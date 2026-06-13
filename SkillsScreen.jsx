@@ -1,0 +1,353 @@
+import { useState } from "react";
+import { BookOpen, Youtube, FileText, Plus, ChevronRight, X, Check, Trophy, ArrowRight, Sparkles } from "lucide-react";
+
+// ── DIKW stages ─────────────────────────────────────────────────
+const STAGES = [
+  { id: "D", label: "Data",        color: "#3A7CA5", soft: "rgba(58,124,165,0.10)",  prompt: "What did you read/watch? Log the raw source and a quick note.",         hint: "e.g. 'Atomic Habits ch.1 — habits are systems not goals'" },
+  { id: "I", label: "Information", color: "#8268B0", soft: "rgba(130,104,176,0.10)", prompt: "What did you actually understand from it? In your own words.",            hint: "e.g. 'Small 1% improvements compound into massive change over time'" },
+  { id: "K", label: "Knowledge",   color: "#C9A227", soft: "rgba(201,162,39,0.10)",  prompt: "How will this specifically improve your life? Connect it to your goals.", hint: "e.g. 'I will improve my morning workout habit by 1% each week'" },
+  { id: "W", label: "Wisdom",      color: "#4C9A6B", soft: "rgba(76,154,107,0.10)",  prompt: "How have you implemented it? What changed?",                             hint: "e.g. 'I've not missed a workout in 3 weeks using the 1% rule'" },
+];
+const stageIndex = (id) => STAGES.findIndex((s) => s.id === id);
+
+const SOURCE_TYPES = [
+  { id: "book",    label: "Book",    icon: BookOpen },
+  { id: "video",   label: "Video",   icon: Youtube },
+  { id: "article", label: "Article", icon: FileText },
+];
+const sourceIcon = (type) => SOURCE_TYPES.find((s) => s.id === type);
+
+// ── Seed skills ─────────────────────────────────────────────────
+const SEED = [
+  {
+    id: "s1", title: "Atomic Habits", type: "book", pillar: "Academic",
+    stage: "K",
+    notes: {
+      D: "James Clear — habits are the compound interest of self-improvement. Read ch.1–3.",
+      I: "Small 1% daily improvements compound into remarkable results over time. Systems beat goals.",
+      K: "Apply to my morning workout block — make it obvious, attractive, easy, satisfying. Track streaks.",
+      W: "",
+    },
+  },
+  {
+    id: "s2", title: "How to Pick a Business Idea", type: "video", pillar: "Financial",
+    stage: "I",
+    notes: {
+      D: "YC talk on idea validation — solve your own problem, talk to 10 users before building.",
+      I: "Best ideas come from pain points you personally experience. Distribution matters as much as product.",
+      K: "",
+      W: "",
+    },
+  },
+  {
+    id: "s3", title: "The Psychology of Money", type: "book", pillar: "Financial",
+    stage: "W",
+    notes: {
+      D: "Morgan Housel — wealth is what you don't spend. Behaviour beats intelligence in investing.",
+      I: "Long-term compounding requires staying in the game. Avoid ruin at all costs.",
+      K: "Keep 6-month emergency fund before any risky trading. Never risk money I can't afford to lose.",
+      W: "Have maintained emergency fund discipline for 3 months. Algo-trading only with surplus capital.",
+    },
+  },
+  {
+    id: "s4", title: "Deep Work", type: "book", pillar: "Academic",
+    stage: "D",
+    notes: {
+      D: "Cal Newport — ability to focus without distraction is increasingly rare and valuable.",
+      I: "",
+      K: "",
+      W: "",
+    },
+  },
+  {
+    id: "s5", title: "The Alchemist Summary", type: "article", pillar: "Spiritual",
+    stage: "I",
+    notes: {
+      D: "Article on following your Personal Legend — the universe conspires to help those who commit.",
+      I: "Fear of failure is the biggest obstacle. The journey itself is the transformation.",
+      K: "",
+      W: "",
+    },
+  },
+];
+
+const PILLARS = {
+  Financial:    "#C9A227",
+  Academic:     "#3A7CA5",
+  Relationship: "#C2536B",
+  Health:       "#4C9A6B",
+  Spiritual:    "#8268B0",
+};
+
+export default function SkillsScreen() {
+  const [skills, setSkills] = useState(SEED);
+  const [selected, setSelected] = useState(null); // skill id
+  const [filter, setFilter] = useState("ALL"); // ALL or D/I/K/W
+  const [adding, setAdding] = useState(false);
+  const [celebrated, setCelebrated] = useState(null); // skill id that just hit W
+  const [newSkill, setNewSkill] = useState({ title: "", type: "book", pillar: "Academic", note: "" });
+
+  const skill = skills.find((s) => s.id === selected);
+
+  const updateNote = (skillId, stage, text) =>
+    setSkills((ss) => ss.map((s) => s.id === skillId ? { ...s, notes: { ...s.notes, [stage]: text } } : s));
+
+  const advance = (skillId) => {
+    setSkills((ss) => ss.map((s) => {
+      if (s.id !== skillId) return s;
+      const idx = stageIndex(s.stage);
+      if (idx >= STAGES.length - 1) return s;
+      const next = STAGES[idx + 1].id;
+      if (next === "W") setCelebrated(skillId);
+      return { ...s, stage: next };
+    }));
+  };
+
+  const addSkill = () => {
+    if (!newSkill.title.trim()) return;
+    const id = `s${Date.now()}`;
+    setSkills((ss) => [...ss, {
+      id, title: newSkill.title.trim(), type: newSkill.type,
+      pillar: newSkill.pillar, stage: "D",
+      notes: { D: newSkill.note.trim(), I: "", K: "", W: "" },
+    }]);
+    setAdding(false);
+    setNewSkill({ title: "", type: "book", pillar: "Academic", note: "" });
+    setSelected(id);
+  };
+
+  const filtered = filter === "ALL" ? skills : skills.filter((s) => s.stage === filter);
+  const wisdomCount = skills.filter((s) => s.stage === "W").length;
+
+  return (
+    <div style={S.page}>
+      {/* ── Wisdom celebration overlay ── */}
+      {celebrated && (
+        <div style={S.celebOverlay}>
+          <div style={S.celebBox}>
+            <div style={S.celebEmoji}>🏆</div>
+            <div style={S.celebTitle}>Wisdom unlocked!</div>
+            <div style={S.celebSub}>You've implemented this knowledge — that's rare and real.</div>
+            <button onClick={() => setCelebrated(null)} style={S.celebBtn}>Continue</button>
+          </div>
+        </div>
+      )}
+
+      <div style={S.head}>
+        <div>
+          <div style={S.eyebrow}>BRTN · Skills</div>
+          <h1 style={S.h1}>DIKW Skills</h1>
+          <div style={S.subhead}>Data → Information → Knowledge → Wisdom</div>
+        </div>
+        <div style={S.headRight}>
+          <div style={S.wisdomBadge}><Trophy size={14} color="#C9A227" /> {wisdomCount} Wisdom{wisdomCount !== 1 ? "s" : ""}</div>
+          <button onClick={() => { setAdding(true); setSelected(null); }} style={S.addSkillBtn}><Plus size={15} /> Add skill</button>
+        </div>
+      </div>
+
+      {/* ── Stage filter ── */}
+      <div style={S.filterBar}>
+        {["ALL", ...STAGES.map((s) => s.id)].map((f) => {
+          const stage = STAGES.find((s) => s.id === f);
+          const on = filter === f;
+          return (
+            <button key={f} onClick={() => setFilter(f)}
+              style={{ ...S.filterBtn, ...(on ? { background: stage ? stage.color : "#26241F", color: "#fff", borderColor: "transparent" } : {}) }}>
+              {stage ? `${f} · ${stage.label}` : "All"}
+            </button>
+          );
+        })}
+      </div>
+
+      <div style={S.layout}>
+        {/* ── Skill cards list ── */}
+        <div style={S.cardList}>
+          {adding && (
+            <div style={{ ...S.skillCard, border: "2px dashed #3A7CA5" }}>
+              <div style={S.cardTitle}>New skill</div>
+              <input placeholder="Title (book / video / article name)" value={newSkill.title}
+                onChange={(e) => setNewSkill((n) => ({ ...n, title: e.target.value }))}
+                onKeyDown={(e) => e.key === "Enter" && addSkill()}
+                style={S.input} autoFocus />
+              <div style={S.addRow}>
+                <select value={newSkill.type} onChange={(e) => setNewSkill((n) => ({ ...n, type: e.target.value }))} style={S.select}>
+                  {SOURCE_TYPES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+                </select>
+                <select value={newSkill.pillar} onChange={(e) => setNewSkill((n) => ({ ...n, pillar: e.target.value }))} style={S.select}>
+                  {Object.keys(PILLARS).map((p) => <option key={p}>{p}</option>)}
+                </select>
+              </div>
+              <input placeholder="First note (what did you read/watch?)" value={newSkill.note}
+                onChange={(e) => setNewSkill((n) => ({ ...n, note: e.target.value }))}
+                style={S.input} />
+              <div style={S.addRow}>
+                <button onClick={addSkill} style={S.saveBtn}><Check size={14} /> Save</button>
+                <button onClick={() => setAdding(false)} style={S.cancelBtn}><X size={14} /> Cancel</button>
+              </div>
+            </div>
+          )}
+
+          {filtered.map((sk) => {
+            const sIdx = stageIndex(sk.stage);
+            const stage = STAGES[sIdx];
+            const Src = sourceIcon(sk.type);
+            const isWisdom = sk.stage === "W";
+            const isSel = selected === sk.id;
+            return (
+              <div key={sk.id} onClick={() => setSelected(isSel ? null : sk.id)}
+                style={{ ...S.skillCard, ...(isSel ? { borderColor: stage.color, borderWidth: 2 } : {}), ...(isWisdom ? { background: "rgba(76,154,107,0.05)" } : {}) }}>
+                <div style={S.skillCardTop}>
+                  <div style={S.skillMeta}>
+                    <span style={{ ...S.srcIcon, color: PILLARS[sk.pillar] }}><Src.icon size={13} /></span>
+                    <span style={{ ...S.pillarDot, background: PILLARS[sk.pillar] }} />
+                    <span style={S.srcLabel}>{Src.label} · {sk.pillar}</span>
+                  </div>
+                  {isWisdom && <Sparkles size={14} color="#4C9A6B" />}
+                </div>
+                <div style={S.skillTitle}>{sk.title}</div>
+
+                {/* D→I→K→W progress track */}
+                <div style={S.track}>
+                  {STAGES.map((st, i) => {
+                    const done = i <= sIdx;
+                    const current = i === sIdx;
+                    return (
+                      <div key={st.id} style={S.trackItem}>
+                        <div style={{ ...S.trackDot, background: done ? st.color : "#E4E2DA", boxShadow: current ? `0 0 0 3px ${st.color}33` : "none" }}>
+                          {done && i < sIdx && <Check size={9} color="#fff" strokeWidth={3} />}
+                          {current && <span style={S.trackCurrent}>{st.id}</span>}
+                        </div>
+                        {i < STAGES.length - 1 && <div style={{ ...S.trackLine, background: i < sIdx ? STAGES[i + 1].color : "#E4E2DA" }} />}
+                      </div>
+                    );
+                  })}
+                  <span style={{ ...S.stageTag, background: stage.soft, color: stage.color }}>{stage.label}</span>
+                </div>
+              </div>
+            );
+          })}
+
+          {filtered.length === 0 && !adding && (
+            <div style={S.empty}>No skills at this stage yet.</div>
+          )}
+        </div>
+
+        {/* ── Detail panel ── */}
+        {skill && (
+          <div style={S.detail}>
+            <div style={S.detailHead}>
+              <div>
+                <div style={S.eyebrow}>{sourceIcon(skill.type)?.label} · {skill.pillar}</div>
+                <div style={S.detailTitle}>{skill.title}</div>
+              </div>
+              <button onClick={() => setSelected(null)} style={S.closeBtn}><X size={16} /></button>
+            </div>
+
+            {STAGES.map((st, i) => {
+              const sIdx = stageIndex(skill.stage);
+              const unlocked = i <= sIdx;
+              const isCurrent = i === sIdx;
+              const isDone = i < sIdx;
+              return (
+                <div key={st.id} style={{ ...S.stageBlock, ...(unlocked ? { borderColor: st.color } : {}), opacity: unlocked ? 1 : 0.45 }}>
+                  <div style={S.stageBlockHead}>
+                    <div style={{ ...S.stageLetter, background: unlocked ? st.color : "#E4E2DA", color: unlocked ? "#fff" : "#9A968C" }}>{st.id}</div>
+                    <div>
+                      <div style={{ ...S.stageName, color: unlocked ? st.color : "#9A968C" }}>{st.label}</div>
+                      {unlocked && <div style={S.stagePrompt}>{st.prompt}</div>}
+                    </div>
+                    {isDone && <Check size={16} color={st.color} style={{ marginLeft: "auto" }} />}
+                  </div>
+
+                  {unlocked && (
+                    <textarea
+                      placeholder={st.hint}
+                      value={skill.notes[st.id]}
+                      onChange={(e) => updateNote(skill.id, st.id, e.target.value)}
+                      readOnly={isDone}
+                      style={{ ...S.textarea, ...(isDone ? S.textareaDone : {}) }}
+                      rows={isCurrent ? 4 : 2}
+                    />
+                  )}
+                </div>
+              );
+            })}
+
+            {skill.stage !== "W" && (
+              <button onClick={() => advance(skill.id)} style={{ ...S.advanceBtn, background: STAGES[stageIndex(skill.stage)].color }}>
+                <ArrowRight size={15} />
+                Mark as {STAGES[stageIndex(skill.stage) + 1]?.label} →
+              </button>
+            )}
+            {skill.stage === "W" && (
+              <div style={S.wisdomDone}><Trophy size={16} color="#4C9A6B" /> Wisdom achieved — implemented in your life</div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const S = {
+  page: { fontFamily: "'Inter', system-ui, sans-serif", background: "#F7F6F3", minHeight: "100%", padding: "26px 22px", color: "#26241F", boxSizing: "border-box", position: "relative" },
+  eyebrow: { fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", color: "#9A968C", fontWeight: 600, marginBottom: 4 },
+  h1: { fontSize: 28, fontWeight: 700, margin: 0, letterSpacing: "-0.02em", fontFamily: "'Fraunces', Georgia, serif" },
+  subhead: { fontSize: 12.5, color: "#9A968C", marginTop: 3 },
+  head: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 18 },
+  headRight: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" },
+  wisdomBadge: { display: "flex", alignItems: "center", gap: 5, background: "rgba(201,162,39,0.12)", border: "1px solid rgba(201,162,39,0.3)", padding: "6px 12px", borderRadius: 20, fontSize: 12.5, fontWeight: 700, color: "#8A6E1A" },
+  addSkillBtn: { display: "flex", alignItems: "center", gap: 6, border: "none", background: "#26241F", color: "#fff", padding: "8px 14px", borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
+
+  filterBar: { display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16 },
+  filterBtn: { border: "1px solid #E0DDD5", background: "#fff", padding: "6px 12px", borderRadius: 20, fontSize: 12, fontWeight: 600, color: "#4A463E", cursor: "pointer", fontFamily: "inherit" },
+
+  layout: { display: "grid", gridTemplateColumns: "1fr", gap: 12 },
+
+  cardList: { display: "flex", flexDirection: "column", gap: 10 },
+  skillCard: { background: "#fff", borderRadius: 12, padding: "14px 14px", border: "1.5px solid #ECEAE3", cursor: "pointer", boxShadow: "0 1px 2px rgba(0,0,0,0.04)" },
+  skillCardTop: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 },
+  skillMeta: { display: "flex", alignItems: "center", gap: 6 },
+  srcIcon: { display: "grid", placeItems: "center" },
+  pillarDot: { width: 8, height: 8, borderRadius: "50%", flexShrink: 0 },
+  srcLabel: { fontSize: 11, fontWeight: 600, color: "#9A968C" },
+  skillTitle: { fontSize: 15, fontWeight: 700, letterSpacing: "-0.01em", marginBottom: 12 },
+  cardTitle: { fontSize: 13, fontWeight: 700, marginBottom: 10 },
+
+  track: { display: "flex", alignItems: "center", gap: 0 },
+  trackItem: { display: "flex", alignItems: "center" },
+  trackDot: { width: 22, height: 22, borderRadius: "50%", display: "grid", placeItems: "center", flexShrink: 0, transition: "box-shadow 0.2s" },
+  trackCurrent: { fontSize: 9, fontWeight: 800, color: "#fff" },
+  trackLine: { width: 24, height: 3, borderRadius: 2 },
+  stageTag: { fontSize: 11, fontWeight: 700, padding: "3px 9px", borderRadius: 12, marginLeft: 10 },
+
+  detail: { background: "#fff", borderRadius: 14, padding: "18px 16px", boxShadow: "0 1px 4px rgba(0,0,0,0.07)", border: "1.5px solid #ECEAE3" },
+  detailHead: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 },
+  detailTitle: { fontSize: 18, fontWeight: 700, letterSpacing: "-0.02em", fontFamily: "'Fraunces', Georgia, serif" },
+  closeBtn: { border: "none", background: "#F2F1EC", color: "#6B675E", width: 30, height: 30, borderRadius: 8, cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0 },
+
+  stageBlock: { border: "1.5px solid #ECEAE3", borderRadius: 10, padding: "12px 13px", marginBottom: 10, transition: "border-color 0.2s" },
+  stageBlockHead: { display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 8 },
+  stageLetter: { width: 28, height: 28, borderRadius: 8, display: "grid", placeItems: "center", fontSize: 13, fontWeight: 800, flexShrink: 0 },
+  stageName: { fontSize: 13, fontWeight: 700 },
+  stagePrompt: { fontSize: 11.5, color: "#6B675E", marginTop: 2, lineHeight: 1.4 },
+  textarea: { width: "100%", border: "1px solid #E4E2DA", borderRadius: 8, padding: "9px 10px", fontSize: 13.5, fontFamily: "inherit", outline: "none", resize: "vertical", boxSizing: "border-box", lineHeight: 1.5, color: "#26241F" },
+  textareaDone: { background: "#FAFAF8", color: "#6B675E", borderColor: "transparent", resize: "none" },
+
+  advanceBtn: { display: "flex", alignItems: "center", gap: 8, border: "none", color: "#fff", padding: "11px 18px", borderRadius: 9, fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", width: "100%", justifyContent: "center", marginTop: 4 },
+  wisdomDone: { display: "flex", alignItems: "center", gap: 8, justifyContent: "center", fontSize: 13.5, fontWeight: 700, color: "#4C9A6B", padding: "12px", background: "rgba(76,154,107,0.08)", borderRadius: 10, marginTop: 4 },
+
+  input: { border: "1px solid #E4E2DA", borderRadius: 8, padding: "9px 11px", fontSize: 13.5, fontFamily: "inherit", outline: "none", width: "100%", boxSizing: "border-box", marginBottom: 8 },
+  select: { border: "1px solid #E4E2DA", borderRadius: 8, padding: "8px 10px", fontSize: 12.5, fontFamily: "inherit", flex: 1 },
+  addRow: { display: "flex", gap: 8, marginBottom: 8 },
+  saveBtn: { display: "flex", alignItems: "center", gap: 5, border: "none", background: "#4C9A6B", color: "#fff", padding: "8px 14px", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
+  cancelBtn: { display: "flex", alignItems: "center", gap: 5, border: "1px solid #E4E2DA", background: "#fff", color: "#6B675E", padding: "8px 14px", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
+  empty: { fontSize: 13, color: "#9A968C", padding: "32px 12px", textAlign: "center" },
+
+  celebOverlay: { position: "fixed", inset: 0, background: "rgba(38,36,31,0.55)", zIndex: 50, display: "grid", placeItems: "center" },
+  celebBox: { background: "#fff", borderRadius: 20, padding: "40px 32px", textAlign: "center", maxWidth: 320, boxShadow: "0 8px 40px rgba(0,0,0,0.18)" },
+  celebEmoji: { fontSize: 52, marginBottom: 12 },
+  celebTitle: { fontSize: 22, fontWeight: 700, fontFamily: "'Fraunces', Georgia, serif", marginBottom: 8 },
+  celebSub: { fontSize: 13.5, color: "#6B675E", lineHeight: 1.5, marginBottom: 22 },
+  celebBtn: { border: "none", background: "#4C9A6B", color: "#fff", padding: "11px 28px", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" },
+};
