@@ -1218,6 +1218,30 @@ def delete_focus(session_id: int):
                      (_now_iso(), session_id))
 
 
+# ── Per-user settings (key/value JSON) ────────────────────────────────────────
+
+class SettingBody(BaseModel):
+    value: object = None
+
+@app.get("/api/settings/{key}")
+def get_setting(key: str):
+    with db() as conn:
+        row = conn.execute(
+            f"SELECT value FROM user_setting WHERE user_id={cu()} AND key=?", (key,)
+        ).fetchone()
+    val = json.loads(row["value"]) if row and row["value"] else None
+    return {"key": key, "value": val}
+
+@app.put("/api/settings/{key}")
+def put_setting(key: str, body: SettingBody):
+    with db() as conn:
+        conn.execute(
+            f"INSERT OR REPLACE INTO user_setting (user_id, key, value) VALUES ({cu()}, ?, ?)",
+            (key, json.dumps(body.value)),
+        )
+    return {"key": key, "value": body.value}
+
+
 # ── Serve React frontend (must be last) ──────────────────────────────────────
 
 if os.path.isdir(DIST):

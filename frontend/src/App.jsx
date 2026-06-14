@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import {
   LayoutGrid, Target, CheckSquare, BookOpen,
   GraduationCap, Star, RotateCcw, Menu, X,
-  Sparkles, ScrollText, ChevronDown, ChevronRight, LogOut, Trees
+  Sparkles, ScrollText, ChevronDown, ChevronRight, LogOut, Trees, IndianRupee
 } from "lucide-react";
 import QuadrantView from "./screens/QuadrantView.jsx";
 import GoalsWithGantt from "./screens/GoalsWithGantt.jsx";
@@ -13,6 +13,7 @@ import SpiritualScreen from "./screens/SpiritualScreen.jsx";
 import RevisionScreen from "./screens/RevisionScreen.jsx";
 import AffirmationsScreen from "./screens/AffirmationsScreen.jsx";
 import GroveScreen from "./screens/GroveScreen.jsx";
+import WorthScreen from "./screens/WorthScreen.jsx";
 import AuthScreen from "./screens/AuthScreen.jsx";
 import { api, getToken, clearToken } from "./api.js";
 
@@ -22,6 +23,7 @@ const SCREENS = {
   quadrant:     { label: "Quadrant",     icon: LayoutGrid,    component: QuadrantView },
   goals:        { label: "Goals",        icon: Target,        component: GoalsWithGantt },
   grove:        { label: "Grove",        icon: Trees,         component: GroveScreen },
+  worth:        { label: "Worth",        icon: IndianRupee,   component: WorthScreen },
   journal:      { label: "Journal",      icon: BookOpen,      component: JournalScreen },
   revision:     { label: "Revision",     icon: RotateCcw,     component: RevisionScreen },
   affirmations: { label: "Affirmations", icon: Sparkles,      component: AffirmationsScreen },
@@ -40,6 +42,7 @@ const NAV = [
   { type: "item", id: "affirmations" },
   { type: "item", id: "skills" },
   { type: "item", id: "spiritual" },
+  { type: "item", id: "worth" },
 ];
 
 function useIsMobile() {

@@ -49,3 +49,5 @@ def make_png(size, path):
 out = os.path.join("frontend", "public")
 make_png(192, os.path.join(out, "icon-192.png"))
 make_png(512, os.path.join(out, "icon-512.png"))
+make_png(32, os.path.join(out, "favicon-32.png"))
+make_png(16, os.path.join(out, "favicon-16.png"))

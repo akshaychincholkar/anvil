@@ -48,6 +48,10 @@ export const api = {
   createFocus: (data) => req("POST", "/focus", data),
   deleteFocus: (id) => req("DELETE", `/focus/${id}`),
 
+  // Per-user settings (key/value)
+  getSetting: (key) => req("GET", `/settings/${key}`),
+  setSetting: (key, value) => req("PUT", `/settings/${key}`, { value }),
+
   // Tasks
   getTasks: () => req("GET", "/tasks"),
   createTask: (data) => req("POST", "/tasks", data),
