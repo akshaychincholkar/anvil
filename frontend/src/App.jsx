@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import {
   LayoutGrid, Target, CheckSquare, BookOpen,
   GraduationCap, Star, RotateCcw, Menu, X,
-  Sparkles, ScrollText, ChevronDown, ChevronRight, LogOut
+  Sparkles, ScrollText, ChevronDown, ChevronRight, LogOut, Trees
 } from "lucide-react";
 import QuadrantView from "./screens/QuadrantView.jsx";
 import GoalsWithGantt from "./screens/GoalsWithGantt.jsx";
@@ -12,6 +12,7 @@ import SkillsScreen from "./screens/SkillsScreen.jsx";
 import SpiritualScreen from "./screens/SpiritualScreen.jsx";
 import RevisionScreen from "./screens/RevisionScreen.jsx";
 import AffirmationsScreen from "./screens/AffirmationsScreen.jsx";
+import GroveScreen from "./screens/GroveScreen.jsx";
 import AuthScreen from "./screens/AuthScreen.jsx";
 import { api, getToken, clearToken } from "./api.js";
 
@@ -20,6 +21,7 @@ const SCREENS = {
   habits:       { label: "Habits",       icon: CheckSquare,   component: HabitTracker },
   quadrant:     { label: "Quadrant",     icon: LayoutGrid,    component: QuadrantView },
   goals:        { label: "Goals",        icon: Target,        component: GoalsWithGantt },
+  grove:        { label: "Grove",        icon: Trees,         component: GroveScreen },
   journal:      { label: "Journal",      icon: BookOpen,      component: JournalScreen },
   revision:     { label: "Revision",     icon: RotateCcw,     component: RevisionScreen },
   affirmations: { label: "Affirmations", icon: Sparkles,      component: AffirmationsScreen },
@@ -32,6 +34,7 @@ const NAV = [
   { type: "item", id: "habits" },
   { type: "item", id: "quadrant" },
   { type: "item", id: "goals" },
+  { type: "item", id: "grove" },
   { type: "item", id: "journal" },
   { type: "item", id: "revision" },
   { type: "item", id: "affirmations" },

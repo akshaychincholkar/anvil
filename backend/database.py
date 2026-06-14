@@ -66,6 +66,20 @@ def init_db():
         );
         INSERT OR IGNORE INTO user (id, name) VALUES (1, 'Anvil User');
 
+        CREATE TABLE IF NOT EXISTS focus_session (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            label TEXT,
+            tree TEXT NOT NULL DEFAULT 'oak',
+            duration_min INTEGER NOT NULL,
+            actual_min INTEGER NOT NULL DEFAULT 0,
+            completed INTEGER NOT NULL DEFAULT 0,
+            started_at TEXT,
+            ended_at TEXT,
+            deleted_at TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
         CREATE TABLE IF NOT EXISTS pillar (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL DEFAULT 1,

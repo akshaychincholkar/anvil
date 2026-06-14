@@ -43,6 +43,11 @@ export const api = {
   // Pillars
   getPillars: () => req("GET", "/pillars"),
 
+  // Grove (focus / pomodoro)
+  getFocus: () => req("GET", "/focus"),
+  createFocus: (data) => req("POST", "/focus", data),
+  deleteFocus: (id) => req("DELETE", `/focus/${id}`),
+
   // Tasks
   getTasks: () => req("GET", "/tasks"),
   createTask: (data) => req("POST", "/tasks", data),

@@ -1144,6 +1144,80 @@ def restore_affirmation(aff_id: int):
         return {"id": r["id"], "category": r["category"], "text": r["text"], "favorite": bool(r["favorite"])} if r else {}
 
 
+# ── Grove (Focus / Pomodoro) ──────────────────────────────────────────────────
+
+class FocusCreate(BaseModel):
+    label: Optional[str] = None
+    tree: str = "oak"
+    duration_min: int
+    actual_min: int = 0
+    completed: bool = False
+    started_at: Optional[str] = None
+    ended_at: Optional[str] = None
+
+def _focus_row(r) -> dict:
+    return {
+        "id": r["id"], "label": r["label"], "tree": r["tree"],
+        "duration_min": r["duration_min"], "actual_min": r["actual_min"],
+        "completed": bool(r["completed"]), "started_at": r["started_at"],
+        "ended_at": r["ended_at"], "created_at": r["created_at"],
+    }
+
+@app.get("/api/focus")
+def get_focus():
+    with db() as conn:
+        rows = [_focus_row(r) for r in conn.execute(
+            f"""SELECT id, label, tree, duration_min, actual_min, completed, started_at, ended_at, created_at
+                FROM focus_session WHERE user_id={cu()} AND deleted_at IS NULL
+                ORDER BY COALESCE(started_at, created_at) DESC""").fetchall()]
+
+    def day_of(s):
+        return (s["started_at"] or s["created_at"] or "")[:10]
+
+    completed = [s for s in rows if s["completed"]]
+    today = str(date.today())
+    today_min = sum(s["actual_min"] for s in completed if day_of(s) == today)
+    days = {day_of(s) for s in completed if day_of(s)}
+    # streak: consecutive days ending today (or yesterday) with a completed session
+    streak, d = 0, date.today()
+    if str(d) not in days:
+        d -= timedelta(days=1)
+    while str(d) in days:
+        streak += 1
+        d -= timedelta(days=1)
+
+    stats = {
+        "trees": len(completed),
+        "total_minutes": sum(s["actual_min"] for s in completed),
+        "today_minutes": today_min,
+        "today_trees": len([s for s in completed if day_of(s) == today]),
+        "total_sessions": len(rows),
+        "success_rate": round(100 * len(completed) / len(rows)) if rows else 0,
+        "streak": streak,
+    }
+    return {"sessions": rows, "stats": stats}
+
+@app.post("/api/focus", status_code=201)
+def create_focus(body: FocusCreate):
+    with db() as conn:
+        cur = conn.execute(
+            f"""INSERT INTO focus_session (user_id, label, tree, duration_min, actual_min, completed, started_at, ended_at)
+                VALUES ({cu()}, ?, ?, ?, ?, ?, ?, ?)""",
+            (body.label, body.tree, body.duration_min, body.actual_min,
+             1 if body.completed else 0, body.started_at, body.ended_at)
+        )
+        r = conn.execute(
+            """SELECT id, label, tree, duration_min, actual_min, completed, started_at, ended_at, created_at
+               FROM focus_session WHERE id=?""", (cur.lastrowid,)).fetchone()
+        return _focus_row(r)
+
+@app.delete("/api/focus/{session_id}", status_code=204)
+def delete_focus(session_id: int):
+    with db() as conn:
+        conn.execute(f"UPDATE focus_session SET deleted_at=? WHERE id=? AND user_id={cu()}",
+                     (_now_iso(), session_id))
+
+
 # ── Serve React frontend (must be last) ──────────────────────────────────────
 
 if os.path.isdir(DIST):
