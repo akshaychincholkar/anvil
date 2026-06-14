@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { BookOpen, Youtube, FileText, Plus, X, Check, Trophy, ArrowRight, Sparkles } from "lucide-react";
+import { BookOpen, Youtube, FileText, Plus, X, Check, Trophy, ArrowRight, Sparkles, Lock } from "lucide-react";
 import { api } from "../api.js";
 
 const STAGES = [
@@ -26,43 +26,59 @@ export default function SkillsScreen() {
   const [adding, setAdding] = useState(false);
   const [celebrated, setCelebrated] = useState(null);
   const [newSkill, setNewSkill] = useState({ title: "", type: "book", pillar: "Academic", note: "" });
-  const [localNotes, setLocalNotes] = useState({});
+  const [noteDrafts, setNoteDrafts] = useState({});
 
-  const load = useCallback(() => api.getSkills().then((ss) => {
-    setSkills(ss);
-    const notes = {};
-    ss.forEach((s) => { notes[s.id] = { ...s.notes }; });
-    setLocalNotes(notes);
-  }).catch(console.error), []);
+  const load = useCallback(async () => {
+    try {
+      const ss = await api.getSkills();
+      setSkills(ss);
+      const drafts = {};
+      ss.forEach((s) => { drafts[s.id] = Object.fromEntries(STAGES.map((st) => [st.id, ""])); });
+      setNoteDrafts((prev) => {
+        const merged = { ...drafts };
+        ss.forEach((s) => {
+          if (prev[s.id]) merged[s.id] = { ...drafts[s.id], ...prev[s.id] };
+        });
+        return merged;
+      });
+    } catch (e) { console.error(e); }
+  }, []);
 
   useEffect(() => { load(); }, [load]);
 
   const skill = skills.find((s) => s.id === selected);
   const sIdx = skill ? stageIndex(skill.stage) : -1;
 
-  const saveNotes = async (skillId) => {
-    const notes = localNotes[skillId];
-    if (!notes) return;
-    await api.updateSkill(skillId, {
-      note_d: notes.D, note_i: notes.I, note_k: notes.K, note_w: notes.W,
-    });
+  const addNote = async (skillId, stageId) => {
+    const text = (noteDrafts[skillId]?.[stageId] ?? "").trim();
+    if (!text) return;
+    await api.addSkillNote(skillId, stageId, text);
+    setNoteDrafts((d) => ({ ...d, [skillId]: { ...d[skillId], [stageId]: "" } }));
     load();
   };
 
-  const advance = async (skillId) => {
+  const deleteNote = async (noteId) => {
+    await api.deleteSkillNote(noteId);
+    load();
+  };
+
+  const completeStage = async (skillId, stageId) => {
     const sk = skills.find((s) => s.id === skillId);
     if (!sk) return;
-    const idx = stageIndex(sk.stage);
-    if (idx >= STAGES.length - 1) return;
-    const nextStage = STAGES[idx + 1].id;
-    if (nextStage === "W") setCelebrated(skillId);
-    await api.updateSkill(skillId, { stage: nextStage });
+    const nextStage = STAGES[stageIndex(stageId) + 1];
+    if (nextStage?.id === "W") setCelebrated(skillId);
+    await api.completeSkillStage(skillId, stageId);
     load();
   };
 
   const createSkill = async () => {
     if (!newSkill.title.trim()) return;
-    const s = await api.createSkill({ pillar: newSkill.pillar, title: newSkill.title.trim(), source_type: newSkill.type, note_d: newSkill.note.trim() });
+    const s = await api.createSkill({
+      pillar: newSkill.pillar,
+      title: newSkill.title.trim(),
+      source_type: newSkill.type,
+      note_d: newSkill.note.trim(),
+    });
     setAdding(false);
     setNewSkill({ title: "", type: "book", pillar: "Academic", note: "" });
     setSelected(s.id);
@@ -77,6 +93,7 @@ export default function SkillsScreen() {
 
   const filtered = filter === "ALL" ? skills : skills.filter((s) => s.stage === filter);
   const wisdomCount = skills.filter((s) => s.stage === "W").length;
+  const hasDetail = !!skill;
 
   return (
     <div style={S.page}>
@@ -116,7 +133,7 @@ export default function SkillsScreen() {
         })}
       </div>
 
-      <div style={S.layout}>
+      <div style={{ ...S.layout, gridTemplateColumns: hasDetail ? "1fr 1fr" : "1fr" }}>
         <div style={S.cardList}>
           {adding && (
             <div style={{ ...S.skillCard, border: "2px dashed #3A7CA5" }}>
@@ -166,15 +183,17 @@ export default function SkillsScreen() {
                 <div style={S.skillTitle}>{sk.title}</div>
                 <div style={S.track}>
                   {STAGES.map((st, i) => {
-                    const done = i <= si;
+                    const done = i < si;
                     const current = i === si;
+                    const stageDone = sk.completed_stages?.[st.id];
                     return (
                       <div key={st.id} style={S.trackItem}>
-                        <div style={{ ...S.trackDot, background: done ? st.color : "#E4E2DA", boxShadow: current ? `0 0 0 3px ${st.color}33` : "none" }}>
-                          {done && i < si && <Check size={9} color="#fff" strokeWidth={3} />}
-                          {current && <span style={S.trackCurrent}>{st.id}</span>}
+                        <div style={{ ...S.trackDot, background: (done || stageDone) ? st.color : (current ? st.color : "#E4E2DA"), boxShadow: current ? `0 0 0 3px ${st.color}33` : "none" }}>
+                          {(done || (current && stageDone)) && <Check size={9} color="#fff" strokeWidth={3} />}
+                          {current && !stageDone && <span style={S.trackCurrent}>{st.id}</span>}
+                          {!done && !current && <Lock size={8} color="#B5B1A7" />}
                         </div>
-                        {i < STAGES.length - 1 && <div style={{ ...S.trackLine, background: i < si ? STAGES[i+1].color : "#E4E2DA" }} />}
+                        {i < STAGES.length - 1 && <div style={{ ...S.trackLine, background: done ? STAGES[i+1].color : "#E4E2DA" }} />}
                       </div>
                     );
                   })}
@@ -189,7 +208,7 @@ export default function SkillsScreen() {
           )}
         </div>
 
-        {skill && localNotes[skill.id] && (
+        {skill && (
           <div style={S.detail}>
             <div style={S.detailHead}>
               <div>
@@ -202,39 +221,70 @@ export default function SkillsScreen() {
             {STAGES.map((st, i) => {
               const unlocked = i <= sIdx;
               const isCurrent = i === sIdx;
-              const isDone = i < sIdx;
-              const noteKey = st.id;
+              const isDone = i < sIdx || skill.completed_stages?.[st.id];
+              const isLocked = i > sIdx;
+              const notes = skill.notes?.[st.id] || [];
+              const draft = noteDrafts[skill.id]?.[st.id] ?? "";
               return (
-                <div key={st.id} style={{ ...S.stageBlock, ...(unlocked ? { borderColor: st.color } : {}), opacity: unlocked ? 1 : 0.45 }}>
+                <div key={st.id} style={{ ...S.stageBlock, ...(unlocked ? { borderColor: st.color } : {}), opacity: isLocked ? 0.45 : 1 }}>
                   <div style={S.stageBlockHead}>
-                    <div style={{ ...S.stageLetter, background: unlocked ? st.color : "#E4E2DA", color: unlocked ? "#fff" : "#9A968C" }}>{st.id}</div>
-                    <div>
+                    <div style={{ ...S.stageLetter, background: unlocked ? st.color : "#E4E2DA", color: unlocked ? "#fff" : "#9A968C" }}>
+                      {isDone && !isCurrent ? <Check size={12} color="#fff" strokeWidth={3} /> : (isLocked ? <Lock size={11} color="#9A968C" /> : st.id)}
+                    </div>
+                    <div style={{ flex: 1 }}>
                       <div style={{ ...S.stageName, color: unlocked ? st.color : "#9A968C" }}>{st.label}</div>
                       {unlocked && <div style={S.stagePrompt}>{st.prompt}</div>}
                     </div>
-                    {isDone && <Check size={16} color={st.color} style={{ marginLeft: "auto" }} />}
+                    {isDone && !isCurrent && <span style={{ ...S.doneBadge, color: st.color, background: st.soft }}>Done</span>}
                   </div>
+
                   {unlocked && (
-                    <textarea
-                      placeholder={st.hint}
-                      value={localNotes[skill.id][noteKey] ?? ""}
-                      onChange={(e) => setLocalNotes((n) => ({ ...n, [skill.id]: { ...n[skill.id], [noteKey]: e.target.value } }))}
-                      onBlur={() => saveNotes(skill.id)}
-                      readOnly={isDone}
-                      style={{ ...S.textarea, ...(isDone ? S.textareaDone : {}) }}
-                      rows={isCurrent ? 4 : 2}
-                    />
+                    <>
+                      {/* Notes list */}
+                      {notes.length > 0 && (
+                        <ul style={S.noteList}>
+                          {notes.map((n) => (
+                            <li key={n.id} style={S.noteItem}>
+                              <span style={{ ...S.noteDot, background: st.color }} />
+                              <span style={S.noteText}>{n.text}</span>
+                              <button onClick={() => deleteNote(n.id)} style={S.ghostBtn}><X size={12} /></button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      {notes.length === 0 && (
+                        <div style={S.noNotes}>No notes yet — {st.hint}</div>
+                      )}
+
+                      {/* Add note input */}
+                      <div style={S.noteAddRow}>
+                        <input
+                          placeholder={`Add a ${st.label} note…`}
+                          value={draft}
+                          onChange={(e) => setNoteDrafts((d) => ({ ...d, [skill.id]: { ...d[skill.id], [st.id]: e.target.value } }))}
+                          onKeyDown={(e) => e.key === "Enter" && addNote(skill.id, st.id)}
+                          style={S.noteInput}
+                        />
+                        <button onClick={() => addNote(skill.id, st.id)} style={{ ...S.noteAddBtn, background: st.color }}><Plus size={14} /></button>
+                      </div>
+
+                      {/* Advance button — only shown for current active stage */}
+                      {isCurrent && !skill.completed_stages?.[st.id] && (
+                        <button
+                          onClick={() => completeStage(skill.id, st.id)}
+                          disabled={notes.length === 0}
+                          style={{ ...S.advanceBtn, background: notes.length > 0 ? st.color : "#C3BFB5", marginTop: 10, cursor: notes.length > 0 ? "pointer" : "not-allowed" }}>
+                          <Check size={14} />
+                          {st.id === "W" ? "Mark Wisdom complete" : `Complete ${st.label} → ${STAGES[i + 1]?.label}`}
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
               );
             })}
 
-            {skill.stage !== "W" ? (
-              <button onClick={() => advance(skill.id)} style={{ ...S.advanceBtn, background: STAGES[sIdx].color }}>
-                <ArrowRight size={15} />
-                Mark as {STAGES[sIdx + 1]?.label} →
-              </button>
-            ) : (
+            {skill.stage === "W" && skill.completed_stages?.W && (
               <div style={S.wisdomDone}><Trophy size={16} color="#4C9A6B" /> Wisdom achieved — implemented in your life</div>
             )}
           </div>
@@ -255,7 +305,7 @@ const S = {
   addSkillBtn: { display: "flex", alignItems: "center", gap: 6, border: "none", background: "#26241F", color: "#fff", padding: "8px 14px", borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
   filterBar: { display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16 },
   filterBtn: { border: "1px solid #E0DDD5", background: "#fff", padding: "6px 12px", borderRadius: 20, fontSize: 12, fontWeight: 600, color: "#4A463E", cursor: "pointer", fontFamily: "inherit" },
-  layout: { display: "grid", gridTemplateColumns: skill => skill ? "1fr 1fr" : "1fr", gap: 12 },
+  layout: { display: "grid", gap: 12 },
   cardList: { display: "flex", flexDirection: "column", gap: 10 },
   skillCard: { background: "#fff", borderRadius: 12, padding: "14px", border: "1.5px solid #ECEAE3", cursor: "pointer", boxShadow: "0 1px 2px rgba(0,0,0,0.04)" },
   skillCardTop: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 },
@@ -279,9 +329,16 @@ const S = {
   stageLetter: { width: 28, height: 28, borderRadius: 8, display: "grid", placeItems: "center", fontSize: 13, fontWeight: 800, flexShrink: 0 },
   stageName: { fontSize: 13, fontWeight: 700 },
   stagePrompt: { fontSize: 11.5, color: "#6B675E", marginTop: 2, lineHeight: 1.4 },
-  textarea: { width: "100%", border: "1px solid #E4E2DA", borderRadius: 8, padding: "9px 10px", fontSize: 13.5, fontFamily: "inherit", outline: "none", resize: "vertical", boxSizing: "border-box", lineHeight: 1.5, color: "#26241F" },
-  textareaDone: { background: "#FAFAF8", color: "#6B675E", borderColor: "transparent", resize: "none" },
-  advanceBtn: { display: "flex", alignItems: "center", gap: 8, border: "none", color: "#fff", padding: "11px 18px", borderRadius: 9, fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", width: "100%", justifyContent: "center", marginTop: 4 },
+  doneBadge: { fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 10, marginLeft: "auto", flexShrink: 0 },
+  noteList: { margin: "0 0 8px 0", padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 6 },
+  noteItem: { display: "flex", alignItems: "flex-start", gap: 8, fontSize: 13, lineHeight: 1.4 },
+  noteDot: { width: 6, height: 6, borderRadius: "50%", flexShrink: 0, marginTop: 5 },
+  noteText: { flex: 1, color: "#26241F" },
+  noNotes: { fontSize: 12, color: "#B5B1A7", fontStyle: "italic", marginBottom: 8 },
+  noteAddRow: { display: "flex", gap: 6 },
+  noteInput: { flex: 1, border: "1px solid #E4E2DA", borderRadius: 7, padding: "7px 10px", fontSize: 13, fontFamily: "inherit", outline: "none" },
+  noteAddBtn: { width: 32, height: 32, border: "none", borderRadius: 7, color: "#fff", cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0 },
+  advanceBtn: { display: "flex", alignItems: "center", gap: 8, border: "none", color: "#fff", padding: "10px 16px", borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", width: "100%", justifyContent: "center" },
   wisdomDone: { display: "flex", alignItems: "center", gap: 8, justifyContent: "center", fontSize: 13.5, fontWeight: 700, color: "#4C9A6B", padding: 12, background: "rgba(76,154,107,0.08)", borderRadius: 10, marginTop: 4 },
   ghostBtn: { border: "none", background: "none", color: "#C3BFB5", cursor: "pointer", padding: 2, display: "grid", placeItems: "center" },
   input: { border: "1px solid #E4E2DA", borderRadius: 8, padding: "9px 11px", fontSize: 13.5, fontFamily: "inherit", outline: "none", width: "100%", boxSizing: "border-box", marginBottom: 8 },

@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { Plus, X, Check, ChevronDown, ChevronRight, RotateCcw, Trophy } from "lucide-react";
 import { api } from "../api.js";
+import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
+import UndoToast from "../components/UndoToast.jsx";
 
 const PILLARS = {
   Financial:    { dot: "#C9A227", soft: "rgba(201,162,39,0.10)" },
@@ -39,7 +41,7 @@ export default function RevisionScreen() {
   const [selectedDay, setSelectedDay] = useState(null);
   const [cementedOpen, setCementedOpen] = useState(false);
   const [adding, setAdding] = useState(false);
-  const [newTopic, setNewTopic] = useState({ topic: "", pillar: "Academic", intervals: "1,3,7,15,30" });
+  const [newTopic, setNewTopic] = useState({ topic: "", pillar: "Academic", intervals: "1,3,7,15,30", learned_date: today });
 
   const load = useCallback(async () => {
     const [t, d, c] = await Promise.all([
@@ -62,16 +64,16 @@ export default function RevisionScreen() {
   const createTopic = async () => {
     const intervalArr = newTopic.intervals.split(",").map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n));
     if (!newTopic.topic.trim() || intervalArr.length === 0) return;
-    await api.createTopic({ pillar: newTopic.pillar, topic: newTopic.topic.trim(), intervals: intervalArr });
-    setNewTopic({ topic: "", pillar: "Academic", intervals: "1,3,7,15,30" });
+    await api.createTopic({ pillar: newTopic.pillar, topic: newTopic.topic.trim(), intervals: intervalArr, learned_date: newTopic.learned_date || today });
+    setNewTopic({ topic: "", pillar: "Academic", intervals: "1,3,7,15,30", learned_date: today });
     setAdding(false);
     load();
   };
 
-  const deleteTopic = async (id) => {
-    await api.deleteTopic(id);
-    load();
-  };
+  const { deleteItem: softDeleteTopic, toasts, handleUndo, handleDismiss } = useUndoableDelete(
+    api.deleteTopic, api.restoreTopic, load
+  );
+  const deleteTopic = (id, topic) => softDeleteTopic(id, topic);
 
   const prevMonth = () => {
     if (month === 1) { setYear((y) => y - 1); setMonth(12); }
@@ -116,10 +118,16 @@ export default function RevisionScreen() {
             <select value={newTopic.pillar} onChange={(e) => setNewTopic((n) => ({ ...n, pillar: e.target.value }))} style={S.select}>
               {PILLAR_NAMES.map((p) => <option key={p}>{p}</option>)}
             </select>
+            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+              <label style={{ fontSize: 10, fontWeight: 600, color: "#9A968C", textTransform: "uppercase" }}>Learned on</label>
+              <input type="date" value={newTopic.learned_date}
+                onChange={(e) => setNewTopic((n) => ({ ...n, learned_date: e.target.value }))}
+                style={{ ...S.select, fontSize: 13 }} />
+            </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <input value={newTopic.intervals}
                 onChange={(e) => setNewTopic((n) => ({ ...n, intervals: e.target.value }))}
-                placeholder="Review intervals in days (1,3,7,15,30)"
+                placeholder="Intervals (days): 1,3,7,15,30"
                 style={S.input} />
             </div>
           </div>
@@ -177,7 +185,7 @@ export default function RevisionScreen() {
                 <span style={S.topicName}>{t.topic}</span>
                 <span style={S.topicPillar}>{t.pillar}</span>
                 <span style={S.topicProgress}>{done}/{t.reviews.length} done</span>
-                <button onClick={() => deleteTopic(t.id)} style={S.ghostBtn}><X size={13} /></button>
+                <button onClick={() => deleteTopic(t.id, t.topic)} style={S.ghostBtn}><X size={13} /></button>
               </div>
               <div style={S.reviewDots}>
                 {t.reviews.map((r) => {
@@ -288,6 +296,7 @@ export default function RevisionScreen() {
           </div>
         )}
       </div>
+      <UndoToast toasts={toasts} onUndo={handleUndo} onDismiss={handleDismiss} />
     </div>
   );
 }

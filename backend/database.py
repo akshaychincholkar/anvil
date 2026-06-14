@@ -19,15 +19,42 @@ def db():
     finally:
         conn.close()
 
+def migrate_db():
+    with db() as conn:
+        def add_col(table, col, definition):
+            cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+            if col not in cols:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {definition}")
+
+        # Soft-delete column across all major tables
+        for table in ["task", "goal", "habit", "skill", "scripture", "chapter", "revision_topic", "journal_entry"]:
+            add_col(table, "deleted_at", "TEXT")
+
+        # task extras
+        add_col("task", "start_datetime", "TEXT")
+
+        # habit type system (item 3)
+        add_col("habit", "type", "TEXT NOT NULL DEFAULT 'regular'")
+        add_col("habit", "target_count", "INTEGER")
+        add_col("habit", "period", "TEXT")
+
+        # habit_log note (item 4)
+        add_col("habit_log", "note", "TEXT")
+        # habit_log per-day count for minimum/maximum habits
+        add_col("habit_log", "count", "INTEGER")
+
+        # skill stage tracking (item 11)
+        add_col("skill", "completed_stages", "TEXT NOT NULL DEFAULT '{}'")
+
 def init_db():
     with db() as conn:
         conn.executescript("""
         CREATE TABLE IF NOT EXISTS user (
             id INTEGER PRIMARY KEY,
-            name TEXT NOT NULL DEFAULT 'BRTN User',
+            name TEXT NOT NULL DEFAULT 'Anvil User',
             timezone TEXT NOT NULL DEFAULT 'Asia/Kolkata'
         );
-        INSERT OR IGNORE INTO user (id, name) VALUES (1, 'BRTN User');
+        INSERT OR IGNORE INTO user (id, name) VALUES (1, 'Anvil User');
 
         CREATE TABLE IF NOT EXISTS pillar (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -45,6 +72,8 @@ def init_db():
             time_estimate_min INTEGER NOT NULL DEFAULT 30,
             gcal_event_id TEXT,
             status TEXT NOT NULL DEFAULT 'active',
+            start_datetime TEXT,
+            deleted_at TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -56,7 +85,8 @@ def init_db():
             horizon TEXT NOT NULL CHECK(horizon IN ('Yearly','Quarterly','Monthly','Weekly')),
             parent_goal_id INTEGER,
             start_date TEXT NOT NULL,
-            end_date TEXT NOT NULL
+            end_date TEXT NOT NULL,
+            deleted_at TEXT
         );
 
         CREATE TABLE IF NOT EXISTS habit (
@@ -65,7 +95,11 @@ def init_db():
             pillar_id INTEGER NOT NULL,
             name TEXT NOT NULL,
             target_per_week INTEGER NOT NULL DEFAULT 7,
-            reminder_time TEXT
+            reminder_time TEXT,
+            type TEXT NOT NULL DEFAULT 'regular',
+            target_count INTEGER,
+            period TEXT,
+            deleted_at TEXT
         );
 
         CREATE TABLE IF NOT EXISTS habit_log (
@@ -73,6 +107,8 @@ def init_db():
             habit_id INTEGER NOT NULL,
             date TEXT NOT NULL,
             done INTEGER NOT NULL DEFAULT 1,
+            note TEXT,
+            count INTEGER,
             UNIQUE(habit_id, date)
         );
 
@@ -81,6 +117,7 @@ def init_db():
             user_id INTEGER NOT NULL DEFAULT 1,
             date TEXT NOT NULL,
             mood INTEGER,
+            deleted_at TEXT,
             UNIQUE(user_id, date)
         );
 
@@ -101,7 +138,17 @@ def init_db():
             note_d TEXT NOT NULL DEFAULT '',
             note_i TEXT NOT NULL DEFAULT '',
             note_k TEXT NOT NULL DEFAULT '',
-            note_w TEXT NOT NULL DEFAULT ''
+            note_w TEXT NOT NULL DEFAULT '',
+            completed_stages TEXT NOT NULL DEFAULT '{}',
+            deleted_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS skill_note (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            skill_id INTEGER NOT NULL,
+            stage TEXT NOT NULL CHECK(stage IN ('D','I','K','W')),
+            text TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
         CREATE TABLE IF NOT EXISTS scripture (
@@ -109,7 +156,8 @@ def init_db():
             user_id INTEGER NOT NULL DEFAULT 1,
             name TEXT NOT NULL,
             color TEXT NOT NULL DEFAULT '#8268B0',
-            streak INTEGER NOT NULL DEFAULT 0
+            streak INTEGER NOT NULL DEFAULT 0,
+            deleted_at TEXT
         );
 
         CREATE TABLE IF NOT EXISTS chapter (
@@ -120,7 +168,8 @@ def init_db():
             mood INTEGER,
             reflection TEXT NOT NULL DEFAULT '',
             contemplation TEXT NOT NULL DEFAULT '',
-            bookmarked INTEGER NOT NULL DEFAULT 0
+            bookmarked INTEGER NOT NULL DEFAULT 0,
+            deleted_at TEXT
         );
 
         CREATE TABLE IF NOT EXISTS chapter_insight (
@@ -135,7 +184,8 @@ def init_db():
             pillar_id INTEGER NOT NULL,
             topic TEXT NOT NULL,
             learned_date TEXT NOT NULL,
-            intervals TEXT NOT NULL DEFAULT '[1,3,7,15,30]'
+            intervals TEXT NOT NULL DEFAULT '[1,3,7,15,30]',
+            deleted_at TEXT
         );
 
         CREATE TABLE IF NOT EXISTS review (
@@ -145,7 +195,17 @@ def init_db():
             due_date TEXT NOT NULL,
             done INTEGER NOT NULL DEFAULT 0
         );
+
+        CREATE TABLE IF NOT EXISTS oauth_token (
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            provider TEXT NOT NULL DEFAULT 'google',
+            token_json TEXT NOT NULL,
+            UNIQUE(user_id, provider)
+        );
         """)
+
+        migrate_db()
 
         # Seed the 5 pillars if not present
         count = conn.execute("SELECT COUNT(*) FROM pillar WHERE user_id=1").fetchone()[0]

@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
-import { Plus, X, Bookmark, BookOpen, Flame, ChevronDown, ChevronRight, Menu, Star, Pencil, Check } from "lucide-react";
+import { Plus, X, Bookmark, BookOpen, Flame, ChevronDown, ChevronRight, Menu, Star, Pencil, Check, Trash2 } from "lucide-react";
 import { api } from "../api.js";
+import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
+import UndoToast from "../components/UndoToast.jsx";
 
 const MOODS = [
   { id: 1, emoji: "😣", label: "Rough",  color: "#C2536B" },
@@ -32,6 +34,11 @@ export default function SpiritualScreen() {
       setSelectedChapter(ss[0].chapters[0]?.id ?? null);
     }
   }).catch(console.error), [selectedId]);
+
+  const { deleteItem: softDeleteScripture, toasts: scriptureToasts, handleUndo: undoScripture, handleDismiss: dismissScripture } =
+    useUndoableDelete(api.deleteScripture, api.restoreScripture, load);
+  const { deleteItem: softDeleteChapter, toasts: chapterToasts, handleUndo: undoChapter, handleDismiss: dismissChapter } =
+    useUndoableDelete(api.deleteChapter, api.restoreChapter, load);
 
   useEffect(() => { load(); }, [load]);
 
@@ -108,6 +115,9 @@ export default function SpiritualScreen() {
 
   return (
     <div style={S.shell}>
+      <UndoToast toasts={[...scriptureToasts, ...chapterToasts]}
+        onUndo={(id) => { undoScripture(id); undoChapter(id); }}
+        onDismiss={(id) => { dismissScripture(id); dismissChapter(id); }} />
       {isMobile && sidebarOpen && <div style={S.backdrop} onClick={() => setSidebarOpen(false)} />}
 
       <aside style={sidebarStyle}>
@@ -128,6 +138,7 @@ export default function SpiritualScreen() {
                   <span style={{ ...S.sideDot, background: sc.color }} />
                   <span onClick={() => pick(sc.id, sc.chapters[0]?.id ?? null)} style={S.sideScriptureName}>{sc.name}</span>
                   <span style={S.sideStreak}><Flame size={10} />{sc.streak}</span>
+                  <button onClick={(e) => { e.stopPropagation(); softDeleteScripture(sc.id, sc.name); if (selectedId === sc.id) { setSelectedId(null); setSelectedChapter(null); } }} style={S.ghostBtn} title="Delete"><X size={12} /></button>
                 </div>
                 {isExpanded && sc.chapters.map((ch) => (
                   <button key={ch.id} onClick={() => pick(sc.id, ch.id)}
@@ -196,6 +207,10 @@ export default function SpiritualScreen() {
                 <button onClick={() => toggleBookmark(chapter.id)}
                   style={{ ...S.iconBtn, color: chapter.bookmarked ? scripture.color : "#C3BFB5" }}>
                   <Bookmark size={17} fill={chapter.bookmarked ? "currentColor" : "none"} />
+                </button>
+                <button onClick={() => { softDeleteChapter(chapter.id, chapter.title); setSelectedChapter(null); }}
+                  style={{ ...S.iconBtn, color: "#C3BFB5" }} title="Delete chapter">
+                  <Trash2 size={15} />
                 </button>
               </div>
             </div>

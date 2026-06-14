@@ -1,6 +1,8 @@
-import { useState, useEffect, useCallback } from "react";
-import { Pencil, Plus, SlidersHorizontal, Bell, Check, Flame, LayoutGrid, Menu, X } from "lucide-react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { Pencil, Plus, Bell, Check, Flame, LayoutGrid, Menu, X, MoreHorizontal, FileText, Link2 } from "lucide-react";
 import { api } from "../api.js";
+import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
+import UndoToast from "../components/UndoToast.jsx";
 
 const PILLARS = {
   Financial:    { dot: "#C9A227", soft: "rgba(201,162,39,0.12)" },
@@ -10,15 +12,14 @@ const PILLARS = {
   Spiritual:    { dot: "#8268B0", soft: "rgba(130,104,176,0.12)" },
 };
 const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+const MONTHS_SHORT = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
-// ISO date → "YYYY-MM-DD"
 const toISO = (d) => d.toISOString().slice(0, 10);
 const todayISO = () => toISO(new Date());
 
-// Monday-first week containing today
 const getWeekDates = () => {
   const today = new Date();
-  const dow = today.getDay(); // 0=Sun
+  const dow = today.getDay();
   const offset = dow === 0 ? -6 : 1 - dow;
   const monday = new Date(today);
   monday.setDate(today.getDate() + offset);
@@ -29,29 +30,12 @@ const getWeekDates = () => {
   });
 };
 
-const monthStart = () => {
-  const d = new Date();
-  return new Date(d.getFullYear(), d.getMonth(), 1);
-};
-
-const daysInCurrentMonth = () => {
-  const d = new Date();
-  return new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
-};
-
-const monthStartOffset = () => {
-  const dow = monthStart().getDay();
-  return dow === 0 ? 6 : dow - 1; // Monday-first
-};
-
+const monthStart = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); };
+const daysInCurrentMonth = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(); };
+const monthStartOffset = () => { const dow = monthStart().getDay(); return dow === 0 ? 6 : dow - 1; };
 const monthDates = () => {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = d.getMonth();
-  const days = daysInCurrentMonth();
-  return Array.from({ length: days }, (_, i) =>
-    `${y}-${String(m+1).padStart(2,"0")}-${String(i+1).padStart(2,"0")}`
-  );
+  const d = new Date(); const y = d.getFullYear(); const m = d.getMonth(); const days = daysInCurrentMonth();
+  return Array.from({ length: days }, (_, i) => `${y}-${String(m+1).padStart(2,"0")}-${String(i+1).padStart(2,"0")}`);
 };
 
 const MONTH_LABEL = new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" });
@@ -59,6 +43,7 @@ const WEEK_DATES = getWeekDates();
 const TODAY = todayISO();
 const MONTH_DATES = monthDates();
 const MONTH_OFFSET = monthStartOffset();
+const THIS_YEAR = new Date().getFullYear();
 
 export default function HabitTracker() {
   const [habits, setHabits] = useState([]);
@@ -66,50 +51,55 @@ export default function HabitTracker() {
   const [isMobile, setIsMobile] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [adding, setAdding] = useState(false);
-  const [editingId, setEditingId] = useState(null);
-  const [editName, setEditName] = useState("");
-  const [newHabit, setNewHabit] = useState({ name: "", pillar: "Health", target_per_week: 7 });
+  const [editingHabit, setEditingHabit] = useState(null);
+  const [countPopup, setCountPopup] = useState(null); // { habit, date }
+  const [newHabit, setNewHabit] = useState({ name: "", pillar: "Health", target_per_week: 7, type: "regular", target_count: null, period: "week" });
 
   const load = useCallback(() => api.getHabits().then(setHabits).catch(console.error), []);
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
-    const check = () => {
-      const mobile = window.innerWidth < 720;
-      setIsMobile(mobile);
-      if (!mobile) setSidebarOpen(false);
-    };
-    check();
-    window.addEventListener("resize", check);
-    return () => window.removeEventListener("resize", check);
+    const check = () => { const mobile = window.innerWidth < 720; setIsMobile(mobile); if (!mobile) setSidebarOpen(false); };
+    check(); window.addEventListener("resize", check); return () => window.removeEventListener("resize", check);
   }, []);
+
+  const { deleteItem: softDelete, toasts, handleUndo, handleDismiss } = useUndoableDelete(
+    api.deleteHabit, api.restoreHabit, load
+  );
 
   const pick = (id) => { setSelected(id); if (isMobile) setSidebarOpen(false); };
 
-  const toggleDay = async (habitId, dateStr) => {
-    await api.toggleHabitLog(habitId, dateStr);
-    load();
+  // Per-day count habits open the counter popup; everything else toggles done/undone.
+  const dayAction = (habit, dateStr) => {
+    if ((habit.type === "minimum" || habit.type === "maximum") && habit.period === "day") {
+      setCountPopup({ habit, date: dateStr });
+    } else {
+      toggleDay(habit.id, dateStr);
+    }
   };
+  const toggleDay = async (habitId, dateStr) => { await api.toggleHabitLog(habitId, dateStr); load(); };
+  const saveCount = async (habitId, dateStr, count, note) => { await api.setHabitLogCount(habitId, dateStr, count, note); setCountPopup(null); load(); };
+  const clearLog = async (habitId, dateStr) => { await api.clearHabitLog(habitId, dateStr); setCountPopup(null); load(); };
 
   const createHabit = async () => {
     if (!newHabit.name.trim()) return;
-    await api.createHabit(newHabit);
-    setNewHabit({ name: "", pillar: "Health", target_per_week: 7 });
+    const body = {
+      name: newHabit.name.trim(),
+      pillar: newHabit.pillar,
+      target_per_week: Number(newHabit.target_per_week) || 7,
+      type: newHabit.type,
+      target_count: newHabit.type !== "regular" ? Number(newHabit.target_count) || 1 : null,
+      period: newHabit.type !== "regular" ? newHabit.period : null,
+    };
+    await api.createHabit(body);
+    setNewHabit({ name: "", pillar: "Health", target_per_week: 7, type: "regular", target_count: null, period: "week" });
     setAdding(false);
     load();
   };
 
-  const renameHabit = async (id) => {
-    if (!editName.trim()) return;
-    await api.updateHabit(id, { name: editName.trim() });
-    setEditingId(null);
-    load();
-  };
-
-  const deleteHabit = async (id) => {
-    await api.deleteHabit(id);
+  const deleteHabit = async (id, name) => {
     if (selected === id) setSelected("ALL");
-    load();
+    softDelete(id, name);
   };
 
   const current = habits.find((h) => h.id === selected);
@@ -151,19 +141,12 @@ export default function HabitTracker() {
         })}
 
         {adding ? (
-          <div style={S.addBox}>
-            <input autoFocus placeholder="Habit name" value={newHabit.name}
-              onChange={(e) => setNewHabit((n) => ({ ...n, name: e.target.value }))}
-              onKeyDown={(e) => e.key === "Enter" && createHabit()}
-              style={S.sideInput} />
-            <select value={newHabit.pillar} onChange={(e) => setNewHabit((n) => ({ ...n, pillar: e.target.value }))} style={S.sideInput}>
-              {Object.keys(PILLARS).map((p) => <option key={p}>{p}</option>)}
-            </select>
-            <div style={{ display: "flex", gap: 6 }}>
-              <button onClick={createHabit} style={S.sideAddBtn}><Check size={13} /></button>
-              <button onClick={() => setAdding(false)} style={S.sideCancelBtn}><X size={13} /></button>
-            </div>
-          </div>
+          <AddHabitForm
+            habit={newHabit}
+            onChange={setNewHabit}
+            onSave={createHabit}
+            onCancel={() => setAdding(false)}
+          />
         ) : (
           <button onClick={() => setAdding(true)} style={S.sideNewBtn}><Plus size={13} /> New habit</button>
         )}
@@ -177,16 +160,148 @@ export default function HabitTracker() {
           </button>
         )}
         {selected === "ALL"
-          ? <AllHabitsWeekly habits={habits} toggleDay={toggleDay} logSet={logSet}
-              onDelete={deleteHabit} onRename={(h) => { setEditingId(h.id); setEditName(h.name); }}
-              editingId={editingId} editName={editName} setEditName={setEditName} renameHabit={renameHabit} />
-          : <SingleHabitMonthly habit={current} toggleDay={toggleDay} logSet={logSet} />}
+          ? <AllHabitsWeekly habits={habits} dayAction={dayAction} logSet={logSet}
+              onDelete={deleteHabit}
+              onEdit={(h) => setEditingHabit(h)} />
+          : <SingleHabitMonthly habit={current} dayAction={dayAction} logSet={logSet}
+              onDelete={() => deleteHabit(current.id, current.name)}
+              onEdit={() => setEditingHabit(current)}
+              setNote={(date, note) => api.setHabitLogNote(current.id, date, note).then(load)} />}
+
+        {/* Yearly bar chart always shown in All view */}
+        {selected === "ALL" && <YearlyChart year={THIS_YEAR} />}
       </main>
+
+      {editingHabit && (
+        <EditHabitModal
+          habit={editingHabit}
+          onSave={async (updates) => { await api.updateHabit(editingHabit.id, updates); setEditingHabit(null); load(); }}
+          onClose={() => setEditingHabit(null)}
+        />
+      )}
+
+      {countPopup && (
+        <CountPopup
+          habit={countPopup.habit}
+          date={countPopup.date}
+          initialCount={countPopup.habit.log_counts?.[countPopup.date] ?? 0}
+          initialNote={countPopup.habit.log_notes?.[countPopup.date] ?? ""}
+          onSave={(count, note) => saveCount(countPopup.habit.id, countPopup.date, count, note)}
+          onClear={() => clearLog(countPopup.habit.id, countPopup.date)}
+          onClose={() => setCountPopup(null)}
+        />
+      )}
+
+      <UndoToast toasts={toasts} onUndo={handleUndo} onDismiss={handleDismiss} />
     </div>
   );
 }
 
-function AllHabitsWeekly({ habits, toggleDay, logSet, onDelete, onRename, editingId, editName, setEditName, renameHabit }) {
+function AddHabitForm({ habit, onChange, onSave, onCancel }) {
+  const needsCount = habit.type !== "regular";
+  return (
+    <div style={S.addBox}>
+      <input autoFocus placeholder="Habit name" value={habit.name}
+        onChange={(e) => onChange((n) => ({ ...n, name: e.target.value }))}
+        onKeyDown={(e) => e.key === "Enter" && onSave()}
+        style={S.sideInput} />
+      <select value={habit.pillar} onChange={(e) => onChange((n) => ({ ...n, pillar: e.target.value }))} style={S.sideInput}>
+        {Object.keys(PILLARS).map((p) => <option key={p}>{p}</option>)}
+      </select>
+      <select value={habit.type} onChange={(e) => onChange((n) => ({ ...n, type: e.target.value }))} style={S.sideInput}>
+        <option value="regular">Regular (yes/no)</option>
+        <option value="minimum">Minimum (at least N)</option>
+        <option value="maximum">Maximum (no more than N)</option>
+      </select>
+      {needsCount && (
+        <div style={{ display: "flex", gap: 6 }}>
+          <input type="number" min={1} placeholder="N" value={habit.target_count || ""}
+            onChange={(e) => onChange((n) => ({ ...n, target_count: e.target.value }))}
+            style={{ ...S.sideInput, width: 60 }} />
+          <select value={habit.period} onChange={(e) => onChange((n) => ({ ...n, period: e.target.value }))} style={S.sideInput}>
+            {["day","week","month","year"].map((p) => <option key={p}>{p}</option>)}
+          </select>
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 6 }}>
+        <button onClick={onSave} style={S.sideAddBtn}><Check size={13} /></button>
+        <button onClick={onCancel} style={S.sideCancelBtn}><X size={13} /></button>
+      </div>
+    </div>
+  );
+}
+
+function EditHabitModal({ habit, onSave, onClose }) {
+  const [name, setName] = useState(habit.name);
+  const [type, setType] = useState(habit.type || "regular");
+  const [targetCount, setTargetCount] = useState(habit.target_count || "");
+  const [period, setPeriod] = useState(habit.period || "week");
+  const [reminder, setReminder] = useState(habit.reminder_time || "");
+
+  const save = () => onSave({ name: name.trim(), type, target_count: type !== "regular" ? Number(targetCount) : null, period: type !== "regular" ? period : null, reminder_time: reminder || null });
+
+  return (
+    <div style={S.modalOverlay} onClick={onClose}>
+      <div style={S.modal} onClick={(e) => e.stopPropagation()}>
+        <div style={S.modalHead}>Edit Habit<button onClick={onClose} style={S.closeBtn}><X size={16} /></button></div>
+        <label style={S.modalLabel}>Name</label>
+        <input value={name} onChange={(e) => setName(e.target.value)} style={S.sideInput} />
+        <label style={S.modalLabel}>Type</label>
+        <select value={type} onChange={(e) => setType(e.target.value)} style={S.sideInput}>
+          <option value="regular">Regular (yes/no)</option>
+          <option value="minimum">Minimum (at least N)</option>
+          <option value="maximum">Maximum (no more than N)</option>
+        </select>
+        {type !== "regular" && (
+          <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+            <input type="number" min={1} value={targetCount} onChange={(e) => setTargetCount(e.target.value)} style={{ ...S.sideInput, width: 70 }} />
+            <select value={period} onChange={(e) => setPeriod(e.target.value)} style={S.sideInput}>
+              {["day","week","month","year"].map((p) => <option key={p}>{p}</option>)}
+            </select>
+          </div>
+        )}
+        <label style={S.modalLabel}>Reminder time</label>
+        <input type="time" value={reminder} onChange={(e) => setReminder(e.target.value)} style={S.sideInput} />
+        <button onClick={save} style={{ ...S.sideAddBtn, width: "100%", marginTop: 10, height: 36 }}>Save</button>
+      </div>
+    </div>
+  );
+}
+
+function CountPopup({ habit, date, initialCount, initialNote, onSave, onClear, onClose }) {
+  const [count, setCount] = useState(initialCount ?? 0);
+  const [note, setNote] = useState(initialNote ?? "");
+  const target = habit.target_count;
+  const meets = habit.type === "minimum" ? count >= target : (count > 0 && count <= target);
+  const over = habit.type === "maximum" && count > target;
+  const statusColor = meets ? "#4C9A6B" : (over ? "#C2536B" : "#C2773B");
+  const statusText = meets ? "✓ Goal met" : (over ? "Over the limit" : "Not met yet");
+
+  return (
+    <div style={S.modalOverlay} onClick={onClose}>
+      <div style={S.modal} onClick={(e) => e.stopPropagation()}>
+        <div style={S.modalHead}>{habit.name}<button onClick={onClose} style={S.closeBtn}><X size={16} /></button></div>
+        <div style={{ fontSize: 12, color: "#9A968C", marginBottom: 2 }}>
+          {date} · {habit.type === "minimum" ? `at least ${target}` : `no more than ${target}`} / {habit.period}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 20, margin: "14px 0 6px" }}>
+          <button onClick={() => setCount((n) => Math.max(0, n - 1))} style={S.counterBtn}>−</button>
+          <span style={{ fontSize: 38, fontWeight: 700, fontFamily: "'Fraunces',Georgia,serif", minWidth: 52, textAlign: "center", color: statusColor }}>{count}</span>
+          <button onClick={() => setCount((n) => n + 1)} style={S.counterBtn}>+</button>
+        </div>
+        <div style={{ textAlign: "center", fontSize: 12.5, fontWeight: 700, color: statusColor, marginBottom: 12 }}>{statusText}</div>
+        <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Add a comment (optional)…"
+          style={{ ...S.sideInput, minHeight: 56, resize: "vertical" }} />
+        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+          <button onClick={() => onSave(count, note)} style={{ ...S.sideAddBtn, flex: 1, justifyContent: "center", height: 38 }}><Check size={14} /> Set</button>
+          <button onClick={onClear} style={{ ...S.actionBtn, color: "#C2536B", borderColor: "#C2536B" }}><X size={14} /> Delete</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AllHabitsWeekly({ habits, dayAction, logSet, onDelete, onEdit }) {
   return (
     <div>
       <div style={S.mainHead}>
@@ -211,42 +326,57 @@ function AllHabitsWeekly({ habits, toggleDay, logSet, onDelete, onRename, editin
           const c = PILLARS[h.pillar]?.dot || "#9A968C";
           const soft = PILLARS[h.pillar]?.soft || "rgba(0,0,0,0.05)";
           const logs = logSet(h);
+          // "N times a week" chain: whole week connects once the weekly target is met.
+          const isWeekChain = h.type === "minimum" && h.period === "week";
+          const weekDone = WEEK_DATES.filter((d) => logs.has(d)).length;
+          const weekAchieved = isWeekChain && weekDone >= (h.target_count || 0);
           return (
             <div key={h.id} style={S.weekRow}>
               <div style={{ ...S.weekNameCol, flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   <span style={{ ...S.sideDot, background: c }} />
-                  {editingId === h.id ? (
-                    <input autoFocus value={editName} onChange={(e) => setEditName(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && renameHabit(h.id)}
-                      onBlur={() => renameHabit(h.id)}
-                      style={{ ...S.sideInput, padding: "3px 6px", fontSize: 12 }} />
-                  ) : (
-                    <span style={S.weekHabitName}>{h.name}</span>
-                  )}
+                  <span style={S.weekHabitName}>{h.name}</span>
                 </div>
                 <div style={{ display: "flex", gap: 4, paddingLeft: 15 }}>
-                  <button onClick={() => onRename(h)} style={S.tinyBtn} title="Rename"><Pencil size={10} /></button>
-                  <button onClick={() => onDelete(h.id)} style={S.tinyBtn} title="Delete"><X size={10} /></button>
+                  <button onClick={() => onEdit(h)} style={S.tinyBtn} title="Edit"><Pencil size={10} /></button>
+                  <button onClick={() => onDelete(h.id, h.name)} style={S.tinyBtn} title="Delete"><X size={10} /></button>
                 </div>
+                {h.type !== "regular" && (
+                  <span style={S.typeBadge}>{h.type === "minimum" ? `≥${h.target_count}/${h.period}` : `≤${h.target_count}/${h.period}`}</span>
+                )}
               </div>
 
-              {WEEK_DATES.map((dateStr) => {
+              {WEEK_DATES.map((dateStr, di) => {
                 const done = logs.has(dateStr);
                 const future = dateStr > TODAY;
+                const isPerDayCount = (h.type === "minimum" || h.type === "maximum") && h.period === "day";
+                const count = h.log_counts?.[dateStr];
+                const hasCount = count !== undefined && count !== null;
+                const hasNote = !!h.log_notes?.[dateStr];
+                const filled = done || weekAchieved;
                 return (
-                  <div key={dateStr} style={S.weekCell}>
-                    <button disabled={future} onClick={() => toggleDay(h.id, dateStr)}
-                      style={{ ...S.tick, ...(done ? { background: c, borderColor: c } : {}), ...(future ? S.tickFuture : {}) }}>
-                      {done && <Check size={14} color="#fff" strokeWidth={3} />}
+                  <div key={dateStr} style={{ ...S.weekCell, position: "relative" }}>
+                    {weekAchieved && <span style={{ ...S.chainLine, background: c, ...(di === 0 ? { left: "50%" } : {}), ...(di === WEEK_DATES.length - 1 ? { right: "50%" } : {}) }} />}
+                    <button disabled={future} onClick={() => dayAction(h, dateStr)}
+                      style={{
+                        ...S.tick,
+                        position: "relative", zIndex: 1,
+                        ...(filled ? { background: c, borderColor: c, color: "#fff" } : {}),
+                        ...(isPerDayCount && hasCount && !done ? { borderColor: c, color: c } : {}),
+                        ...(future && !filled ? S.tickFuture : {}),
+                      }}>
+                      {isPerDayCount
+                        ? (hasCount ? <span style={{ fontSize: 12, fontWeight: 700 }}>{count}</span> : null)
+                        : (done && <Check size={14} color="#fff" strokeWidth={3} />)}
                     </button>
+                    {hasNote && <span style={S.cellNoteBubble} />}
                   </div>
                 );
               })}
               <div style={S.weekStreakCol}>
-                <span style={{ ...S.streakPill, background: soft, color: c }}>
-                  <Flame size={12} /> {h.streak}
-                </span>
+                {weekAchieved
+                  ? <span style={{ ...S.streakPill, background: soft, color: c }}><Link2 size={12} /> {weekDone}/{h.target_count}</span>
+                  : <span style={{ ...S.streakPill, background: soft, color: c }}><Flame size={12} /> {h.streak}</span>}
               </div>
             </div>
           );
@@ -262,7 +392,12 @@ function AllHabitsWeekly({ habits, toggleDay, logSet, onDelete, onRename, editin
   );
 }
 
-function SingleHabitMonthly({ habit, toggleDay, logSet }) {
+function SingleHabitMonthly({ habit, dayAction, logSet, onDelete, onEdit, setNote }) {
+  const [menuDate, setMenuDate] = useState(null);
+  const [noteInput, setNoteInput] = useState("");
+  const [noteDate, setNoteDate] = useState(null);
+  const longPressTimer = useRef(null);
+
   if (!habit) return null;
   const c = PILLARS[habit.pillar]?.dot || "#9A968C";
   const soft = PILLARS[habit.pillar]?.soft || "rgba(0,0,0,0.05)";
@@ -271,6 +406,24 @@ function SingleHabitMonthly({ habit, toggleDay, logSet }) {
   const daysPassed = MONTH_DATES.filter((d) => d <= TODAY).length;
   const rate = daysPassed > 0 ? Math.round((completed / daysPassed) * 100) : 0;
 
+  // "N times a month/year" chain: the whole period connects once the target is met.
+  const isMonthChain = habit.type === "minimum" && (habit.period === "month" || habit.period === "year");
+  const periodDone = habit.period === "year"
+    ? (habit.logs || []).filter((d) => d.startsWith(`${THIS_YEAR}-`)).length
+    : MONTH_DATES.filter((d) => logs.has(d)).length;
+  const periodAchieved = isMonthChain && periodDone >= (habit.target_count || 0);
+
+  const startLongPress = (dateStr) => {
+    longPressTimer.current = setTimeout(() => setMenuDate(dateStr), 500);
+  };
+  const cancelLongPress = () => clearTimeout(longPressTimer.current);
+
+  const openNote = (dateStr) => {
+    setNoteDate(dateStr);
+    setNoteInput(habit.log_notes?.[dateStr] || "");
+    setMenuDate(null);
+  };
+
   return (
     <div>
       <div style={S.mainHead}>
@@ -278,17 +431,36 @@ function SingleHabitMonthly({ habit, toggleDay, logSet }) {
           <div style={S.eyebrow}><span style={{ ...S.sideDot, background: c, marginRight: 6 }} />{habit.pillar} · Monthly view</div>
           <h1 style={S.h1}>{habit.name}</h1>
         </div>
+        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+          <button onClick={onEdit} style={S.actionBtn}><Pencil size={14} /> Edit</button>
+          <button onClick={onDelete} style={{ ...S.actionBtn, color: "#C2536B", borderColor: "#C2536B" }}><X size={14} /> Delete</button>
+          {habit.reminder_time && <button style={S.actionBtn}><Bell size={14} /> {habit.reminder_time}</button>}
+        </div>
       </div>
 
       <div style={S.statStrip}>
         <Stat label="Current streak" value={`${habit.streak} days`} c={c} soft={soft} flame />
         <Stat label="Done this month" value={`${completed}/${daysPassed}`} c={c} soft={soft} />
         <Stat label="Completion" value={`${rate}%`} c={c} soft={soft} />
-        <Stat label="Weekly target" value={`${habit.target_per_week}×`} c={c} soft={soft} />
+        {habit.type === "regular"
+          ? <Stat label="Weekly target" value={`${habit.target_per_week}×`} c={c} soft={soft} />
+          : <Stat label={habit.type === "minimum" ? "Min target" : "Max allowed"} value={`${habit.target_count}/${habit.period}`} c={c} soft={soft} />}
       </div>
 
+      {isMonthChain && (
+        <div style={{ ...S.chainBanner, background: periodAchieved ? soft : "#F7F6F3", color: periodAchieved ? c : "#9A968C" }}>
+          <Link2 size={15} />
+          {periodAchieved
+            ? `${habit.period === "year" ? "Yearly" : "Monthly"} chain complete — ${periodDone}/${habit.target_count} connected`
+            : `${periodDone}/${habit.target_count} this ${habit.period} · ${(habit.target_count || 0) - periodDone} more to connect the chain`}
+        </div>
+      )}
+
       <div style={S.monthCard}>
-        <div style={S.monthTitle}>{MONTH_LABEL}</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <div style={S.monthTitle}>{MONTH_LABEL}</div>
+          <span style={{ fontSize: 11, color: "#9A968C" }}>Long-press a day for options</span>
+        </div>
         <div style={S.monthDow}>{DAYS.map((d) => <div key={d} style={S.monthDowCell}>{d}</div>)}</div>
         <div style={S.monthGrid}>
           {Array.from({ length: MONTH_OFFSET }).map((_, i) => <div key={`pad${i}`} />)}
@@ -297,19 +469,108 @@ function SingleHabitMonthly({ habit, toggleDay, logSet }) {
             const done = logs.has(dateStr);
             const future = dateStr > TODAY;
             const isToday = dateStr === TODAY;
+            const hasNote = !!habit.log_notes?.[dateStr];
+            const isPerDayCount = (habit.type === "minimum" || habit.type === "maximum") && habit.period === "day";
+            const count = habit.log_counts?.[dateStr];
+            const hasCount = count !== undefined && count !== null;
+            const filled = done || periodAchieved;
+            const col = (MONTH_OFFSET + i) % 7;
             return (
-              <button key={dateStr} disabled={future} onClick={() => toggleDay(habit.id, dateStr)}
-                style={{
-                  ...S.monthDay,
-                  ...(done ? { background: c, borderColor: c, color: "#fff" } : {}),
-                  ...(future ? S.monthDayFuture : {}),
-                  ...(isToday && !done ? { borderColor: c, borderWidth: 2 } : {}),
-                }}>
-                {day}
-              </button>
+              <div key={dateStr} style={{ position: "relative" }}>
+                {periodAchieved && (
+                  <span style={{ ...S.chainLine, background: c, ...(col === 0 ? { left: "50%" } : { left: -6 }), ...(col === 6 ? { right: "50%" } : { right: -6 }) }} />
+                )}
+                <button
+                  disabled={future}
+                  onClick={() => dayAction(habit, dateStr)}
+                  onMouseDown={() => !isPerDayCount && startLongPress(dateStr)}
+                  onMouseUp={cancelLongPress}
+                  onTouchStart={() => !isPerDayCount && startLongPress(dateStr)}
+                  onTouchEnd={cancelLongPress}
+                  style={{
+                    ...S.monthDay,
+                    position: "relative", zIndex: 1,
+                    ...(filled ? { background: c, borderColor: c, color: "#fff" } : {}),
+                    ...(isPerDayCount && hasCount && !done ? { borderColor: c, color: c } : {}),
+                    ...(future && !filled ? S.monthDayFuture : {}),
+                    ...(isToday && !filled ? { borderColor: c, borderWidth: 2 } : {}),
+                    width: "100%",
+                  }}>
+                  {day}
+                </button>
+                {isPerDayCount && hasCount && (
+                  <span style={{ ...S.countBadge, background: done ? "#4C9A6B" : c }}>{count}</span>
+                )}
+                {hasNote && <span style={S.noteIndicator} />}
+                {menuDate === dateStr && (
+                  <LongPressMenu
+                    onEdit={onEdit}
+                    onDelete={onDelete}
+                    onAddNote={() => openNote(dateStr)}
+                    onRemind={onEdit}
+                    onClose={() => setMenuDate(null)}
+                  />
+                )}
+              </div>
             );
           })}
         </div>
+      </div>
+
+      {noteDate && (
+        <div style={S.noteBox}>
+          <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>Note for {noteDate}</div>
+          <textarea
+            value={noteInput}
+            onChange={(e) => setNoteInput(e.target.value)}
+            placeholder="Add a note for this day…"
+            style={{ ...S.sideInput, minHeight: 60, resize: "vertical" }}
+          />
+          <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+            <button onClick={() => { setNote(noteDate, noteInput); setNoteDate(null); }} style={S.sideAddBtn}><Check size={13} /> Save</button>
+            <button onClick={() => setNoteDate(null)} style={S.sideCancelBtn}><X size={13} /></button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LongPressMenu({ onEdit, onDelete, onAddNote, onRemind, onClose }) {
+  return (
+    <div style={S.longPressMenu}>
+      <button style={S.menuItem} onClick={() => { onEdit(); onClose(); }}><Pencil size={13} /> Edit</button>
+      <button style={S.menuItem} onClick={() => { onAddNote(); onClose(); }}><FileText size={13} /> Add note</button>
+      <button style={S.menuItem} onClick={() => { onRemind(); onClose(); }}><Bell size={13} /> Remind</button>
+      <button style={{ ...S.menuItem, color: "#C2536B" }} onClick={() => { onDelete(); onClose(); }}><X size={13} /> Delete</button>
+    </div>
+  );
+}
+
+function YearlyChart({ year }) {
+  const [data, setData] = useState([]);
+  useEffect(() => { api.getHabitsYearly(year).then(setData).catch(console.error); }, [year]);
+
+  if (!data.length) return null;
+
+  const monthPcts = Array.from({ length: 12 }, (_, m) => {
+    const total = data.reduce((sum, h) => sum + (h.monthly[m+1]?.done || 0), 0);
+    const expected = data.reduce((sum, h) => sum + Math.floor(((h.monthly[m+1]?.days || 30) / 7) * 7), 0);
+    return expected > 0 ? Math.round((total / expected) * 100) : 0;
+  });
+
+  const max = Math.max(...monthPcts, 1);
+
+  return (
+    <div style={{ ...S.monthCard, marginTop: 18 }}>
+      <div style={S.monthTitle}>{year} Completion</div>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 80, marginTop: 12 }}>
+        {monthPcts.map((pct, i) => (
+          <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+            <div style={{ width: "100%", background: "#4C9A6B", borderRadius: "3px 3px 0 0", height: `${(pct / max) * 60}px`, minHeight: 2, opacity: pct > 0 ? 1 : 0.15 }} title={`${pct}%`} />
+            <span style={{ fontSize: 9, color: "#9A968C", fontWeight: 600 }}>{MONTHS_SHORT[i]}</span>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -326,7 +587,7 @@ function Stat({ label, value, c, soft, flame }) {
 
 const S = {
   shell: { display: "flex", fontFamily: "'Inter',system-ui,sans-serif", background: "#F7F6F3", minHeight: "100vh", color: "#26241F", position: "relative", overflow: "hidden" },
-  sidebar: { width: 230, flexShrink: 0, background: "#fff", borderRight: "1px solid #ECEAE3", padding: "20px 12px", display: "flex", flexDirection: "column", gap: 3 },
+  sidebar: { width: 230, flexShrink: 0, background: "#fff", borderRight: "1px solid #ECEAE3", padding: "20px 12px", display: "flex", flexDirection: "column", gap: 3, overflowY: "auto" },
   sidebarOverlay: { position: "absolute", top: 0, left: 0, bottom: 0, zIndex: 30, boxShadow: "4px 0 24px rgba(0,0,0,0.18)", transition: "transform 0.22s ease", transform: "translateX(0)" },
   sidebarHidden: { transform: "translateX(-105%)", boxShadow: "none" },
   backdrop: { position: "absolute", inset: 0, background: "rgba(38,36,31,0.38)", zIndex: 20 },
@@ -342,26 +603,28 @@ const S = {
   sideDivider: { height: 1, background: "#ECEAE3", margin: "8px 6px" },
   addBox: { padding: "10px 6px", display: "flex", flexDirection: "column", gap: 6 },
   sideInput: { border: "1px solid #E4E2DA", borderRadius: 7, padding: "7px 9px", fontSize: 13, fontFamily: "inherit", outline: "none", width: "100%", boxSizing: "border-box" },
-  sideAddBtn: { border: "none", background: "#4C9A6B", color: "#fff", width: 30, height: 30, borderRadius: 7, cursor: "pointer", display: "grid", placeItems: "center" },
+  sideAddBtn: { border: "none", background: "#4C9A6B", color: "#fff", height: 30, padding: "0 12px", borderRadius: 7, cursor: "pointer", display: "flex", alignItems: "center", gap: 5, fontSize: 13, fontFamily: "inherit" },
   sideCancelBtn: { border: "1px solid #E4E2DA", background: "#fff", color: "#6B675E", width: 30, height: 30, borderRadius: 7, cursor: "pointer", display: "grid", placeItems: "center" },
   sideNewBtn: { display: "flex", alignItems: "center", gap: 6, width: "100%", border: "1px dashed #D9D6CE", background: "none", borderRadius: 8, padding: "8px 10px", fontSize: 12.5, color: "#9A968C", fontWeight: 600, cursor: "pointer", fontFamily: "inherit", marginTop: 6, justifyContent: "center" },
-  main: { flex: 1, padding: "26px", overflowX: "auto", minWidth: 0 },
+  main: { flex: 1, padding: "26px", overflowX: "hidden", overflowY: "auto", minWidth: 0 },
   hamburger: { display: "flex", alignItems: "center", gap: 9, border: "1px solid #E0DDD5", background: "#fff", padding: "9px 14px", borderRadius: 9, fontSize: 13, fontWeight: 600, color: "#4A463E", cursor: "pointer", fontFamily: "inherit", marginBottom: 18 },
   hamburgerLabel: { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 200 },
   mainHead: { marginBottom: 20 },
-  eyebrow: { fontSize: 11, letterSpacing: "0.12em", textTransform: "uppercase", color: "#9A968C", fontWeight: 600, marginBottom: 5 },
+  eyebrow: { fontSize: 11, letterSpacing: "0.12em", textTransform: "uppercase", color: "#9A968C", fontWeight: 600, marginBottom: 5, display: "flex", alignItems: "center" },
   h1: { fontSize: 27, fontWeight: 700, margin: 0, letterSpacing: "-0.02em", fontFamily: "'Fraunces',Georgia,serif" },
-  weekCard: { background: "#fff", borderRadius: 12, padding: "8px 14px 14px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", minWidth: 600 },
-  weekHeadRow: { display: "flex", alignItems: "flex-end", padding: "10px 0", borderBottom: "1px solid #ECEAE3" },
-  weekNameCol: { width: 180, flexShrink: 0, display: "flex", alignItems: "center", gap: 8 },
+  actionBtn: { display: "flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 500, color: "#6B675E", border: "1px solid #E0DDD5", background: "#fff", padding: "5px 10px", borderRadius: 7, cursor: "pointer", fontFamily: "inherit" },
+  weekCard: { background: "#fff", borderRadius: 12, padding: "8px 14px 14px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", overflowX: "auto" },
+  weekHeadRow: { display: "flex", alignItems: "flex-end", padding: "10px 0", borderBottom: "1px solid #ECEAE3", minWidth: 480 },
+  weekNameCol: { width: 160, flexShrink: 0, display: "flex", alignItems: "center", gap: 8 },
   weekDayHead: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 },
   weekDayName: { fontSize: 10, fontWeight: 600, color: "#9A968C", textTransform: "uppercase" },
   weekDayNum: { fontSize: 12, fontWeight: 600, color: "#6B675E", width: 22, height: 22, display: "grid", placeItems: "center", borderRadius: "50%" },
   weekDayToday: { background: "#26241F", color: "#fff" },
   weekStreakCol: { width: 64, flexShrink: 0, textAlign: "center", fontSize: 10, fontWeight: 600, color: "#9A968C", textTransform: "uppercase" },
-  weekRow: { display: "flex", alignItems: "center", padding: "9px 0", borderBottom: "1px solid #F4F2EC" },
+  weekRow: { display: "flex", alignItems: "center", padding: "9px 0", borderBottom: "1px solid #F4F2EC", minWidth: 480 },
   weekHabitName: { fontSize: 13, fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
   weekCell: { flex: 1, display: "grid", placeItems: "center" },
+  typeBadge: { fontSize: 10, color: "#9A968C", background: "#F2F1EC", padding: "1px 6px", borderRadius: 8, fontWeight: 600 },
   tick: { width: 26, height: 26, borderRadius: 7, border: "2px solid #E0DDD5", background: "#fff", cursor: "pointer", display: "grid", placeItems: "center", padding: 0 },
   tickFuture: { opacity: 0.4, cursor: "not-allowed", borderStyle: "dashed" },
   streakPill: { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 700, padding: "3px 9px", borderRadius: 12 },
@@ -377,4 +640,17 @@ const S = {
   monthGrid: { display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 6 },
   monthDay: { aspectRatio: "1", border: "1.5px solid #ECEAE3", background: "#fff", borderRadius: 8, fontSize: 12.5, fontWeight: 600, color: "#6B675E", cursor: "pointer", fontFamily: "inherit", display: "grid", placeItems: "center" },
   monthDayFuture: { opacity: 0.4, cursor: "not-allowed", background: "#FAFAF8" },
+  noteIndicator: { position: "absolute", top: 3, right: 3, width: 5, height: 5, borderRadius: "50%", background: "#3A7CA5" },
+  cellNoteBubble: { position: "absolute", top: 2, right: "calc(50% - 16px)", width: 5, height: 5, borderRadius: "50%", background: "#3A7CA5" },
+  countBadge: { position: "absolute", bottom: 2, right: 2, minWidth: 13, height: 13, padding: "0 2px", borderRadius: 7, color: "#fff", fontSize: 9, fontWeight: 700, display: "grid", placeItems: "center", lineHeight: 1 },
+  counterBtn: { width: 44, height: 44, borderRadius: "50%", border: "1.5px solid #E0DDD5", background: "#fff", color: "#26241F", fontSize: 24, fontWeight: 700, cursor: "pointer", display: "grid", placeItems: "center", fontFamily: "inherit", lineHeight: 1 },
+  chainLine: { position: "absolute", top: "calc(50% - 3px)", left: 0, right: 0, height: 6, zIndex: 0, opacity: 0.9 },
+  chainBanner: { display: "flex", alignItems: "center", gap: 8, borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 12.5, fontWeight: 700, fontFamily: "'Inter',system-ui,sans-serif" },
+  noteBox: { background: "#fff", borderRadius: 10, padding: 14, marginTop: 14, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
+  longPressMenu: { position: "absolute", top: "100%", left: 0, zIndex: 50, background: "#fff", border: "1px solid #E0DDD5", borderRadius: 10, boxShadow: "0 4px 16px rgba(0,0,0,0.12)", padding: "4px 0", minWidth: 140 },
+  menuItem: { display: "flex", alignItems: "center", gap: 8, width: "100%", border: "none", background: "none", padding: "8px 14px", fontSize: 13, color: "#26241F", cursor: "pointer", fontFamily: "inherit", textAlign: "left" },
+  modalOverlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 100, display: "grid", placeItems: "center" },
+  modal: { background: "#fff", borderRadius: 14, padding: 24, width: 320, maxWidth: "90vw", display: "flex", flexDirection: "column", gap: 8 },
+  modalHead: { display: "flex", justifyContent: "space-between", alignItems: "center", fontWeight: 700, fontSize: 16, fontFamily: "'Fraunces',Georgia,serif", marginBottom: 6 },
+  modalLabel: { fontSize: 11, fontWeight: 600, color: "#9A968C", textTransform: "uppercase", letterSpacing: "0.08em", marginTop: 4 },
 };

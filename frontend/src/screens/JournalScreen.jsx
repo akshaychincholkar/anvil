@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Flame, Plus, X, Trophy, Heart, Target, Wind, Sunrise } from "lucide-react";
+import { Flame, Plus, X, Trophy, Heart, Target, Wind, Sunrise, ChevronLeft } from "lucide-react";
 import { api } from "../api.js";
 
 const MOODS = [
@@ -20,52 +20,77 @@ const SECTIONS = [
 ];
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
-const todayLabel = () => new Date().toLocaleDateString("en-US", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+const formatDateLabel = (iso) => {
+  const d = new Date(iso + "T00:00:00");
+  return d.toLocaleDateString("en-US", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+};
 
 export default function JournalScreen() {
   const TODAY = todayISO();
   const [year, month] = [new Date().getFullYear(), new Date().getMonth() + 1];
 
+  const [viewDate, setViewDate] = useState(null); // null = today
+  const selectedDate = viewDate || TODAY;
+  const isToday = selectedDate === TODAY;
+
   const [entry, setEntry] = useState(null);
   const [history, setHistory] = useState({});
   const [drafts, setDrafts] = useState(Object.fromEntries(SECTIONS.map((s) => [s.id, ""])));
 
+  const loadEntry = useCallback(async (dateStr) => {
+    const e = await api.getJournalEntry(dateStr);
+    setEntry(e);
+  }, []);
+
+  const loadHistory = useCallback(async () => {
+    const h = await api.getJournalHistory(year, month);
+    setHistory(h);
+  }, [year, month]);
+
   const load = useCallback(async () => {
     const [e, h] = await Promise.all([
-      api.getJournalEntry(TODAY),
+      api.getJournalEntry(selectedDate),
       api.getJournalHistory(year, month),
     ]);
     setEntry(e);
     setHistory(h);
-  }, [TODAY, year, month]);
+  }, [selectedDate, year, month]);
 
   useEffect(() => { load(); }, [load]);
 
   const setMood = async (moodId) => {
-    await api.updateJournalMood(TODAY, moodId);
+    await api.updateJournalMood(selectedDate, moodId);
     load();
   };
 
   const addBullet = async (sid) => {
     const text = drafts[sid].trim();
     if (!text) return;
-    await api.addJournalBullet(TODAY, sid, text);
+    await api.addJournalBullet(selectedDate, sid, text);
     setDrafts((d) => ({ ...d, [sid]: "" }));
-    load();
+    loadEntry(selectedDate);
   };
 
   const removeBullet = async (bulletId) => {
     await api.deleteJournalBullet(bulletId);
-    load();
+    loadEntry(selectedDate);
+  };
+
+  const openDay = (dateISO) => {
+    if (dateISO === TODAY) setViewDate(null);
+    else setViewDate(dateISO);
+    setDrafts(Object.fromEntries(SECTIONS.map((s) => [s.id, ""])));
   };
 
   if (!entry) return <div style={{ padding: 28, color: "#9A968C" }}>Loading…</div>;
 
   const loggedToday = entry.mood !== null;
   const streak = (() => {
-    let s = loggedToday ? 1 : 0;
+    let s = 0;
     const d = new Date(TODAY);
-    d.setDate(d.getDate() - 1);
+    // count back from today
+    const todayMooded = history[TODAY] || (isToday && loggedToday);
+    if (todayMooded) { s = 1; d.setDate(d.getDate() - 1); } else return 0;
     while (true) {
       const iso = d.toISOString().slice(0, 10);
       if (history[iso]) { s++; d.setDate(d.getDate() - 1); }
@@ -76,7 +101,6 @@ export default function JournalScreen() {
 
   const totalBullets = Object.values(entry.bullets || {}).reduce((n, arr) => n + arr.length, 0);
 
-  // Calendar: days of current month
   const daysInMonth = new Date(year, month, 0).getDate();
   const monthStartDow = new Date(year, month - 1, 1).getDay();
   const offset = monthStartDow === 0 ? 6 : monthStartDow - 1;
@@ -86,8 +110,13 @@ export default function JournalScreen() {
       <div style={S.head}>
         <div>
           <div style={S.eyebrow}>Anvil · Journal</div>
-          <h1 style={S.h1}>Today</h1>
-          <div style={S.date}>{todayLabel()}</div>
+          {!isToday && (
+            <button style={S.backBtn} onClick={() => setViewDate(null)}>
+              <ChevronLeft size={14} /> Back to Today
+            </button>
+          )}
+          <h1 style={S.h1}>{isToday ? "Today" : formatDateLabel(selectedDate)}</h1>
+          {isToday && <div style={S.date}>{formatDateLabel(TODAY)}</div>}
         </div>
         <div style={S.streakBox}>
           <Flame size={16} color="#C2773B" />
@@ -98,7 +127,7 @@ export default function JournalScreen() {
 
       {/* Mood */}
       <div style={S.card}>
-        <div style={S.cardTitle}>How are you?</div>
+        <div style={S.cardTitle}>How {isToday ? "are" : "were"} you?</div>
         <div style={S.moodRow}>
           {MOODS.map((m) => {
             const on = entry.mood === m.id;
@@ -149,10 +178,11 @@ export default function JournalScreen() {
         );
       })}
 
-      {/* Mood calendar */}
+      {/* Mood calendar — clickable days (item 10) */}
       <div style={S.card}>
         <div style={S.cardTitle}>
           {new Date(year, month - 1).toLocaleDateString("en-US", { month: "long", year: "numeric" })} · Mood history
+          <span style={{ fontSize: 11, color: "#9A968C", fontWeight: 400, marginLeft: 8 }}>tap a day to view</span>
         </div>
         <div style={S.calDow}>
           {["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map((d) => <div key={d} style={S.calDowCell}>{d}</div>)}
@@ -164,18 +194,26 @@ export default function JournalScreen() {
             const moodId = dateISO === TODAY && entry.mood ? entry.mood : history[dateISO];
             const m = moodId ? moodById(moodId) : null;
             const future = dateISO > TODAY;
-            const isToday = dateISO === TODAY;
+            const isSelected = dateISO === selectedDate;
             return (
-              <div key={day} style={{
-                ...S.calDay,
-                background: m ? m.color : (future ? "#FAFAF8" : "#fff"),
-                borderColor: isToday ? "#26241F" : "#ECEAE3",
-                borderWidth: isToday ? 2 : 1,
-                color: m ? "#fff" : "#B5B1A7",
-                opacity: future ? 0.5 : 1,
-              }} title={m ? m.label : ""}>
+              <button
+                key={day}
+                onClick={() => !future && openDay(dateISO)}
+                disabled={future}
+                style={{
+                  ...S.calDay,
+                  background: m ? m.color : (future ? "#FAFAF8" : "#fff"),
+                  borderColor: isSelected ? "#26241F" : "#ECEAE3",
+                  borderWidth: isSelected ? 2 : 1,
+                  color: m ? "#fff" : "#B5B1A7",
+                  opacity: future ? 0.5 : 1,
+                  cursor: future ? "not-allowed" : "pointer",
+                  outline: isSelected ? "2px solid #26241F" : "none",
+                  outlineOffset: 1,
+                }}
+                title={m ? m.label : dateISO}>
                 {m ? m.emoji : day}
-              </div>
+              </button>
             );
           })}
         </div>
@@ -189,46 +227,49 @@ export default function JournalScreen() {
       </div>
 
       <div style={S.footer}>
-        {loggedToday
-          ? `Mood set · ${totalBullets} point${totalBullets === 1 ? "" : "s"} written today`
-          : "Tap a mood to log today and keep your streak"}
+        {isToday
+          ? (loggedToday
+            ? `Mood set · ${totalBullets} point${totalBullets === 1 ? "" : "s"} written today`
+            : "Tap a mood to log today and keep your streak")
+          : `Viewing ${formatDateLabel(selectedDate)}`}
       </div>
     </div>
   );
 }
 
 const S = {
-  page: { fontFamily: "'Inter',system-ui,sans-serif", background: "#F7F6F3", minHeight: "100%", padding: "26px 22px", color: "#26241F", boxSizing: "border-box", maxWidth: 680, margin: "0 auto" },
-  head: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 18, gap: 12 },
+  page: { fontFamily: "'Inter',system-ui,sans-serif", background: "#F7F6F3", minHeight: "100%", padding: "28px 24px", color: "#26241F", boxSizing: "border-box", maxWidth: 680, margin: "0 auto" },
+  head: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 22 },
   eyebrow: { fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", color: "#9A968C", fontWeight: 600, marginBottom: 4 },
-  h1: { fontSize: 28, fontWeight: 700, margin: 0, letterSpacing: "-0.02em", fontFamily: "'Fraunces',Georgia,serif" },
-  date: { fontSize: 12.5, color: "#9A968C", marginTop: 3 },
-  streakBox: { display: "flex", alignItems: "center", gap: 5, background: "#fff", borderRadius: 20, padding: "7px 13px", boxShadow: "0 1px 2px rgba(0,0,0,0.06)", flexShrink: 0 },
-  streakNum: { fontSize: 17, fontWeight: 700, fontFamily: "'Fraunces',Georgia,serif" },
+  backBtn: { display: "inline-flex", alignItems: "center", gap: 4, border: "none", background: "none", color: "#3A7CA5", fontSize: 12.5, fontWeight: 600, cursor: "pointer", padding: "0 0 6px", fontFamily: "inherit" },
+  h1: { fontSize: 30, fontWeight: 700, margin: 0, letterSpacing: "-0.02em", fontFamily: "'Fraunces',Georgia,serif" },
+  date: { fontSize: 13, color: "#9A968C", marginTop: 4 },
+  streakBox: { display: "flex", alignItems: "center", gap: 6, background: "#fff", border: "1px solid #ECEAE3", borderRadius: 10, padding: "8px 14px" },
+  streakNum: { fontSize: 20, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif", color: "#C2773B" },
   streakLabel: { fontSize: 11, color: "#9A968C", fontWeight: 500 },
-  card: { background: "#fff", borderRadius: 12, padding: 16, marginBottom: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
-  cardTitle: { fontSize: 14, fontWeight: 700, letterSpacing: "-0.01em" },
-  moodRow: { display: "flex", gap: 8, marginTop: 13, flexWrap: "wrap" },
-  moodBtn: { flex: 1, minWidth: 60, border: "1.5px solid #ECEAE3", background: "#fff", borderRadius: 12, padding: "12px 6px", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, transition: "transform 0.12s ease", fontFamily: "inherit" },
-  moodEmoji: { fontSize: 24, lineHeight: 1 },
-  moodLabel: { fontSize: 11.5, fontWeight: 600 },
-  sectionHead: { display: "flex", alignItems: "center", gap: 10, marginBottom: 12 },
-  sectionIcon: { width: 30, height: 30, borderRadius: 8, display: "grid", placeItems: "center", flexShrink: 0 },
+  card: { background: "#fff", borderRadius: 12, padding: "18px 20px", marginBottom: 14, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
+  cardTitle: { fontSize: 14, fontWeight: 700, marginBottom: 12, color: "#26241F" },
+  moodRow: { display: "flex", gap: 8, flexWrap: "wrap" },
+  moodBtn: { display: "flex", flexDirection: "column", alignItems: "center", gap: 4, border: "2px solid #ECEAE3", background: "#fff", borderRadius: 10, padding: "10px 12px", cursor: "pointer", flex: "1 1 60px", transition: "transform 0.1s" },
+  moodEmoji: { fontSize: 22 },
+  moodLabel: { fontSize: 11, fontWeight: 600 },
+  sectionHead: { display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 10 },
+  sectionIcon: { width: 32, height: 32, borderRadius: 8, display: "grid", placeItems: "center", flexShrink: 0 },
   sectionHint: { fontSize: 11.5, color: "#9A968C", marginTop: 1 },
-  bulletList: { listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 7 },
-  bullet: { display: "flex", alignItems: "center", gap: 9, background: "#FAFAF8", borderRadius: 8, padding: "9px 10px" },
+  bulletList: { margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 },
+  bullet: { display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, lineHeight: 1.4 },
   bulletDot: { width: 6, height: 6, borderRadius: "50%", flexShrink: 0 },
-  bulletText: { fontSize: 13.5, fontWeight: 500, flex: 1, lineHeight: 1.35 },
-  bulletDel: { border: "none", background: "none", color: "#C3BFB5", cursor: "pointer", padding: 2, display: "grid", placeItems: "center", flexShrink: 0 },
-  addRow: { display: "flex", gap: 7, marginTop: 9 },
-  input: { flex: 1, border: "1px solid #E4E2DA", borderRadius: 8, padding: "9px 11px", fontSize: 13.5, fontFamily: "inherit", outline: "none" },
-  addBtn: { border: "none", color: "#fff", width: 38, borderRadius: 8, cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0 },
-  calDow: { display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 6, margin: "13px 0 8px" },
+  bulletText: { flex: 1 },
+  bulletDel: { border: "none", background: "none", color: "#C3BFB5", cursor: "pointer", padding: 2, display: "grid", placeItems: "center" },
+  addRow: { display: "flex", gap: 8 },
+  input: { flex: 1, border: "1px solid #E4E2DA", borderRadius: 8, padding: "9px 12px", fontSize: 13.5, fontFamily: "inherit", outline: "none" },
+  addBtn: { width: 36, height: 36, border: "none", borderRadius: 8, color: "#fff", cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0 },
+  calDow: { display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 4, marginBottom: 6 },
   calDowCell: { fontSize: 10, fontWeight: 600, color: "#9A968C", textAlign: "center", textTransform: "uppercase" },
-  calGrid: { display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 6 },
-  calDay: { aspectRatio: "1", borderRadius: 8, borderStyle: "solid", display: "grid", placeItems: "center", fontSize: 15, fontWeight: 600 },
-  legend: { display: "flex", gap: 12, flexWrap: "wrap", marginTop: 14, paddingTop: 12, borderTop: "1px solid #F2F1EC" },
-  legendItem: { display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#6B675E", fontWeight: 500 },
-  legendDot: { width: 10, height: 10, borderRadius: "50%" },
-  footer: { textAlign: "center", fontSize: 12, color: "#9A968C", padding: "8px 0 4px", fontWeight: 500 },
+  calGrid: { display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 4, marginBottom: 12 },
+  calDay: { aspectRatio: "1", border: "1px solid #ECEAE3", borderRadius: 7, fontSize: 13, display: "grid", placeItems: "center", fontWeight: 500, fontFamily: "inherit" },
+  legend: { display: "flex", gap: 10, flexWrap: "wrap" },
+  legendItem: { display: "flex", alignItems: "center", gap: 5, fontSize: 11.5, color: "#6B675E" },
+  legendDot: { width: 8, height: 8, borderRadius: "50%", display: "inline-block" },
+  footer: { fontSize: 12.5, color: "#9A968C", textAlign: "center", marginTop: 8, fontStyle: "italic" },
 };
