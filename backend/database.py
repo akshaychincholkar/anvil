@@ -45,6 +45,13 @@ def migrate_db():
 
         # skill stage tracking (item 11)
         add_col("skill", "completed_stages", "TEXT NOT NULL DEFAULT '{}'")
+        # wisdom checklist done flag on skill notes
+        add_col("skill_note", "done", "INTEGER NOT NULL DEFAULT 0")
+
+        # multi-user auth columns
+        add_col("user", "email", "TEXT")
+        add_col("user", "password_hash", "TEXT")
+        add_col("user", "salt", "TEXT")
 
 def init_db():
     with db() as conn:
@@ -52,7 +59,10 @@ def init_db():
         CREATE TABLE IF NOT EXISTS user (
             id INTEGER PRIMARY KEY,
             name TEXT NOT NULL DEFAULT 'Anvil User',
-            timezone TEXT NOT NULL DEFAULT 'Asia/Kolkata'
+            timezone TEXT NOT NULL DEFAULT 'Asia/Kolkata',
+            email TEXT,
+            password_hash TEXT,
+            salt TEXT
         );
         INSERT OR IGNORE INTO user (id, name) VALUES (1, 'Anvil User');
 
@@ -148,6 +158,7 @@ def init_db():
             skill_id INTEGER NOT NULL,
             stage TEXT NOT NULL CHECK(stage IN ('D','I','K','W')),
             text TEXT NOT NULL,
+            done INTEGER NOT NULL DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -203,6 +214,16 @@ def init_db():
             token_json TEXT NOT NULL,
             UNIQUE(user_id, provider)
         );
+
+        CREATE TABLE IF NOT EXISTS affirmation (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            category TEXT NOT NULL DEFAULT 'Motivational',
+            text TEXT NOT NULL,
+            favorite INTEGER NOT NULL DEFAULT 0,
+            deleted_at TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
         """)
 
         migrate_db()
@@ -218,5 +239,26 @@ def init_db():
                     ("Relationship", "#C2536B"),
                     ("Health",       "#4C9A6B"),
                     ("Spiritual",    "#8268B0"),
+                ]
+            )
+
+        # Seed starter affirmations if none exist
+        acount = conn.execute("SELECT COUNT(*) FROM affirmation WHERE user_id=1").fetchone()[0]
+        if acount == 0:
+            conn.executemany(
+                "INSERT INTO affirmation (user_id, category, text) VALUES (1, ?, ?)",
+                [
+                    ("Motivational",  "I am capable of achieving everything I set my mind to."),
+                    ("Motivational",  "Every day I grow stronger, wiser, and more disciplined."),
+                    ("Habits",        "Small consistent actions compound into remarkable results."),
+                    ("Habits",        "I show up for myself every single day, no excuses."),
+                    ("Gratitude",     "I am grateful for this moment and all that I have."),
+                    ("Gratitude",     "My life is full of blessings I often overlook."),
+                    ("Health",        "My body is strong, healthy, and full of energy."),
+                    ("Health",        "I nourish my mind and body with care each day."),
+                    ("Abundance",     "Opportunities and abundance flow to me effortlessly."),
+                    ("Abundance",     "I deserve success and welcome it into my life."),
+                    ("Relationships", "I attract loving, supportive, and genuine people."),
+                    ("Relationships", "I give and receive love freely and openly."),
                 ]
             )

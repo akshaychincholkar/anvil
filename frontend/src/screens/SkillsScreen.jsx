@@ -62,11 +62,16 @@ export default function SkillsScreen() {
     load();
   };
 
+  const toggleNote = async (noteId) => {
+    await api.toggleSkillNote(noteId);
+    load();
+  };
+
   const completeStage = async (skillId, stageId) => {
     const sk = skills.find((s) => s.id === skillId);
     if (!sk) return;
-    const nextStage = STAGES[stageIndex(stageId) + 1];
-    if (nextStage?.id === "W") setCelebrated(skillId);
+    // Celebrate only when Wisdom itself is completed.
+    if (stageId === "W") setCelebrated(skillId);
     await api.completeSkillStage(skillId, stageId);
     load();
   };
@@ -238,28 +243,39 @@ export default function SkillsScreen() {
                     {isDone && !isCurrent && <span style={{ ...S.doneBadge, color: st.color, background: st.soft }}>Done</span>}
                   </div>
 
-                  {unlocked && (
+                  {unlocked && (() => {
+                    const isWisdom = st.id === "W";
+                    const allChecked = notes.length > 0 && notes.every((n) => n.done);
+                    const canComplete = isWisdom ? allChecked : notes.length > 0;
+                    return (
                     <>
-                      {/* Notes list */}
+                      {/* Notes / checklist */}
                       {notes.length > 0 && (
                         <ul style={S.noteList}>
                           {notes.map((n) => (
                             <li key={n.id} style={S.noteItem}>
-                              <span style={{ ...S.noteDot, background: st.color }} />
-                              <span style={S.noteText}>{n.text}</span>
+                              {isWisdom ? (
+                                <button onClick={() => toggleNote(n.id)}
+                                  style={{ ...S.checkBox, ...(n.done ? { background: st.color, borderColor: st.color } : {}) }}>
+                                  {n.done && <Check size={11} color="#fff" strokeWidth={3} />}
+                                </button>
+                              ) : (
+                                <span style={{ ...S.noteDot, background: st.color }} />
+                              )}
+                              <span style={{ ...S.noteText, ...(isWisdom && n.done ? { textDecoration: "line-through", color: "#9A968C" } : {}) }}>{n.text}</span>
                               <button onClick={() => deleteNote(n.id)} style={S.ghostBtn}><X size={12} /></button>
                             </li>
                           ))}
                         </ul>
                       )}
                       {notes.length === 0 && (
-                        <div style={S.noNotes}>No notes yet — {st.hint}</div>
+                        <div style={S.noNotes}>{isWisdom ? "Add the steps to implement this — check each off as you do it." : `No notes yet — ${st.hint}`}</div>
                       )}
 
-                      {/* Add note input */}
+                      {/* Add note / checklist item input */}
                       <div style={S.noteAddRow}>
                         <input
-                          placeholder={`Add a ${st.label} note…`}
+                          placeholder={isWisdom ? "Add a step to implement…" : `Add a ${st.label} note…`}
                           value={draft}
                           onChange={(e) => setNoteDrafts((d) => ({ ...d, [skill.id]: { ...d[skill.id], [st.id]: e.target.value } }))}
                           onKeyDown={(e) => e.key === "Enter" && addNote(skill.id, st.id)}
@@ -268,18 +284,24 @@ export default function SkillsScreen() {
                         <button onClick={() => addNote(skill.id, st.id)} style={{ ...S.noteAddBtn, background: st.color }}><Plus size={14} /></button>
                       </div>
 
-                      {/* Advance button — only shown for current active stage */}
+                      {/* Completion button — only for the current active stage */}
                       {isCurrent && !skill.completed_stages?.[st.id] && (
-                        <button
-                          onClick={() => completeStage(skill.id, st.id)}
-                          disabled={notes.length === 0}
-                          style={{ ...S.advanceBtn, background: notes.length > 0 ? st.color : "#C3BFB5", marginTop: 10, cursor: notes.length > 0 ? "pointer" : "not-allowed" }}>
-                          <Check size={14} />
-                          {st.id === "W" ? "Mark Wisdom complete" : `Complete ${st.label} → ${STAGES[i + 1]?.label}`}
-                        </button>
+                        <>
+                          {isWisdom && notes.length > 0 && !allChecked && (
+                            <div style={S.checklistHint}>{notes.filter((n) => n.done).length}/{notes.length} done — check all steps to complete Wisdom</div>
+                          )}
+                          <button
+                            onClick={() => completeStage(skill.id, st.id)}
+                            disabled={!canComplete}
+                            style={{ ...S.advanceBtn, background: canComplete ? st.color : "#C3BFB5", marginTop: 10, cursor: canComplete ? "pointer" : "not-allowed" }}>
+                            <Check size={14} />
+                            {isWisdom ? "Mark Wisdom complete" : `Complete ${st.label} → ${STAGES[i + 1]?.label}`}
+                          </button>
+                        </>
                       )}
                     </>
-                  )}
+                    );
+                  })()}
                 </div>
               );
             })}
@@ -333,6 +355,8 @@ const S = {
   noteList: { margin: "0 0 8px 0", padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 6 },
   noteItem: { display: "flex", alignItems: "flex-start", gap: 8, fontSize: 13, lineHeight: 1.4 },
   noteDot: { width: 6, height: 6, borderRadius: "50%", flexShrink: 0, marginTop: 5 },
+  checkBox: { width: 18, height: 18, borderRadius: 5, border: "2px solid #D9D6CE", background: "#fff", cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0, marginTop: 1, padding: 0 },
+  checklistHint: { fontSize: 11.5, color: "#9A968C", fontWeight: 600, marginTop: 10, textAlign: "center" },
   noteText: { flex: 1, color: "#26241F" },
   noNotes: { fontSize: 12, color: "#B5B1A7", fontStyle: "italic", marginBottom: 8 },
   noteAddRow: { display: "flex", gap: 6 },

@@ -76,12 +76,17 @@ const horizonDates = (horizon, month, week = 1) => {
   }
 };
 
-const toFractM = (dateStr) => {
+// Fractional month position (0–12) for the gantt's 12 equal-width columns.
+// Uses the real number of days in the month so bars line up with their dates;
+// inclusiveEnd extends the bar to cover the whole end day.
+const toFractM = (dateStr, inclusiveEnd = false) => {
   if (!dateStr) return 0;
   const d = new Date(dateStr + "T00:00:00");
   if (d.getFullYear() > YEAR) return 12;
   if (d.getFullYear() < YEAR) return 0;
-  return d.getMonth() + (d.getDate() - 1) / 30;
+  const daysInMonth = new Date(YEAR, d.getMonth() + 1, 0).getDate();
+  const day = d.getDate() - (inclusiveEnd ? 0 : 1);
+  return d.getMonth() + day / daysInMonth;
 };
 
 const periodLabel = (g) => {
@@ -347,6 +352,15 @@ export default function GoalsWithGantt() {
           <div style={S.ganttTitle}>{YEAR} · Weekly Timeline</div>
           {/* Item 6: flex-wrap on multi-select chips */}
           <div style={S.ganttMultiSelect}>
+            {(() => {
+              const allOn = PILLAR_NAMES.every((n) => ganttPillars.includes(n));
+              return (
+                <button onClick={() => setGanttPillars(allOn ? [] : [...PILLAR_NAMES])}
+                  style={{ ...S.msChip, ...(allOn ? { background: "#26241F", color: "#fff", borderColor: "#26241F" } : {}) }}>
+                  All
+                </button>
+              );
+            })()}
             {PILLAR_NAMES.map((name) => {
               const on = ganttPillars.includes(name);
               return (
@@ -372,8 +386,8 @@ export default function GoalsWithGantt() {
               </div>
               {ganttRows.map((g) => {
                 const c = PILLARS[g.pillar].dot;
-                const startFM = toFractM(g.start_date);
-                const endFM = toFractM(g.end_date);
+                const startFM = toFractM(g.start_date, false);
+                const endFM = toFractM(g.end_date, true);
                 const left = (startFM / 12) * 100;
                 const width = Math.max(((endFM - startFM) / 12) * 100, 1.5);
                 return (

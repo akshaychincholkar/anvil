@@ -1,14 +1,76 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Optional, List
 import json
 import os
+import hmac
+import hashlib
+import base64
+import secrets
+import time
+from contextvars import ContextVar
 from datetime import date, timedelta, datetime
 
 from database import db, init_db
+
+# ── Auth (multi-user) ─────────────────────────────────────────────────────────
+SECRET_KEY = os.environ.get("ANVIL_SECRET", "anvil-dev-secret-change-in-production")
+TOKEN_TTL  = 60 * 60 * 24 * 30  # 30 days
+
+_UID: ContextVar[int] = ContextVar("uid", default=0)
+
+def cu() -> int:
+    """Current authenticated user id for this request (0 if unauthenticated)."""
+    return _UID.get()
+
+def _b64e(b: bytes) -> str:
+    return base64.urlsafe_b64encode(b).decode().rstrip("=")
+
+def _b64d(s: str) -> bytes:
+    return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
+
+def hash_password(password: str, salt: str) -> str:
+    return hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 120_000).hex()
+
+def make_token(uid: int) -> str:
+    payload = _b64e(json.dumps({"uid": uid, "exp": int(time.time()) + TOKEN_TTL}).encode())
+    sig = _b64e(hmac.new(SECRET_KEY.encode(), payload.encode(), hashlib.sha256).digest())
+    return f"{payload}.{sig}"
+
+def verify_token(token: str) -> Optional[int]:
+    try:
+        payload, sig = token.split(".")
+        expected = _b64e(hmac.new(SECRET_KEY.encode(), payload.encode(), hashlib.sha256).digest())
+        if not hmac.compare_digest(sig, expected):
+            return None
+        data = json.loads(_b64d(payload))
+        if data.get("exp", 0) < int(time.time()):
+            return None
+        return int(data["uid"])
+    except Exception:
+        return None
+
+def _bearer(request: Request) -> str:
+    auth = request.headers.get("authorization", "")
+    return auth[7:] if auth.lower().startswith("bearer ") else ""
+
+# Paths that do not require authentication.
+_PUBLIC_API = {"/api/auth/login", "/api/auth/register"}
+
+async def auth_dependency(request: Request):
+    """Global dependency: authenticate every /api route and stash the uid in a ContextVar."""
+    path = request.url.path
+    if not path.startswith("/api/"):
+        return  # SPA / static assets
+    if path in _PUBLIC_API or path.startswith("/api/auth/google"):
+        return  # public or browser-redirect OAuth (handled separately)
+    uid = verify_token(_bearer(request))
+    if not uid:
+        raise HTTPException(401, "Not authenticated")
+    _UID.set(uid)
 
 # ── Google Calendar config ────────────────────────────────────────────────────
 GOOGLE_CLIENT_ID     = os.environ.get("GOOGLE_CLIENT_ID", "")
@@ -29,8 +91,8 @@ def _gcal_client_config():
         "token_uri": "https://oauth2.googleapis.com/token",
     }}
 
-def _get_gcal_service():
-    if not GOOGLE_CLIENT_ID:
+def _get_gcal_service(uid: int):
+    if not GOOGLE_CLIENT_ID or not uid:
         return None
     try:
         from google.oauth2.credentials import Credentials
@@ -40,7 +102,7 @@ def _get_gcal_service():
         return None
     with db() as conn:
         row = conn.execute(
-            "SELECT token_json FROM oauth_token WHERE user_id=1 AND provider='google'"
+            "SELECT token_json FROM oauth_token WHERE user_id=? AND provider='google'", (uid,)
         ).fetchone()
     if not row:
         return None
@@ -49,12 +111,12 @@ def _get_gcal_service():
         creds.refresh(Request())
         with db() as conn:
             conn.execute(
-                "UPDATE oauth_token SET token_json=? WHERE user_id=1 AND provider='google'",
-                (creds.to_json(),)
+                "UPDATE oauth_token SET token_json=? WHERE user_id=? AND provider='google'",
+                (creds.to_json(), uid)
             )
     return build("calendar", "v3", credentials=creds)
 
-app = FastAPI(title="Anvil API")
+app = FastAPI(title="Anvil API", dependencies=[Depends(auth_dependency)])
 
 app.add_middleware(
     CORSMiddleware,
@@ -68,13 +130,81 @@ def startup():
     init_db()
 
 
+# ── Auth endpoints ────────────────────────────────────────────────────────────
+
+PILLAR_SEED = [
+    ("Financial", "#C9A227"), ("Academic", "#3A7CA5"), ("Relationship", "#C2536B"),
+    ("Health", "#4C9A6B"), ("Spiritual", "#8268B0"),
+]
+
+def _seed_pillars(conn, uid: int):
+    if not conn.execute("SELECT 1 FROM pillar WHERE user_id=? LIMIT 1", (uid,)).fetchone():
+        conn.executemany("INSERT INTO pillar (user_id, name, color) VALUES (?, ?, ?)",
+                         [(uid, n, c) for n, c in PILLAR_SEED])
+
+class RegisterBody(BaseModel):
+    name: str
+    email: str
+    password: str
+
+class LoginBody(BaseModel):
+    email: str
+    password: str
+
+def _user_public(row) -> dict:
+    return {"id": row["id"], "name": row["name"], "email": row["email"]}
+
+@app.post("/api/auth/register", status_code=201)
+def register(body: RegisterBody):
+    email = body.email.strip().lower()
+    if not email or not body.password:
+        raise HTTPException(400, "Email and password are required")
+    with db() as conn:
+        if conn.execute("SELECT 1 FROM user WHERE lower(email)=?", (email,)).fetchone():
+            raise HTTPException(409, "An account with this email already exists")
+        salt = secrets.token_hex(16)
+        pwhash = hash_password(body.password, salt)
+        # First account claims the legacy single-user data (user 1 has no email yet).
+        legacy = conn.execute("SELECT id FROM user WHERE id=1 AND email IS NULL").fetchone()
+        if legacy:
+            conn.execute("UPDATE user SET name=?, email=?, password_hash=?, salt=? WHERE id=1",
+                         (body.name.strip() or "Anvil User", email, pwhash, salt))
+            uid = 1
+        else:
+            cur = conn.execute("INSERT INTO user (name, email, password_hash, salt) VALUES (?,?,?,?)",
+                               (body.name.strip() or "Anvil User", email, pwhash, salt))
+            uid = cur.lastrowid
+        _seed_pillars(conn, uid)
+        row = conn.execute("SELECT id, name, email FROM user WHERE id=?", (uid,)).fetchone()
+        return {"token": make_token(uid), "user": _user_public(row)}
+
+@app.post("/api/auth/login")
+def login(body: LoginBody):
+    email = body.email.strip().lower()
+    with db() as conn:
+        row = conn.execute("SELECT id, name, email, password_hash, salt FROM user WHERE lower(email)=?", (email,)).fetchone()
+        if not row or not row["password_hash"]:
+            raise HTTPException(401, "Invalid email or password")
+        if not hmac.compare_digest(hash_password(body.password, row["salt"]), row["password_hash"]):
+            raise HTTPException(401, "Invalid email or password")
+        return {"token": make_token(row["id"]), "user": _user_public(row)}
+
+@app.get("/api/auth/me")
+def auth_me():
+    with db() as conn:
+        row = conn.execute("SELECT id, name, email FROM user WHERE id=?", (cu(),)).fetchone()
+        if not row:
+            raise HTTPException(404)
+        return _user_public(row)
+
+
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
 def row_dict(row) -> dict:
     return dict(row) if row else {}
 
 def pillar_id(conn, name: str) -> int:
-    row = conn.execute("SELECT id FROM pillar WHERE user_id=1 AND name=?", (name,)).fetchone()
+    row = conn.execute(f"SELECT id FROM pillar WHERE user_id={cu()} AND name=?", (name,)).fetchone()
     if not row:
         raise HTTPException(400, f"Unknown pillar: {name}")
     return row[0]
@@ -94,7 +224,7 @@ def _restore(conn, table: str, id_val: int, id_col: str = "id"):
 @app.get("/api/pillars")
 def get_pillars():
     with db() as conn:
-        rows = conn.execute("SELECT id, name, color FROM pillar WHERE user_id=1").fetchall()
+        rows = conn.execute(f"SELECT id, name, color FROM pillar WHERE user_id={cu()}").fetchall()
         return [row_dict(r) for r in rows]
 
 
@@ -104,21 +234,29 @@ def get_pillars():
 def google_status():
     with db() as conn:
         row = conn.execute(
-            "SELECT id FROM oauth_token WHERE user_id=1 AND provider='google'"
+            "SELECT id FROM oauth_token WHERE user_id=? AND provider='google'", (cu(),)
         ).fetchone()
     return {"connected": row is not None, "configured": bool(GOOGLE_CLIENT_ID)}
 
 @app.get("/api/auth/google")
-def google_auth():
+def google_auth(token: str = ""):
+    # Browser navigation (no Authorization header) → carry the app token in the query,
+    # then embed the verified uid in the OAuth `state` so the callback knows the user.
+    uid = verify_token(token)
+    if not uid:
+        raise HTTPException(401, "Not authenticated")
     from google_auth_oauthlib.flow import Flow
     flow = Flow.from_client_config(_gcal_client_config(), scopes=GCAL_SCOPES)
     flow.redirect_uri = GCAL_REDIRECT
-    auth_url, _ = flow.authorization_url(access_type="offline", prompt="consent")
+    auth_url, _ = flow.authorization_url(access_type="offline", prompt="consent", state=make_token(uid))
     return RedirectResponse(auth_url)
 
 @app.get("/api/auth/google/callback")
 def google_callback(code: str, state: Optional[str] = None, error: Optional[str] = None):
     if error:
+        return RedirectResponse("/?gcal=error")
+    uid = verify_token(state or "")
+    if not uid:
         return RedirectResponse("/?gcal=error")
     from google_auth_oauthlib.flow import Flow
     flow = Flow.from_client_config(_gcal_client_config(), scopes=GCAL_SCOPES)
@@ -127,15 +265,15 @@ def google_callback(code: str, state: Optional[str] = None, error: Optional[str]
     creds = flow.credentials
     with db() as conn:
         conn.execute(
-            "INSERT OR REPLACE INTO oauth_token (user_id, provider, token_json) VALUES (1, 'google', ?)",
-            (creds.to_json(),)
+            "INSERT OR REPLACE INTO oauth_token (user_id, provider, token_json) VALUES (?, 'google', ?)",
+            (uid, creds.to_json())
         )
     return RedirectResponse("/?gcal=connected")
 
 @app.delete("/api/auth/google", status_code=204)
 def google_disconnect():
     with db() as conn:
-        conn.execute("DELETE FROM oauth_token WHERE user_id=1 AND provider='google'")
+        conn.execute("DELETE FROM oauth_token WHERE user_id=? AND provider='google'", (cu(),))
 
 
 # ── Tasks (Screen 1) ─────────────────────────────────────────────────────────
@@ -155,15 +293,16 @@ class TaskUpdate(BaseModel):
     status: Optional[str] = None
     gcal_event_id: Optional[str] = None
 
-_TASK_SELECT = """
+def _task_sql():
+    return f"""
     SELECT t.id, p.name AS pillar, t.title, t.quadrant,
            t.time_estimate_min, t.gcal_event_id, t.status, t.start_datetime
     FROM task t JOIN pillar p ON t.pillar_id=p.id
-    WHERE t.id=? AND t.user_id=1 AND t.deleted_at IS NULL
+    WHERE t.id=? AND t.user_id={cu()} AND t.deleted_at IS NULL
 """
 
 def _task(conn, task_id: int) -> dict:
-    row = conn.execute(_TASK_SELECT, (task_id,)).fetchone()
+    row = conn.execute(_task_sql(), (task_id,)).fetchone()
     if not row:
         raise HTTPException(404, "Task not found")
     return row_dict(row)
@@ -171,11 +310,11 @@ def _task(conn, task_id: int) -> dict:
 @app.get("/api/tasks")
 def get_tasks():
     with db() as conn:
-        rows = conn.execute("""
+        rows = conn.execute(f"""
             SELECT t.id, p.name AS pillar, t.title, t.quadrant,
                    t.time_estimate_min, t.gcal_event_id, t.status, t.start_datetime
             FROM task t JOIN pillar p ON t.pillar_id=p.id
-            WHERE t.user_id=1 AND t.status='active' AND t.deleted_at IS NULL
+            WHERE t.user_id={cu()} AND t.status='active' AND t.deleted_at IS NULL
             ORDER BY t.created_at
         """).fetchall()
         return [row_dict(r) for r in rows]
@@ -184,7 +323,7 @@ def get_tasks():
 def create_task(body: TaskCreate):
     gcal_event_id = None
     if body.start_datetime:
-        service = _get_gcal_service()
+        service = _get_gcal_service(cu())
         if service:
             try:
                 symbol = QUAD_SYMBOL.get(body.quadrant, "")
@@ -202,7 +341,7 @@ def create_task(body: TaskCreate):
     with db() as conn:
         pid = pillar_id(conn, body.pillar)
         cur = conn.execute(
-            "INSERT INTO task (user_id,pillar_id,title,quadrant,time_estimate_min,start_datetime,gcal_event_id) VALUES (1,?,?,?,?,?,?)",
+            f"INSERT INTO task (user_id,pillar_id,title,quadrant,time_estimate_min,start_datetime,gcal_event_id) VALUES ({cu()},?,?,?,?,?,?)",
             (pid, body.title, body.quadrant, body.time_estimate_min, body.start_datetime, gcal_event_id)
         )
         return _task(conn, cur.lastrowid)
@@ -210,7 +349,7 @@ def create_task(body: TaskCreate):
 @app.put("/api/tasks/{task_id}")
 def update_task(task_id: int, body: TaskUpdate):
     with db() as conn:
-        if not conn.execute("SELECT id FROM task WHERE id=? AND user_id=1 AND deleted_at IS NULL", (task_id,)).fetchone():
+        if not conn.execute(f"SELECT id FROM task WHERE id=? AND user_id={cu()} AND deleted_at IS NULL", (task_id,)).fetchone():
             raise HTTPException(404, "Task not found")
         updates = {k: v for k, v in body.dict().items() if v is not None}
         if "pillar" in updates:
@@ -234,7 +373,7 @@ def restore_task(task_id: int):
 @app.put("/api/tasks/{task_id}/schedule")
 def schedule_task(task_id: int):
     with db() as conn:
-        conn.execute("UPDATE task SET gcal_event_id='pending' WHERE id=? AND user_id=1", (task_id,))
+        conn.execute(f"UPDATE task SET gcal_event_id='pending' WHERE id=? AND user_id={cu()}", (task_id,))
         return _task(conn, task_id)
 
 
@@ -254,15 +393,16 @@ class GoalUpdate(BaseModel):
     start_date: Optional[str] = None
     end_date: Optional[str] = None
 
-_GOAL_SELECT = """
+def _goal_sql():
+    return f"""
     SELECT g.id, p.name AS pillar, g.title, g.horizon,
            g.parent_goal_id, g.start_date, g.end_date
     FROM goal g JOIN pillar p ON g.pillar_id=p.id
-    WHERE g.id=? AND g.user_id=1 AND g.deleted_at IS NULL
+    WHERE g.id=? AND g.user_id={cu()} AND g.deleted_at IS NULL
 """
 
 def _goal(conn, goal_id: int) -> dict:
-    row = conn.execute(_GOAL_SELECT, (goal_id,)).fetchone()
+    row = conn.execute(_goal_sql(), (goal_id,)).fetchone()
     if not row:
         raise HTTPException(404, "Goal not found")
     return row_dict(row)
@@ -271,18 +411,18 @@ def _goal(conn, goal_id: int) -> dict:
 def get_goals(pillar: Optional[str] = None):
     with db() as conn:
         if pillar:
-            rows = conn.execute("""
+            rows = conn.execute(f"""
                 SELECT g.id, p.name AS pillar, g.title, g.horizon,
                        g.parent_goal_id, g.start_date, g.end_date
                 FROM goal g JOIN pillar p ON g.pillar_id=p.id
-                WHERE g.user_id=1 AND p.name=? AND g.deleted_at IS NULL ORDER BY g.start_date
+                WHERE g.user_id={cu()} AND p.name=? AND g.deleted_at IS NULL ORDER BY g.start_date
             """, (pillar,)).fetchall()
         else:
-            rows = conn.execute("""
+            rows = conn.execute(f"""
                 SELECT g.id, p.name AS pillar, g.title, g.horizon,
                        g.parent_goal_id, g.start_date, g.end_date
                 FROM goal g JOIN pillar p ON g.pillar_id=p.id
-                WHERE g.user_id=1 AND g.deleted_at IS NULL ORDER BY g.start_date
+                WHERE g.user_id={cu()} AND g.deleted_at IS NULL ORDER BY g.start_date
             """).fetchall()
         return [row_dict(r) for r in rows]
 
@@ -291,7 +431,7 @@ def create_goal(body: GoalCreate):
     with db() as conn:
         pid = pillar_id(conn, body.pillar)
         cur = conn.execute(
-            "INSERT INTO goal (user_id,pillar_id,title,horizon,parent_goal_id,start_date,end_date) VALUES (1,?,?,?,?,?,?)",
+            f"INSERT INTO goal (user_id,pillar_id,title,horizon,parent_goal_id,start_date,end_date) VALUES ({cu()},?,?,?,?,?,?)",
             (pid, body.title, body.horizon, body.parent_goal_id, body.start_date, body.end_date)
         )
         return _goal(conn, cur.lastrowid)
@@ -310,7 +450,7 @@ def update_goal(goal_id: int, body: GoalUpdate):
             updates["end_date"] = body.end_date
         if updates:
             sets = ", ".join(f"{k}=?" for k in updates)
-            conn.execute(f"UPDATE goal SET {sets} WHERE id=? AND user_id=1", (*updates.values(), goal_id))
+            conn.execute(f"UPDATE goal SET {sets} WHERE id=? AND user_id={cu()}", (*updates.values(), goal_id))
         return _goal(conn, goal_id)
 
 @app.delete("/api/goals/{goal_id}", status_code=204)
@@ -372,11 +512,11 @@ def _streak(logs: list) -> int:
     return s
 
 def _habit_full(conn, habit_id: int) -> dict:
-    h = conn.execute("""
+    h = conn.execute(f"""
         SELECT h.id, p.name AS pillar, h.name, h.target_per_week, h.reminder_time,
                h.type, h.target_count, h.period
         FROM habit h JOIN pillar p ON h.pillar_id=p.id
-        WHERE h.id=? AND h.user_id=1 AND h.deleted_at IS NULL
+        WHERE h.id=? AND h.user_id={cu()} AND h.deleted_at IS NULL
     """, (habit_id,)).fetchone()
     if not h:
         raise HTTPException(404, "Habit not found")
@@ -400,7 +540,7 @@ def _habit_full(conn, habit_id: int) -> dict:
 def get_habits():
     with db() as conn:
         habits = conn.execute(
-            "SELECT h.id FROM habit h WHERE h.user_id=1 AND h.deleted_at IS NULL ORDER BY h.id"
+            f"SELECT h.id FROM habit h WHERE h.user_id={cu()} AND h.deleted_at IS NULL ORDER BY h.id"
         ).fetchall()
         return [_habit_full(conn, h["id"]) for h in habits]
 
@@ -409,7 +549,7 @@ def create_habit(body: HabitCreate):
     with db() as conn:
         pid = pillar_id(conn, body.pillar)
         cur = conn.execute(
-            "INSERT INTO habit (user_id,pillar_id,name,target_per_week,type,target_count,period) VALUES (1,?,?,?,?,?,?)",
+            f"INSERT INTO habit (user_id,pillar_id,name,target_per_week,type,target_count,period) VALUES ({cu()},?,?,?,?,?,?)",
             (pid, body.name, body.target_per_week, body.type, body.target_count, body.period)
         )
         return _habit_full(conn, cur.lastrowid)
@@ -420,7 +560,7 @@ def update_habit(habit_id: int, body: HabitUpdate):
         updates = {k: v for k, v in body.dict().items() if v is not None}
         if updates:
             sets = ", ".join(f"{k}=?" for k in updates)
-            conn.execute(f"UPDATE habit SET {sets} WHERE id=? AND user_id=1", (*updates.values(), habit_id))
+            conn.execute(f"UPDATE habit SET {sets} WHERE id=? AND user_id={cu()}", (*updates.values(), habit_id))
         return _habit_full(conn, habit_id)
 
 @app.delete("/api/habits/{habit_id}", status_code=204)
@@ -464,7 +604,7 @@ def set_habit_log_count(habit_id: int, log_date: str, body: HabitLogCount):
     minimum → done when count >= target; maximum → done when 0 < count <= target."""
     with db() as conn:
         h = conn.execute(
-            "SELECT type, target_count FROM habit WHERE id=? AND user_id=1", (habit_id,)
+            f"SELECT type, target_count FROM habit WHERE id=? AND user_id={cu()}", (habit_id,)
         ).fetchone()
         if not h:
             raise HTTPException(404, "Habit not found")
@@ -504,7 +644,7 @@ def get_habits_yearly(year: int):
     with db() as conn:
         habits = conn.execute(
             "SELECT h.id, h.name, h.target_per_week, h.type, h.target_count, h.period "
-            "FROM habit h WHERE h.user_id=1 AND h.deleted_at IS NULL ORDER BY h.id"
+            f"FROM habit h WHERE h.user_id={cu()} AND h.deleted_at IS NULL ORDER BY h.id"
         ).fetchall()
         result = []
         for h in habits:
@@ -533,11 +673,11 @@ class BulletCreate(BaseModel):
 
 def _journal_full(conn, entry_date: str) -> dict:
     entry = conn.execute(
-        "SELECT id, date, mood FROM journal_entry WHERE user_id=1 AND date=? AND deleted_at IS NULL",
+        f"SELECT id, date, mood FROM journal_entry WHERE user_id={cu()} AND date=? AND deleted_at IS NULL",
         (entry_date,)
     ).fetchone()
     if not entry:
-        cur = conn.execute("INSERT INTO journal_entry (user_id,date) VALUES (1,?)", (entry_date,))
+        cur = conn.execute(f"INSERT INTO journal_entry (user_id,date) VALUES ({cu()},?)", (entry_date,))
         entry_id = cur.lastrowid
         mood = None
     else:
@@ -558,7 +698,7 @@ def get_journal_history(year: int, month: int):
     with db() as conn:
         pattern = f"{year}-{str(month).zfill(2)}-%"
         rows = conn.execute(
-            "SELECT date, mood FROM journal_entry WHERE user_id=1 AND date LIKE ? AND mood IS NOT NULL AND deleted_at IS NULL",
+            f"SELECT date, mood FROM journal_entry WHERE user_id={cu()} AND date LIKE ? AND mood IS NOT NULL AND deleted_at IS NULL",
             (pattern,)
         ).fetchall()
         return {r["date"]: r["mood"] for r in rows}
@@ -572,12 +712,12 @@ def get_journal_entry(entry_date: str):
 def update_journal_mood(entry_date: str, body: MoodUpdate):
     with db() as conn:
         existing = conn.execute(
-            "SELECT id FROM journal_entry WHERE user_id=1 AND date=? AND deleted_at IS NULL", (entry_date,)
+            f"SELECT id FROM journal_entry WHERE user_id={cu()} AND date=? AND deleted_at IS NULL", (entry_date,)
         ).fetchone()
         if existing:
             conn.execute("UPDATE journal_entry SET mood=? WHERE id=?", (body.mood, existing["id"]))
         else:
-            conn.execute("INSERT INTO journal_entry (user_id,date,mood) VALUES (1,?,?)", (entry_date, body.mood))
+            conn.execute(f"INSERT INTO journal_entry (user_id,date,mood) VALUES ({cu()},?,?)", (entry_date, body.mood))
         return _journal_full(conn, entry_date)
 
 @app.post("/api/journal/{entry_date}/bullets", status_code=201)
@@ -613,15 +753,15 @@ class StageComplete(BaseModel):
     stage: str
 
 def _skill_full(conn, skill_id: int) -> dict:
-    row = conn.execute("""
+    row = conn.execute(f"""
         SELECT s.id, p.name AS pillar, s.title, s.source_type, s.stage, s.completed_stages
         FROM skill s JOIN pillar p ON s.pillar_id=p.id
-        WHERE s.id=? AND s.user_id=1 AND s.deleted_at IS NULL
+        WHERE s.id=? AND s.user_id={cu()} AND s.deleted_at IS NULL
     """, (skill_id,)).fetchone()
     if not row:
         raise HTTPException(404, "Skill not found")
     notes_raw = conn.execute(
-        "SELECT id, stage, text, created_at FROM skill_note WHERE skill_id=? ORDER BY stage, id",
+        "SELECT id, stage, text, done, created_at FROM skill_note WHERE skill_id=? ORDER BY stage, id",
         (skill_id,)
     ).fetchall()
     d = row_dict(row)
@@ -631,7 +771,7 @@ def _skill_full(conn, skill_id: int) -> dict:
         d["completed_stages"] = {}
     notes_by_stage = {s: [] for s in STAGE_ORDER}
     for n in notes_raw:
-        notes_by_stage[n["stage"]].append({"id": n["id"], "text": n["text"]})
+        notes_by_stage[n["stage"]].append({"id": n["id"], "text": n["text"], "done": bool(n["done"])})
     d["notes"] = notes_by_stage
     return d
 
@@ -639,7 +779,7 @@ def _skill_full(conn, skill_id: int) -> dict:
 def get_skills():
     with db() as conn:
         rows = conn.execute(
-            "SELECT id FROM skill WHERE user_id=1 AND deleted_at IS NULL ORDER BY id"
+            f"SELECT id FROM skill WHERE user_id={cu()} AND deleted_at IS NULL ORDER BY id"
         ).fetchall()
         return [_skill_full(conn, r["id"]) for r in rows]
 
@@ -648,7 +788,7 @@ def create_skill(body: SkillCreate):
     with db() as conn:
         pid = pillar_id(conn, body.pillar)
         cur = conn.execute(
-            "INSERT INTO skill (user_id,pillar_id,title,source_type,stage,completed_stages) VALUES (1,?,?,?,'D','{}')",
+            f"INSERT INTO skill (user_id,pillar_id,title,source_type,stage,completed_stages) VALUES ({cu()},?,?,?,'D','{{}}')",
             (pid, body.title, body.source_type)
         )
         return _skill_full(conn, cur.lastrowid)
@@ -657,7 +797,7 @@ def create_skill(body: SkillCreate):
 def update_skill(skill_id: int, body: dict):
     with db() as conn:
         if "stage" in body:
-            conn.execute("UPDATE skill SET stage=? WHERE id=? AND user_id=1", (body["stage"], skill_id))
+            conn.execute(f"UPDATE skill SET stage=? WHERE id=? AND user_id={cu()}", (body["stage"], skill_id))
         return _skill_full(conn, skill_id)
 
 @app.delete("/api/skills/{skill_id}", status_code=204)
@@ -685,11 +825,21 @@ def delete_skill_note(note_id: int):
     with db() as conn:
         conn.execute("DELETE FROM skill_note WHERE id=?", (note_id,))
 
+@app.put("/api/skill-notes/{note_id}/toggle")
+def toggle_skill_note(note_id: int):
+    """Flip a checklist item's done state (used for the Wisdom checklist)."""
+    with db() as conn:
+        row = conn.execute("SELECT skill_id, done FROM skill_note WHERE id=?", (note_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Note not found")
+        conn.execute("UPDATE skill_note SET done=? WHERE id=?", (0 if row["done"] else 1, note_id))
+        return _skill_full(conn, row["skill_id"])
+
 @app.post("/api/skills/{skill_id}/complete-stage")
 def complete_skill_stage(skill_id: int, body: StageComplete):
     with db() as conn:
         row = conn.execute(
-            "SELECT stage, completed_stages FROM skill WHERE id=? AND user_id=1 AND deleted_at IS NULL",
+            f"SELECT stage, completed_stages FROM skill WHERE id=? AND user_id={cu()} AND deleted_at IS NULL",
             (skill_id,)
         ).fetchone()
         if not row:
@@ -706,7 +856,7 @@ def complete_skill_stage(skill_id: int, body: StageComplete):
         if stage_idx == cur_idx and cur_idx < len(STAGE_ORDER) - 1:
             new_stage = STAGE_ORDER[cur_idx + 1]
         conn.execute(
-            "UPDATE skill SET completed_stages=?, stage=? WHERE id=? AND user_id=1",
+            f"UPDATE skill SET completed_stages=?, stage=? WHERE id=? AND user_id={cu()}",
             (json.dumps(completed), new_stage, skill_id)
         )
         return _skill_full(conn, skill_id)
@@ -735,7 +885,7 @@ class InsightCreate(BaseModel):
 
 def _scripture_full(conn, scripture_id: int) -> dict:
     sc = conn.execute(
-        "SELECT * FROM scripture WHERE id=? AND user_id=1 AND deleted_at IS NULL", (scripture_id,)
+        f"SELECT * FROM scripture WHERE id=? AND user_id={cu()} AND deleted_at IS NULL", (scripture_id,)
     ).fetchone()
     if not sc:
         raise HTTPException(404, "Scripture not found")
@@ -760,7 +910,7 @@ def _scripture_full(conn, scripture_id: int) -> dict:
 def get_scriptures():
     with db() as conn:
         ids = conn.execute(
-            "SELECT id FROM scripture WHERE user_id=1 AND deleted_at IS NULL ORDER BY id"
+            f"SELECT id FROM scripture WHERE user_id={cu()} AND deleted_at IS NULL ORDER BY id"
         ).fetchall()
         return [_scripture_full(conn, r["id"]) for r in ids]
 
@@ -768,7 +918,7 @@ def get_scriptures():
 def create_scripture(body: ScriptureCreate):
     with db() as conn:
         cur = conn.execute(
-            "INSERT INTO scripture (user_id,name,color) VALUES (1,?,?)", (body.name, body.color)
+            f"INSERT INTO scripture (user_id,name,color) VALUES ({cu()},?,?)", (body.name, body.color)
         )
         return _scripture_full(conn, cur.lastrowid)
 
@@ -841,10 +991,10 @@ class TopicCreate(BaseModel):
     intervals: List[int] = [1, 3, 7, 15, 30]
 
 def _topic_full(conn, topic_id: int) -> dict:
-    t = conn.execute("""
+    t = conn.execute(f"""
         SELECT rt.id, p.name AS pillar, rt.topic, rt.learned_date, rt.intervals
         FROM revision_topic rt JOIN pillar p ON rt.pillar_id=p.id
-        WHERE rt.id=? AND rt.user_id=1 AND rt.deleted_at IS NULL
+        WHERE rt.id=? AND rt.user_id={cu()} AND rt.deleted_at IS NULL
     """, (topic_id,)).fetchone()
     if not t:
         raise HTTPException(404, "Topic not found")
@@ -861,7 +1011,7 @@ def _topic_full(conn, topic_id: int) -> dict:
 def get_topics():
     with db() as conn:
         ids = conn.execute(
-            "SELECT id FROM revision_topic WHERE user_id=1 AND deleted_at IS NULL ORDER BY learned_date DESC"
+            f"SELECT id FROM revision_topic WHERE user_id={cu()} AND deleted_at IS NULL ORDER BY learned_date DESC"
         ).fetchall()
         return [_topic_full(conn, r["id"]) for r in ids]
 
@@ -871,7 +1021,7 @@ def create_topic(body: TopicCreate):
         pid = pillar_id(conn, body.pillar)
         learned = body.learned_date or str(date.today())
         cur = conn.execute(
-            "INSERT INTO revision_topic (user_id,pillar_id,topic,learned_date,intervals) VALUES (1,?,?,?,?)",
+            f"INSERT INTO revision_topic (user_id,pillar_id,topic,learned_date,intervals) VALUES ({cu()},?,?,?,?)",
             (pid, body.topic, learned, json.dumps(body.intervals))
         )
         topic_id = cur.lastrowid
@@ -898,14 +1048,14 @@ def restore_topic(topic_id: int):
 def get_due_today():
     with db() as conn:
         today = str(date.today())
-        rows = conn.execute("""
+        rows = conn.execute(f"""
             SELECT r.id AS review_id, r.topic_id, rt.topic, p.name AS pillar,
                    r.stage, r.due_date, r.done,
                    (SELECT COUNT(*) FROM review r2 WHERE r2.topic_id=r.topic_id) AS total_stages
             FROM review r
             JOIN revision_topic rt ON r.topic_id=rt.id AND rt.deleted_at IS NULL
             JOIN pillar p ON rt.pillar_id=p.id
-            WHERE r.done=0 AND r.due_date<=? AND rt.user_id=1
+            WHERE r.done=0 AND r.due_date<=? AND rt.user_id={cu()}
             ORDER BY r.due_date, rt.topic
         """, (today,)).fetchall()
         result = []
@@ -919,10 +1069,10 @@ def get_due_today():
 def get_revision_calendar(year: int, month: int):
     with db() as conn:
         pattern = f"{year}-{str(month).zfill(2)}-%"
-        rows = conn.execute("""
+        rows = conn.execute(f"""
             SELECT r.due_date, COUNT(*) AS count
             FROM review r JOIN revision_topic rt ON r.topic_id=rt.id AND rt.deleted_at IS NULL
-            WHERE rt.user_id=1 AND r.due_date LIKE ? AND r.done=0
+            WHERE rt.user_id={cu()} AND r.due_date LIKE ? AND r.done=0
             GROUP BY r.due_date
         """, (pattern,)).fetchall()
         return {r["due_date"]: r["count"] for r in rows}
@@ -937,6 +1087,63 @@ def toggle_review_done(review_id: int):
         return _topic_full(conn, row["topic_id"])
 
 
+# ── Affirmations (Screen 8) ───────────────────────────────────────────────────
+
+class AffirmationCreate(BaseModel):
+    text: str
+    category: str = "Motivational"
+
+class AffirmationUpdate(BaseModel):
+    text: Optional[str] = None
+    category: Optional[str] = None
+    favorite: Optional[bool] = None
+
+@app.get("/api/affirmations")
+def get_affirmations():
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT id, category, text, favorite FROM affirmation "
+            f"WHERE user_id={cu()} AND deleted_at IS NULL ORDER BY category, id"
+        ).fetchall()
+        return [{"id": r["id"], "category": r["category"], "text": r["text"], "favorite": bool(r["favorite"])} for r in rows]
+
+@app.post("/api/affirmations", status_code=201)
+def create_affirmation(body: AffirmationCreate):
+    with db() as conn:
+        cur = conn.execute(
+            f"INSERT INTO affirmation (user_id, category, text) VALUES ({cu()}, ?, ?)",
+            (body.category, body.text)
+        )
+        r = conn.execute("SELECT id, category, text, favorite FROM affirmation WHERE id=?", (cur.lastrowid,)).fetchone()
+        return {"id": r["id"], "category": r["category"], "text": r["text"], "favorite": bool(r["favorite"])}
+
+@app.put("/api/affirmations/{aff_id}")
+def update_affirmation(aff_id: int, body: AffirmationUpdate):
+    with db() as conn:
+        updates = {k: v for k, v in body.dict().items() if v is not None}
+        if "favorite" in updates:
+            updates["favorite"] = 1 if updates["favorite"] else 0
+        if updates:
+            sets = ", ".join(f"{k}=?" for k in updates)
+            conn.execute(f"UPDATE affirmation SET {sets} WHERE id=? AND user_id={cu()}", (*updates.values(), aff_id))
+        r = conn.execute("SELECT id, category, text, favorite FROM affirmation WHERE id=?", (aff_id,)).fetchone()
+        if not r:
+            raise HTTPException(404)
+        return {"id": r["id"], "category": r["category"], "text": r["text"], "favorite": bool(r["favorite"])}
+
+@app.delete("/api/affirmations/{aff_id}", status_code=204)
+def delete_affirmation(aff_id: int):
+    with db() as conn:
+        _soft_delete(conn, "affirmation", aff_id)
+
+@app.post("/api/affirmations/{aff_id}/restore")
+def restore_affirmation(aff_id: int):
+    with db() as conn:
+        _restore(conn, "affirmation", aff_id)
+        r = conn.execute("SELECT id, category, text, favorite FROM affirmation WHERE id=?", (aff_id,)).fetchone()
+        return {"id": r["id"], "category": r["category"], "text": r["text"], "favorite": bool(r["favorite"])} if r else {}
+
+
 # ── Serve React frontend (must be last) ──────────────────────────────────────
 
 if os.path.isdir(DIST):
@@ -944,4 +1151,10 @@ if os.path.isdir(DIST):
 
     @app.get("/{full_path:path}", include_in_schema=False)
     def serve_spa(full_path: str):
+        # Serve real static files copied from Vite's public/ (images, etc.);
+        # fall back to index.html for client-side SPA routes.
+        if full_path:
+            candidate = os.path.normpath(os.path.join(DIST, full_path))
+            if candidate.startswith(os.path.normpath(DIST)) and os.path.isfile(candidate):
+                return FileResponse(candidate)
         return FileResponse(os.path.join(DIST, "index.html"))

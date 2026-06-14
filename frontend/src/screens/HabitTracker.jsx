@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Pencil, Plus, Bell, Check, Flame, LayoutGrid, Menu, X, MoreHorizontal, FileText, Link2 } from "lucide-react";
+import { Pencil, Plus, Bell, Check, Flame, LayoutGrid, Menu, X, MoreHorizontal, FileText, Link2, ChevronLeft, ChevronRight } from "lucide-react";
 import { api } from "../api.js";
 import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
 import UndoToast from "../components/UndoToast.jsx";
@@ -17,12 +17,13 @@ const MONTHS_SHORT = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct
 const toISO = (d) => d.toISOString().slice(0, 10);
 const todayISO = () => toISO(new Date());
 
-const getWeekDates = () => {
+// weekOffset: 0 = current week, -1 = last week, +1 = next week …
+const getWeekDates = (weekOffset = 0) => {
   const today = new Date();
   const dow = today.getDay();
-  const offset = dow === 0 ? -6 : 1 - dow;
+  const mondayOffset = dow === 0 ? -6 : 1 - dow;
   const monday = new Date(today);
-  monday.setDate(today.getDate() + offset);
+  monday.setDate(today.getDate() + mondayOffset + weekOffset * 7);
   return Array.from({ length: 7 }, (_, i) => {
     const d = new Date(monday);
     d.setDate(monday.getDate() + i);
@@ -30,19 +31,24 @@ const getWeekDates = () => {
   });
 };
 
-const monthStart = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); };
-const daysInCurrentMonth = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(); };
-const monthStartOffset = () => { const dow = monthStart().getDay(); return dow === 0 ? 6 : dow - 1; };
-const monthDates = () => {
-  const d = new Date(); const y = d.getFullYear(); const m = d.getMonth(); const days = daysInCurrentMonth();
-  return Array.from({ length: days }, (_, i) => `${y}-${String(m+1).padStart(2,"0")}-${String(i+1).padStart(2,"0")}`);
+// monthOffset: 0 = current month, -1 = last month …
+const getMonthInfo = (monthOffset = 0) => {
+  const base = new Date();
+  const d = new Date(base.getFullYear(), base.getMonth() + monthOffset, 1);
+  const year = d.getFullYear();
+  const month = d.getMonth();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const dow = d.getDay();
+  const startOffset = dow === 0 ? 6 : dow - 1;
+  const dates = Array.from({ length: daysInMonth }, (_, i) =>
+    `${year}-${String(month + 1).padStart(2, "0")}-${String(i + 1).padStart(2, "0")}`);
+  const label = d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  return { dates, startOffset, label, year, month };
 };
 
-const MONTH_LABEL = new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" });
-const WEEK_DATES = getWeekDates();
+const fmtShort = (iso) => new Date(iso + "T00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
+
 const TODAY = todayISO();
-const MONTH_DATES = monthDates();
-const MONTH_OFFSET = monthStartOffset();
 const THIS_YEAR = new Date().getFullYear();
 
 export default function HabitTracker() {
@@ -302,11 +308,20 @@ function CountPopup({ habit, date, initialCount, initialNote, onSave, onClear, o
 }
 
 function AllHabitsWeekly({ habits, dayAction, logSet, onDelete, onEdit }) {
+  const [weekOffset, setWeekOffset] = useState(0);
+  const weekDates = getWeekDates(weekOffset);
+  const weekLabel = `${fmtShort(weekDates[0])} – ${fmtShort(weekDates[6])}${weekOffset === 0 ? " · This week" : ""}`;
   return (
     <div>
       <div style={S.mainHead}>
         <div style={S.eyebrow}>Weekly view</div>
         <h1 style={S.h1}>All Habits</h1>
+      </div>
+      <div style={S.navBar}>
+        <button onClick={() => setWeekOffset((o) => o - 1)} style={S.navBtn}><ChevronLeft size={16} /></button>
+        <span style={S.navLabel}>{weekLabel}</span>
+        <button onClick={() => setWeekOffset((o) => Math.min(0, o + 1))} disabled={weekOffset >= 0}
+          style={{ ...S.navBtn, ...(weekOffset >= 0 ? S.navBtnDisabled : {}) }}><ChevronRight size={16} /></button>
       </div>
       <div style={S.weekCard}>
         <div style={S.weekHeadRow}>
@@ -314,8 +329,8 @@ function AllHabitsWeekly({ habits, dayAction, logSet, onDelete, onEdit }) {
           {DAYS.map((d, i) => (
             <div key={d} style={S.weekDayHead}>
               <span style={S.weekDayName}>{d}</span>
-              <span style={{ ...S.weekDayNum, ...(WEEK_DATES[i] === TODAY ? S.weekDayToday : {}) }}>
-                {new Date(WEEK_DATES[i] + "T00:00").getDate()}
+              <span style={{ ...S.weekDayNum, ...(weekDates[i] === TODAY ? S.weekDayToday : {}) }}>
+                {new Date(weekDates[i] + "T00:00").getDate()}
               </span>
             </div>
           ))}
@@ -326,10 +341,25 @@ function AllHabitsWeekly({ habits, dayAction, logSet, onDelete, onEdit }) {
           const c = PILLARS[h.pillar]?.dot || "#9A968C";
           const soft = PILLARS[h.pillar]?.soft || "rgba(0,0,0,0.05)";
           const logs = logSet(h);
-          // "N times a week" chain: whole week connects once the weekly target is met.
-          const isWeekChain = h.type === "minimum" && h.period === "week";
-          const weekDone = WEEK_DATES.filter((d) => logs.has(d)).length;
-          const weekAchieved = isWeekChain && weekDone >= (h.target_count || 0);
+          // Minimum "N times a week/month/year" chains: a day is part of a connected
+          // chain when its whole period (week, month or year) has met the target.
+          const isMinChain = h.type === "minimum" && ["week", "month", "year"].includes(h.period);
+          const target = h.target_count || 0;
+          const allLogs = h.logs || [];
+          const monthCount = (ym) => allLogs.filter((d) => d.slice(0, 7) === ym).length;
+          const yearCount = (y) => allLogs.filter((d) => d.slice(0, 4) === y).length;
+          const weekDone = weekDates.filter((d) => logs.has(d)).length;
+          const cellAchieved = (dateStr) => {
+            if (!isMinChain) return false;
+            if (h.period === "week") return weekDone >= target;
+            if (h.period === "month") return monthCount(dateStr.slice(0, 7)) >= target;
+            if (h.period === "year") return yearCount(dateStr.slice(0, 4)) >= target;
+            return false;
+          };
+          const rowAchieved = isMinChain && weekDates.some(cellAchieved);
+          const periodCount = h.period === "week" ? weekDone
+            : h.period === "month" ? monthCount(weekDates[0].slice(0, 7))
+            : h.period === "year" ? yearCount(weekDates[0].slice(0, 4)) : 0;
           return (
             <div key={h.id} style={S.weekRow}>
               <div style={{ ...S.weekNameCol, flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
@@ -346,17 +376,20 @@ function AllHabitsWeekly({ habits, dayAction, logSet, onDelete, onEdit }) {
                 )}
               </div>
 
-              {WEEK_DATES.map((dateStr, di) => {
+              {weekDates.map((dateStr, di) => {
                 const done = logs.has(dateStr);
                 const future = dateStr > TODAY;
                 const isPerDayCount = (h.type === "minimum" || h.type === "maximum") && h.period === "day";
                 const count = h.log_counts?.[dateStr];
                 const hasCount = count !== undefined && count !== null;
                 const hasNote = !!h.log_notes?.[dateStr];
-                const filled = done || weekAchieved;
+                const ach = cellAchieved(dateStr);
+                const prevAch = di > 0 && cellAchieved(weekDates[di - 1]);
+                const nextAch = di < weekDates.length - 1 && cellAchieved(weekDates[di + 1]);
+                const filled = done || ach;
                 return (
                   <div key={dateStr} style={{ ...S.weekCell, position: "relative" }}>
-                    {weekAchieved && <span style={{ ...S.chainLine, background: c, ...(di === 0 ? { left: "50%" } : {}), ...(di === WEEK_DATES.length - 1 ? { right: "50%" } : {}) }} />}
+                    {ach && <span style={{ ...S.chainLine, background: c, left: prevAch ? 0 : "50%", right: nextAch ? 0 : "50%" }} />}
                     <button disabled={future} onClick={() => dayAction(h, dateStr)}
                       style={{
                         ...S.tick,
@@ -374,8 +407,8 @@ function AllHabitsWeekly({ habits, dayAction, logSet, onDelete, onEdit }) {
                 );
               })}
               <div style={S.weekStreakCol}>
-                {weekAchieved
-                  ? <span style={{ ...S.streakPill, background: soft, color: c }}><Link2 size={12} /> {weekDone}/{h.target_count}</span>
+                {rowAchieved
+                  ? <span style={{ ...S.streakPill, background: soft, color: c }}><Link2 size={12} /> {periodCount}/{target}</span>
                   : <span style={{ ...S.streakPill, background: soft, color: c }}><Flame size={12} /> {h.streak}</span>}
               </div>
             </div>
@@ -396,21 +429,23 @@ function SingleHabitMonthly({ habit, dayAction, logSet, onDelete, onEdit, setNot
   const [menuDate, setMenuDate] = useState(null);
   const [noteInput, setNoteInput] = useState("");
   const [noteDate, setNoteDate] = useState(null);
+  const [monthOffset, setMonthOffset] = useState(0);
   const longPressTimer = useRef(null);
 
   if (!habit) return null;
   const c = PILLARS[habit.pillar]?.dot || "#9A968C";
   const soft = PILLARS[habit.pillar]?.soft || "rgba(0,0,0,0.05)";
   const logs = logSet(habit);
-  const completed = MONTH_DATES.filter((d) => d <= TODAY && logs.has(d)).length;
-  const daysPassed = MONTH_DATES.filter((d) => d <= TODAY).length;
+  const { dates: monthDates, startOffset: monthGridOffset, label: monthLabel, year: viewYear } = getMonthInfo(monthOffset);
+  const completed = monthDates.filter((d) => d <= TODAY && logs.has(d)).length;
+  const daysPassed = monthDates.filter((d) => d <= TODAY).length;
   const rate = daysPassed > 0 ? Math.round((completed / daysPassed) * 100) : 0;
 
   // "N times a month/year" chain: the whole period connects once the target is met.
   const isMonthChain = habit.type === "minimum" && (habit.period === "month" || habit.period === "year");
   const periodDone = habit.period === "year"
-    ? (habit.logs || []).filter((d) => d.startsWith(`${THIS_YEAR}-`)).length
-    : MONTH_DATES.filter((d) => logs.has(d)).length;
+    ? (habit.logs || []).filter((d) => d.startsWith(`${viewYear}-`)).length
+    : monthDates.filter((d) => logs.has(d)).length;
   const periodAchieved = isMonthChain && periodDone >= (habit.target_count || 0);
 
   const startLongPress = (dateStr) => {
@@ -447,6 +482,13 @@ function SingleHabitMonthly({ habit, dayAction, logSet, onDelete, onEdit, setNot
           : <Stat label={habit.type === "minimum" ? "Min target" : "Max allowed"} value={`${habit.target_count}/${habit.period}`} c={c} soft={soft} />}
       </div>
 
+      <div style={S.navBar}>
+        <button onClick={() => setMonthOffset((o) => o - 1)} style={S.navBtn}><ChevronLeft size={16} /></button>
+        <span style={S.navLabel}>{monthLabel}{monthOffset === 0 ? " · This month" : ""}</span>
+        <button onClick={() => setMonthOffset((o) => Math.min(0, o + 1))} disabled={monthOffset >= 0}
+          style={{ ...S.navBtn, ...(monthOffset >= 0 ? S.navBtnDisabled : {}) }}><ChevronRight size={16} /></button>
+      </div>
+
       {isMonthChain && (
         <div style={{ ...S.chainBanner, background: periodAchieved ? soft : "#F7F6F3", color: periodAchieved ? c : "#9A968C" }}>
           <Link2 size={15} />
@@ -458,13 +500,13 @@ function SingleHabitMonthly({ habit, dayAction, logSet, onDelete, onEdit, setNot
 
       <div style={S.monthCard}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-          <div style={S.monthTitle}>{MONTH_LABEL}</div>
+          <div style={S.monthTitle}>{monthLabel}</div>
           <span style={{ fontSize: 11, color: "#9A968C" }}>Long-press a day for options</span>
         </div>
         <div style={S.monthDow}>{DAYS.map((d) => <div key={d} style={S.monthDowCell}>{d}</div>)}</div>
         <div style={S.monthGrid}>
-          {Array.from({ length: MONTH_OFFSET }).map((_, i) => <div key={`pad${i}`} />)}
-          {MONTH_DATES.map((dateStr, i) => {
+          {Array.from({ length: monthGridOffset }).map((_, i) => <div key={`pad${i}`} />)}
+          {monthDates.map((dateStr, i) => {
             const day = i + 1;
             const done = logs.has(dateStr);
             const future = dateStr > TODAY;
@@ -474,7 +516,7 @@ function SingleHabitMonthly({ habit, dayAction, logSet, onDelete, onEdit, setNot
             const count = habit.log_counts?.[dateStr];
             const hasCount = count !== undefined && count !== null;
             const filled = done || periodAchieved;
-            const col = (MONTH_OFFSET + i) % 7;
+            const col = (monthGridOffset + i) % 7;
             return (
               <div key={dateStr} style={{ position: "relative" }}>
                 {periodAchieved && (
@@ -646,6 +688,10 @@ const S = {
   counterBtn: { width: 44, height: 44, borderRadius: "50%", border: "1.5px solid #E0DDD5", background: "#fff", color: "#26241F", fontSize: 24, fontWeight: 700, cursor: "pointer", display: "grid", placeItems: "center", fontFamily: "inherit", lineHeight: 1 },
   chainLine: { position: "absolute", top: "calc(50% - 3px)", left: 0, right: 0, height: 6, zIndex: 0, opacity: 0.9 },
   chainBanner: { display: "flex", alignItems: "center", gap: 8, borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 12.5, fontWeight: 700, fontFamily: "'Inter',system-ui,sans-serif" },
+  navBar: { display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 16 },
+  navBtn: { width: 34, height: 34, borderRadius: 9, border: "1px solid #E0DDD5", background: "#fff", color: "#4A463E", cursor: "pointer", display: "grid", placeItems: "center", fontFamily: "inherit" },
+  navBtnDisabled: { opacity: 0.4, cursor: "not-allowed" },
+  navLabel: { fontSize: 13, fontWeight: 700, color: "#26241F", minWidth: 180, textAlign: "center", fontFamily: "'Fraunces',Georgia,serif" },
   noteBox: { background: "#fff", borderRadius: 10, padding: 14, marginTop: 14, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
   longPressMenu: { position: "absolute", top: "100%", left: 0, zIndex: 50, background: "#fff", border: "1px solid #E0DDD5", borderRadius: 10, boxShadow: "0 4px 16px rgba(0,0,0,0.12)", padding: "4px 0", minWidth: 140 },
   menuItem: { display: "flex", alignItems: "center", gap: 8, width: "100%", border: "none", background: "none", padding: "8px 14px", fontSize: 13, color: "#26241F", cursor: "pointer", fontFamily: "inherit", textAlign: "left" },

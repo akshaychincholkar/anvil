@@ -1,21 +1,43 @@
+const TOKEN_KEY = "anvil_token";
+export const getToken = () => localStorage.getItem(TOKEN_KEY);
+export const setToken = (t) => localStorage.setItem(TOKEN_KEY, t);
+export const clearToken = () => localStorage.removeItem(TOKEN_KEY);
+
 const req = async (method, path, body) => {
+  const headers = {};
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  const token = getToken();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
   const res = await fetch(`/api${path}`, {
     method,
-    headers: body !== undefined ? { "Content-Type": "application/json" } : {},
+    headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
+  if (res.status === 401) {
+    // Session expired / invalid — drop token and bounce to login.
+    clearToken();
+    window.dispatchEvent(new Event("anvil-unauthorized"));
+    throw new Error("Not authenticated");
+  }
   if (res.status === 204) return null;
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(text || `HTTP ${res.status}`);
+    let msg = text;
+    try { msg = JSON.parse(text).detail || text; } catch { /* keep text */ }
+    throw new Error(msg || `HTTP ${res.status}`);
   }
   return res.json();
 };
 
 export const api = {
+  // Auth
+  register: (data) => req("POST", "/auth/register", data),
+  login: (data) => req("POST", "/auth/login", data),
+  me: () => req("GET", "/auth/me"),
+
   // Google Calendar auth
   getGcalStatus: () => req("GET", "/auth/google/status"),
-  connectGoogle: () => { window.location.href = "/api/auth/google"; },
+  connectGoogle: () => { window.location.href = `/api/auth/google?token=${encodeURIComponent(getToken() || "")}`; },
   disconnectGoogle: () => req("DELETE", "/auth/google"),
 
   // Pillars
@@ -62,6 +84,7 @@ export const api = {
   restoreSkill: (id) => req("POST", `/skills/${id}/restore`),
   addSkillNote: (id, stage, text) => req("POST", `/skills/${id}/notes`, { stage, text }),
   deleteSkillNote: (id) => req("DELETE", `/skill-notes/${id}`),
+  toggleSkillNote: (id) => req("PUT", `/skill-notes/${id}/toggle`),
   completeSkillStage: (id, stage) => req("POST", `/skills/${id}/complete-stage`, { stage }),
 
   // Spiritual
@@ -84,4 +107,11 @@ export const api = {
   getDueToday: () => req("GET", "/revision/due-today"),
   getCalendar: (year, month) => req("GET", `/revision/calendar/${year}/${month}`),
   toggleReviewDone: (id) => req("PUT", `/revision/reviews/${id}/done`),
+
+  // Affirmations
+  getAffirmations: () => req("GET", "/affirmations"),
+  createAffirmation: (data) => req("POST", "/affirmations", data),
+  updateAffirmation: (id, data) => req("PUT", `/affirmations/${id}`, data),
+  deleteAffirmation: (id) => req("DELETE", `/affirmations/${id}`),
+  restoreAffirmation: (id) => req("POST", `/affirmations/${id}/restore`),
 };
