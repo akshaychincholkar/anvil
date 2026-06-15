@@ -31,7 +31,7 @@ function ImageCarousel({ base, count }) {
 export default function SpiritualScreen() {
   const isMobile = useIsMobile();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [activeId, setActiveId] = useState(SPIRITUAL_ITEMS[0].id);
+  const [activeId, setActiveId] = useState("dss");
   const item = SPIRITUAL_ITEMS.find((x) => x.id === activeId) || SPIRITUAL_ITEMS[0];
 
   const pick = (id) => { setActiveId(id); if (isMobile) setSidebarOpen(false); };

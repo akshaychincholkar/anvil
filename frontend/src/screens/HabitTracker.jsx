@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Pencil, Plus, Bell, Check, Flame, LayoutGrid, Menu, X, MoreHorizontal, FileText, Link2, ChevronLeft, ChevronRight } from "lucide-react";
 import { api } from "../api.js";
 import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
@@ -60,9 +60,32 @@ export default function HabitTracker() {
   const [editingHabit, setEditingHabit] = useState(null);
   const [countPopup, setCountPopup] = useState(null); // { habit, date }
   const [newHabit, setNewHabit] = useState({ name: "", pillar: "Health", target_per_week: 7, type: "regular", target_count: null, period: "week" });
+  const [reordering, setReordering] = useState(false);
+  const [habitOrder, setHabitOrder] = useState([]);
 
   const load = useCallback(() => api.getHabits().then(setHabits).catch(console.error), []);
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    api.getSetting("habit_order").then((v) => { if (Array.isArray(v)) setHabitOrder(v); }).catch(() => {});
+  }, []);
+
+  const sortedHabits = useMemo(() => {
+    if (!habitOrder.length) return habits;
+    return [...habits].sort((a, b) => {
+      const ai = habitOrder.indexOf(a.id), bi = habitOrder.indexOf(b.id);
+      if (ai === -1 && bi === -1) return 0;
+      if (ai === -1) return 1;
+      if (bi === -1) return -1;
+      return ai - bi;
+    });
+  }, [habits, habitOrder]);
+
+  const saveOrder = async (ids) => {
+    setHabitOrder(ids);
+    await api.setSetting("habit_order", ids);
+    setReordering(false);
+  };
 
   useEffect(() => {
     const check = () => { const mobile = window.innerWidth < 720; setIsMobile(mobile); if (!mobile) setSidebarOpen(false); };
@@ -127,14 +150,19 @@ export default function HabitTracker() {
           {isMobile && <button onClick={() => setSidebarOpen(false)} style={S.closeBtn}><X size={18} /></button>}
         </div>
 
-        <button onClick={() => pick("ALL")} style={{ ...S.sideItem, ...(selected === "ALL" ? S.sideItemOn : {}) }}>
-          <LayoutGrid size={15} />
-          <span style={S.sideLabel}>All Habits</span>
-          <span style={S.sideCount}>{habits.length}</span>
-        </button>
+        <div style={{ ...S.sideItem, ...(selected === "ALL" ? S.sideItemOn : {}), cursor: "default", padding: "2px 6px 2px 10px" }}>
+          <button onClick={() => pick("ALL")} style={{ display: "flex", alignItems: "center", gap: 9, flex: 1, border: "none", background: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: selected === "ALL" ? 600 : 500, color: "#4A463E", padding: "7px 0" }}>
+            <LayoutGrid size={15} />
+            <span style={S.sideLabel}>All Habits</span>
+            <span style={S.sideCount}>{habits.length}</span>
+          </button>
+          <button onClick={(e) => { e.stopPropagation(); setReordering(true); }} style={S.tinyBtn} title="Reorder habits">
+            <Pencil size={12} />
+          </button>
+        </div>
         <div style={S.sideDivider} />
 
-        {habits.map((h) => {
+        {sortedHabits.map((h) => {
           const on = selected === h.id;
           const c = PILLARS[h.pillar]?.dot || "#9A968C";
           return (
@@ -166,7 +194,7 @@ export default function HabitTracker() {
           </button>
         )}
         {selected === "ALL"
-          ? <AllHabitsWeekly habits={habits} dayAction={dayAction} logSet={logSet}
+          ? <AllHabitsWeekly habits={sortedHabits} dayAction={dayAction} logSet={logSet}
               onDelete={deleteHabit}
               onEdit={(h) => setEditingHabit(h)} />
           : <SingleHabitMonthly habit={current} dayAction={dayAction} logSet={logSet}
@@ -177,6 +205,14 @@ export default function HabitTracker() {
         {/* Yearly bar chart always shown in All view */}
         {selected === "ALL" && <YearlyChart year={THIS_YEAR} />}
       </main>
+
+      {reordering && (
+        <ReorderModal
+          habits={sortedHabits}
+          onSave={saveOrder}
+          onClose={() => setReordering(false)}
+        />
+      )}
 
       {editingHabit && (
         <EditHabitModal
@@ -585,6 +621,51 @@ function LongPressMenu({ onEdit, onDelete, onAddNote, onRemind, onClose }) {
       <button style={S.menuItem} onClick={() => { onAddNote(); onClose(); }}><FileText size={13} /> Add note</button>
       <button style={S.menuItem} onClick={() => { onRemind(); onClose(); }}><Bell size={13} /> Remind</button>
       <button style={{ ...S.menuItem, color: "#C2536B" }} onClick={() => { onDelete(); onClose(); }}><X size={13} /> Delete</button>
+    </div>
+  );
+}
+
+function ReorderModal({ habits, onSave, onClose }) {
+  const [items, setItems] = useState([...habits]);
+
+  const move = (i, dir) => {
+    const next = [...items];
+    const j = i + dir;
+    if (j < 0 || j >= next.length) return;
+    [next[i], next[j]] = [next[j], next[i]];
+    setItems(next);
+  };
+
+  return (
+    <div style={S.modalOverlay} onClick={onClose}>
+      <div style={{ ...S.modal, maxHeight: "80vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+        <div style={S.modalHead}>
+          Reorder Habits
+          <button onClick={onClose} style={S.closeBtn}><X size={16} /></button>
+        </div>
+        <p style={{ fontSize: 12, color: "#9A968C", margin: "0 0 10px" }}>Use arrows to set the display order.</p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {items.map((h, i) => {
+            const c = PILLARS[h.pillar]?.dot || "#9A968C";
+            return (
+              <div key={h.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 10px", background: "#F7F6F3", borderRadius: 9, border: "1px solid #ECEAE3" }}>
+                <span style={{ ...S.sideDot, background: c }} />
+                <span style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>{h.name}</span>
+                <button
+                  onClick={() => move(i, -1)} disabled={i === 0}
+                  style={{ ...S.navBtn, width: 28, height: 28, opacity: i === 0 ? 0.3 : 1, fontSize: 14 }}>↑</button>
+                <button
+                  onClick={() => move(i, 1)} disabled={i === items.length - 1}
+                  style={{ ...S.navBtn, width: 28, height: 28, opacity: i === items.length - 1 ? 0.3 : 1, fontSize: 14 }}>↓</button>
+              </div>
+            );
+          })}
+        </div>
+        <button onClick={() => onSave(items.map((h) => h.id))}
+          style={{ ...S.sideAddBtn, width: "100%", marginTop: 14, height: 38, justifyContent: "center" }}>
+          <Check size={14} /> Save Order
+        </button>
+      </div>
     </div>
   );
 }

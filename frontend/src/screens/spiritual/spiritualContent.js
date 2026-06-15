@@ -6634,7 +6634,7 @@ export const SPIRITUAL_ITEMS = [
   {
     id: "dss",
     title: "Durga Saptashati",
-    carousel: 16,
+    carousel: 19,
     imageBase: "/spiritual/saptashati/saptashati_adhyay_",
   },
   {

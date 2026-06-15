@@ -12,11 +12,12 @@ const fmtMin = (m) => (m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`);
 export default function GroveScreen() {
   const [view, setView] = useState("timer"); // timer | stats
   const [phase, setPhase] = useState("idle"); // idle | running | done | failed
-  const [duration, setDuration] = useState(30);
+  const [duration, setDuration] = useState(15);
   const [custom, setCustom] = useState(false);
   const [label, setLabel] = useState("");
   const [tree, setTree] = useState(DEFAULT_TREE);
-  const [remaining, setRemaining] = useState(30 * 60);
+  const [deepFocus, setDeepFocus] = useState(() => localStorage.getItem("anvil_grove_deepfocus") !== "0");
+  const [remaining, setRemaining] = useState(15 * 60);
   const [data, setData] = useState({ sessions: [], stats: null });
 
   const endRef = useRef(null);
@@ -81,13 +82,19 @@ export default function GroveScreen() {
     return () => clearInterval(id);
   }, [phase, complete]);
 
-  // Leave the app / switch tabs while focusing → the tree withers
+  // Deep Focus: leaving the app / switching tabs while focusing → the tree withers
   useEffect(() => {
-    if (phase !== "running") return;
+    if (phase !== "running" || !deepFocus) return;
     const onHide = () => { if (document.hidden) fail(); };
     document.addEventListener("visibilitychange", onHide);
     return () => document.removeEventListener("visibilitychange", onHide);
-  }, [phase, fail]);
+  }, [phase, deepFocus, fail]);
+
+  const toggleDeep = () => setDeepFocus((v) => {
+    const n = !v;
+    localStorage.setItem("anvil_grove_deepfocus", n ? "1" : "0");
+    return n;
+  });
 
   const plant = () => {
     recordedRef.current = false;
@@ -103,6 +110,7 @@ export default function GroveScreen() {
   const reset = () => { setPhase("idle"); setRemaining(duration * 60); };
 
   const pickPreset = (d) => { setCustom(false); setDuration(d); setRemaining(d * 60); };
+  const enterCustom = () => { if (!custom) { setCustom(true); setDuration(5); setRemaining(5 * 60); } };
   const onCustomChange = (v) => {
     setCustom(true);
     if (v === "") { setDuration(0); setRemaining(0); return; }
@@ -167,7 +175,7 @@ export default function GroveScreen() {
                   <button key={d} onClick={() => pickPreset(d)}
                     style={{ ...S.chip, ...(!custom && duration === d ? S.chipOn : {}) }}>{d}m</button>
                 ))}
-                <button onClick={() => setCustom(true)}
+                <button onClick={enterCustom}
                   style={{ ...S.chip, ...(custom ? S.chipOn : {}) }}>Custom</button>
               </div>
               {custom && (
@@ -188,6 +196,15 @@ export default function GroveScreen() {
                   </button>
                 ))}
               </div>
+              <button onClick={toggleDeep} style={S.toggleRow}>
+                <div style={{ textAlign: "left" }}>
+                  <div style={S.toggleTitle}>Deep Focus</div>
+                  <div style={S.toggleHint}>{deepFocus ? "Leaving the app kills the tree" : "Tree survives until you give up"}</div>
+                </div>
+                <div style={{ ...S.switch, ...(deepFocus ? S.switchOn : {}) }}>
+                  <div style={{ ...S.knob, ...(deepFocus ? S.knobOn : {}) }} />
+                </div>
+              </button>
               <button onClick={plant} disabled={duration < 1} style={{ ...S.plantBtn, ...(duration < 1 ? { opacity: 0.5, cursor: "not-allowed" } : {}) }}>Plant tree</button>
             </div>
           </>
@@ -197,7 +214,9 @@ export default function GroveScreen() {
           <>
             <div style={S.timeBig}>{fmt(remaining)}</div>
             <div style={S.focusLabel}>{label.trim() || "Focusing…"}</div>
-            <div style={S.warn}>⚠ Leaving this app will kill your tree.</div>
+            <div style={deepFocus ? S.warn : S.warnSoft}>
+              {deepFocus ? "⚠ Deep Focus on — leaving this app will kill your tree." : "🌿 Relaxed mode — only Give up ends this session."}
+            </div>
             <button onClick={fail} style={S.giveUp}>Give up</button>
           </>
         )}
@@ -293,7 +312,15 @@ const S = {
   ringInner: { position: "relative", zIndex: 1, display: "grid", placeItems: "center" },
   timeBig: { fontSize: 40, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif", letterSpacing: "-0.02em", marginTop: 6 },
   focusLabel: { fontSize: 14, color: "#6B675E", marginTop: 2, fontWeight: 500 },
-  warn: { fontSize: 12, color: "#C2773B", marginTop: 12, fontWeight: 600 },
+  warn: { fontSize: 12, color: "#C2773B", marginTop: 12, fontWeight: 600, textAlign: "center", maxWidth: 320 },
+  warnSoft: { fontSize: 12, color: "#4C9A6B", marginTop: 12, fontWeight: 600, textAlign: "center", maxWidth: 320 },
+  toggleRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, border: "1px solid #E0DDD5", background: "#fff", borderRadius: 12, padding: "10px 14px", cursor: "pointer", fontFamily: "inherit", width: "100%" },
+  toggleTitle: { fontSize: 14, fontWeight: 700, color: "#26241F" },
+  toggleHint: { fontSize: 11.5, color: "#9A968C", marginTop: 1 },
+  switch: { width: 42, height: 24, borderRadius: 12, background: "#D9D6CE", flexShrink: 0, padding: 2, transition: "background 0.18s", boxSizing: "border-box" },
+  switchOn: { background: "#4C9A6B" },
+  knob: { width: 20, height: 20, borderRadius: "50%", background: "#fff", boxShadow: "0 1px 2px rgba(0,0,0,0.2)", transform: "translateX(0)", transition: "transform 0.18s" },
+  knobOn: { transform: "translateX(18px)" },
 
   controls: { width: "100%", maxWidth: 380, display: "flex", flexDirection: "column", gap: 14, marginTop: 8 },
   chips: { display: "flex", gap: 7, justifyContent: "center", flexWrap: "wrap" },

@@ -35,7 +35,7 @@ function ranges(type, now) {
 }
 
 export default function GroveStats({ sessions = [], onBack }) {
-  const [range, setRange] = useState("week");
+  const [range, setRange] = useState("day");
   const now = new Date();
   const { start, end, prev, prev2 } = ranges(range, now);
 
