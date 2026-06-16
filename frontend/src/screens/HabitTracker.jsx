@@ -67,7 +67,7 @@ export default function HabitTracker() {
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
-    api.getSetting("habit_order").then((v) => { if (Array.isArray(v)) setHabitOrder(v); }).catch(() => {});
+    api.getSetting("habit_order").then((r) => { if (Array.isArray(r?.value)) setHabitOrder(r.value); }).catch(() => {});
   }, []);
 
   const sortedHabits = useMemo(() => {
@@ -151,7 +151,7 @@ export default function HabitTracker() {
         </div>
 
         <div style={{ ...S.sideItem, ...(selected === "ALL" ? S.sideItemOn : {}), cursor: "default", padding: "2px 6px 2px 10px" }}>
-          <button onClick={() => pick("ALL")} style={{ display: "flex", alignItems: "center", gap: 9, flex: 1, border: "none", background: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: selected === "ALL" ? 600 : 500, color: "#4A463E", padding: "7px 0" }}>
+          <button onClick={() => pick("ALL")} style={{ display: "flex", alignItems: "center", gap: 9, flex: 1, border: "none", background: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: selected === "ALL" ? 600 : 500, color: "var(--text-2)", padding: "7px 0" }}>
             <LayoutGrid size={15} />
             <span style={S.sideLabel}>All Habits</span>
             <span style={S.sideCount}>{habits.length}</span>
@@ -323,7 +323,7 @@ function CountPopup({ habit, date, initialCount, initialNote, onSave, onClear, o
     <div style={S.modalOverlay} onClick={onClose}>
       <div style={S.modal} onClick={(e) => e.stopPropagation()}>
         <div style={S.modalHead}>{habit.name}<button onClick={onClose} style={S.closeBtn}><X size={16} /></button></div>
-        <div style={{ fontSize: 12, color: "#9A968C", marginBottom: 2 }}>
+        <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 2 }}>
           {date} · {habit.type === "minimum" ? `at least ${target}` : `no more than ${target}`} / {habit.period}
         </div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 20, margin: "14px 0 6px" }}>
@@ -335,8 +335,8 @@ function CountPopup({ habit, date, initialCount, initialNote, onSave, onClear, o
         <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Add a comment (optional)…"
           style={{ ...S.sideInput, minHeight: 56, resize: "vertical" }} />
         <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-          <button onClick={() => onSave(count, note)} style={{ ...S.sideAddBtn, flex: 1, justifyContent: "center", height: 38 }}><Check size={14} /> Set</button>
           <button onClick={onClear} style={{ ...S.actionBtn, color: "#C2536B", borderColor: "#C2536B" }}><X size={14} /> Delete</button>
+          <button onClick={() => onSave(count, note)} style={{ ...S.sideAddBtn, flex: 1, justifyContent: "center", height: 38 }}><Check size={14} /> Set</button>
         </div>
       </div>
     </div>
@@ -452,7 +452,7 @@ function AllHabitsWeekly({ habits, dayAction, logSet, onDelete, onEdit }) {
         })}
 
         {habits.length === 0 && (
-          <div style={{ fontSize: 13, color: "#9A968C", padding: "24px 12px", textAlign: "center" }}>
+          <div style={{ fontSize: 13, color: "var(--text-3)", padding: "24px 12px", textAlign: "center" }}>
             No habits yet — add one from the sidebar.
           </div>
         )}
@@ -483,6 +483,26 @@ function SingleHabitMonthly({ habit, dayAction, logSet, onDelete, onEdit, setNot
     ? (habit.logs || []).filter((d) => d.startsWith(`${viewYear}-`)).length
     : monthDates.filter((d) => logs.has(d)).length;
   const periodAchieved = isMonthChain && periodDone >= (habit.target_count || 0);
+
+  // "N times a week" chain: each Mon–Sun week that hits the target connects on its
+  // own (the month grid rows are already Mon–Sun weeks).
+  const isWeekChain = habit.type === "minimum" && habit.period === "week";
+  const target = habit.target_count || 0;
+  const weekCount = (dateStr) => {
+    const d = new Date(dateStr + "T00:00");
+    const dow = d.getDay();
+    const mon = new Date(d); mon.setDate(d.getDate() + (dow === 0 ? -6 : 1 - dow));
+    let n = 0;
+    for (let k = 0; k < 7; k++) { const x = new Date(mon); x.setDate(mon.getDate() + k); if (logs.has(toISO(x))) n++; }
+    return n;
+  };
+  const cellAchieved = (dateStr) => {
+    if (isMonthChain) return periodAchieved;
+    if (isWeekChain) return weekCount(dateStr) >= target;
+    return false;
+  };
+  const thisWeekDone = isWeekChain ? weekCount(TODAY) : 0;
+  const thisWeekAchieved = isWeekChain && thisWeekDone >= target;
 
   const startLongPress = (dateStr) => {
     longPressTimer.current = setTimeout(() => setMenuDate(dateStr), 500);
@@ -526,7 +546,7 @@ function SingleHabitMonthly({ habit, dayAction, logSet, onDelete, onEdit, setNot
       </div>
 
       {isMonthChain && (
-        <div style={{ ...S.chainBanner, background: periodAchieved ? soft : "#F7F6F3", color: periodAchieved ? c : "#9A968C" }}>
+        <div style={{ ...S.chainBanner, background: periodAchieved ? soft : "var(--bg)", color: periodAchieved ? c : "var(--text-3)" }}>
           <Link2 size={15} />
           {periodAchieved
             ? `${habit.period === "year" ? "Yearly" : "Monthly"} chain complete — ${periodDone}/${habit.target_count} connected`
@@ -534,10 +554,19 @@ function SingleHabitMonthly({ habit, dayAction, logSet, onDelete, onEdit, setNot
         </div>
       )}
 
+      {isWeekChain && monthOffset === 0 && (
+        <div style={{ ...S.chainBanner, background: thisWeekAchieved ? soft : "var(--bg)", color: thisWeekAchieved ? c : "var(--text-3)" }}>
+          <Link2 size={15} />
+          {thisWeekAchieved
+            ? `This week's chain complete — ${thisWeekDone}/${target} connected`
+            : `${thisWeekDone}/${target} this week · ${Math.max(0, target - thisWeekDone)} more to connect the chain`}
+        </div>
+      )}
+
       <div style={S.monthCard}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
           <div style={S.monthTitle}>{monthLabel}</div>
-          <span style={{ fontSize: 11, color: "#9A968C" }}>Long-press a day for options</span>
+          <span style={{ fontSize: 11, color: "var(--text-3)" }}>Long-press a day for options</span>
         </div>
         <div style={S.monthDow}>{DAYS.map((d) => <div key={d} style={S.monthDowCell}>{d}</div>)}</div>
         <div style={S.monthGrid}>
@@ -551,11 +580,12 @@ function SingleHabitMonthly({ habit, dayAction, logSet, onDelete, onEdit, setNot
             const isPerDayCount = (habit.type === "minimum" || habit.type === "maximum") && habit.period === "day";
             const count = habit.log_counts?.[dateStr];
             const hasCount = count !== undefined && count !== null;
-            const filled = done || periodAchieved;
+            const ach = cellAchieved(dateStr);
+            const filled = done || ach;
             const col = (monthGridOffset + i) % 7;
             return (
               <div key={dateStr} style={{ position: "relative" }}>
-                {periodAchieved && (
+                {ach && (
                   <span style={{ ...S.chainLine, background: c, ...(col === 0 ? { left: "50%" } : { left: -6 }), ...(col === 6 ? { right: "50%" } : { right: -6 }) }} />
                 )}
                 <button
@@ -643,12 +673,12 @@ function ReorderModal({ habits, onSave, onClose }) {
           Reorder Habits
           <button onClick={onClose} style={S.closeBtn}><X size={16} /></button>
         </div>
-        <p style={{ fontSize: 12, color: "#9A968C", margin: "0 0 10px" }}>Use arrows to set the display order.</p>
+        <p style={{ fontSize: 12, color: "var(--text-3)", margin: "0 0 10px" }}>Use arrows to set the display order.</p>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {items.map((h, i) => {
             const c = PILLARS[h.pillar]?.dot || "#9A968C";
             return (
-              <div key={h.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 10px", background: "#F7F6F3", borderRadius: 9, border: "1px solid #ECEAE3" }}>
+              <div key={h.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 10px", background: "var(--bg)", borderRadius: 9, border: "1px solid var(--border)" }}>
                 <span style={{ ...S.sideDot, background: c }} />
                 <span style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>{h.name}</span>
                 <button
@@ -691,7 +721,7 @@ function YearlyChart({ year }) {
         {monthPcts.map((pct, i) => (
           <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
             <div style={{ width: "100%", background: "#4C9A6B", borderRadius: "3px 3px 0 0", height: `${(pct / max) * 60}px`, minHeight: 2, opacity: pct > 0 ? 1 : 0.15 }} title={`${pct}%`} />
-            <span style={{ fontSize: 9, color: "#9A968C", fontWeight: 600 }}>{MONTHS_SHORT[i]}</span>
+            <span style={{ fontSize: 9, color: "var(--text-3)", fontWeight: 600 }}>{MONTHS_SHORT[i]}</span>
           </div>
         ))}
       </div>
@@ -709,75 +739,75 @@ function Stat({ label, value, c, soft, flame }) {
 }
 
 const S = {
-  shell: { display: "flex", fontFamily: "'Inter',system-ui,sans-serif", background: "#F7F6F3", minHeight: "100vh", color: "#26241F", position: "relative", overflow: "hidden" },
-  sidebar: { width: 230, flexShrink: 0, background: "#fff", borderRight: "1px solid #ECEAE3", padding: "20px 12px", display: "flex", flexDirection: "column", gap: 3, overflowY: "auto" },
+  shell: { display: "flex", fontFamily: "'Inter',system-ui,sans-serif", background: "var(--bg)", minHeight: "100vh", color: "var(--text)", position: "relative", overflow: "hidden" },
+  sidebar: { width: 230, flexShrink: 0, background: "var(--surface)", borderRight: "1px solid var(--border)", padding: "20px 12px", display: "flex", flexDirection: "column", gap: 3, overflowY: "auto" },
   sidebarOverlay: { position: "absolute", top: 0, left: 0, bottom: 0, zIndex: 30, boxShadow: "4px 0 24px rgba(0,0,0,0.18)", transition: "transform 0.22s ease", transform: "translateX(0)" },
   sidebarHidden: { transform: "translateX(-105%)", boxShadow: "none" },
   backdrop: { position: "absolute", inset: 0, background: "rgba(38,36,31,0.38)", zIndex: 20 },
   sideTop: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 4px" },
-  closeBtn: { border: "none", background: "none", color: "#6B675E", cursor: "pointer", padding: 4, display: "grid", placeItems: "center", marginBottom: 8 },
-  brand: { fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", color: "#9A968C", fontWeight: 700, padding: "0 6px 14px" },
-  sideItem: { display: "flex", alignItems: "center", gap: 9, width: "100%", border: "none", background: "none", padding: "9px 10px", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 500, color: "#4A463E", textAlign: "left" },
-  sideItemOn: { background: "#F2F1EC", fontWeight: 600 },
+  closeBtn: { border: "none", background: "none", color: "var(--text-2)", cursor: "pointer", padding: 4, display: "grid", placeItems: "center", marginBottom: 8 },
+  brand: { fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--text-3)", fontWeight: 700, padding: "0 6px 14px" },
+  sideItem: { display: "flex", alignItems: "center", gap: 9, width: "100%", border: "none", background: "none", padding: "9px 10px", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 500, color: "var(--text-2)", textAlign: "left" },
+  sideItemOn: { background: "var(--hover)", fontWeight: 600 },
   sideLabel: { flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
-  sideCount: { fontSize: 11, fontWeight: 700, color: "#9A968C", background: "#F2F1EC", borderRadius: 10, padding: "1px 7px" },
+  sideCount: { fontSize: 11, fontWeight: 700, color: "var(--text-3)", background: "var(--hover)", borderRadius: 10, padding: "1px 7px" },
   sideStreak: { display: "flex", alignItems: "center", gap: 3, fontSize: 11, fontWeight: 600, color: "#C2773B" },
   sideDot: { width: 9, height: 9, borderRadius: "50%", flexShrink: 0, display: "inline-block" },
-  sideDivider: { height: 1, background: "#ECEAE3", margin: "8px 6px" },
+  sideDivider: { height: 1, background: "var(--border)", margin: "8px 6px" },
   addBox: { padding: "10px 6px", display: "flex", flexDirection: "column", gap: 6 },
-  sideInput: { border: "1px solid #E4E2DA", borderRadius: 7, padding: "7px 9px", fontSize: 13, fontFamily: "inherit", outline: "none", width: "100%", boxSizing: "border-box" },
+  sideInput: { border: "1px solid var(--border)", borderRadius: 7, padding: "7px 9px", fontSize: 13, fontFamily: "inherit", outline: "none", width: "100%", boxSizing: "border-box" },
   sideAddBtn: { border: "none", background: "#4C9A6B", color: "#fff", height: 30, padding: "0 12px", borderRadius: 7, cursor: "pointer", display: "flex", alignItems: "center", gap: 5, fontSize: 13, fontFamily: "inherit" },
-  sideCancelBtn: { border: "1px solid #E4E2DA", background: "#fff", color: "#6B675E", width: 30, height: 30, borderRadius: 7, cursor: "pointer", display: "grid", placeItems: "center" },
-  sideNewBtn: { display: "flex", alignItems: "center", gap: 6, width: "100%", border: "1px dashed #D9D6CE", background: "none", borderRadius: 8, padding: "8px 10px", fontSize: 12.5, color: "#9A968C", fontWeight: 600, cursor: "pointer", fontFamily: "inherit", marginTop: 6, justifyContent: "center" },
+  sideCancelBtn: { border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-2)", width: 30, height: 30, borderRadius: 7, cursor: "pointer", display: "grid", placeItems: "center" },
+  sideNewBtn: { display: "flex", alignItems: "center", gap: 6, width: "100%", border: "1px dashed var(--border)", background: "none", borderRadius: 8, padding: "8px 10px", fontSize: 12.5, color: "var(--text-3)", fontWeight: 600, cursor: "pointer", fontFamily: "inherit", marginTop: 6, justifyContent: "center" },
   main: { flex: 1, padding: "26px", overflowX: "hidden", overflowY: "auto", minWidth: 0 },
-  hamburger: { display: "flex", alignItems: "center", gap: 9, border: "1px solid #E0DDD5", background: "#fff", padding: "9px 14px", borderRadius: 9, fontSize: 13, fontWeight: 600, color: "#4A463E", cursor: "pointer", fontFamily: "inherit", marginBottom: 18 },
+  hamburger: { display: "flex", alignItems: "center", gap: 9, border: "1px solid var(--border)", background: "var(--surface)", padding: "9px 14px", borderRadius: 9, fontSize: 13, fontWeight: 600, color: "var(--text-2)", cursor: "pointer", fontFamily: "inherit", marginBottom: 18 },
   hamburgerLabel: { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 200 },
   mainHead: { marginBottom: 20 },
-  eyebrow: { fontSize: 11, letterSpacing: "0.12em", textTransform: "uppercase", color: "#9A968C", fontWeight: 600, marginBottom: 5, display: "flex", alignItems: "center" },
+  eyebrow: { fontSize: 11, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--text-3)", fontWeight: 600, marginBottom: 5, display: "flex", alignItems: "center" },
   h1: { fontSize: 27, fontWeight: 700, margin: 0, letterSpacing: "-0.02em", fontFamily: "'Fraunces',Georgia,serif" },
-  actionBtn: { display: "flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 500, color: "#6B675E", border: "1px solid #E0DDD5", background: "#fff", padding: "5px 10px", borderRadius: 7, cursor: "pointer", fontFamily: "inherit" },
-  weekCard: { background: "#fff", borderRadius: 12, padding: "8px 14px 14px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", overflowX: "auto" },
-  weekHeadRow: { display: "flex", alignItems: "flex-end", padding: "10px 0", borderBottom: "1px solid #ECEAE3", minWidth: 480 },
+  actionBtn: { display: "flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 500, color: "var(--text-2)", border: "1px solid var(--border)", background: "var(--surface)", padding: "5px 10px", borderRadius: 7, cursor: "pointer", fontFamily: "inherit" },
+  weekCard: { background: "var(--surface)", borderRadius: 12, padding: "8px 14px 14px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", overflowX: "auto" },
+  weekHeadRow: { display: "flex", alignItems: "flex-end", padding: "10px 0", borderBottom: "1px solid var(--border)", minWidth: 480 },
   weekNameCol: { width: 160, flexShrink: 0, display: "flex", alignItems: "center", gap: 8 },
   weekDayHead: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 },
-  weekDayName: { fontSize: 10, fontWeight: 600, color: "#9A968C", textTransform: "uppercase" },
-  weekDayNum: { fontSize: 12, fontWeight: 600, color: "#6B675E", width: 22, height: 22, display: "grid", placeItems: "center", borderRadius: "50%" },
-  weekDayToday: { background: "#26241F", color: "#fff" },
-  weekStreakCol: { width: 64, flexShrink: 0, textAlign: "center", fontSize: 10, fontWeight: 600, color: "#9A968C", textTransform: "uppercase" },
+  weekDayName: { fontSize: 10, fontWeight: 600, color: "var(--text-3)", textTransform: "uppercase" },
+  weekDayNum: { fontSize: 12, fontWeight: 600, color: "var(--text-2)", width: 22, height: 22, display: "grid", placeItems: "center", borderRadius: "50%" },
+  weekDayToday: { background: "var(--accent-strong)", color: "#fff" },
+  weekStreakCol: { width: 64, flexShrink: 0, textAlign: "center", fontSize: 10, fontWeight: 600, color: "var(--text-3)", textTransform: "uppercase" },
   weekRow: { display: "flex", alignItems: "center", padding: "9px 0", borderBottom: "1px solid #F4F2EC", minWidth: 480 },
   weekHabitName: { fontSize: 13, fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
   weekCell: { flex: 1, display: "grid", placeItems: "center" },
-  typeBadge: { fontSize: 10, color: "#9A968C", background: "#F2F1EC", padding: "1px 6px", borderRadius: 8, fontWeight: 600 },
-  tick: { width: 26, height: 26, borderRadius: 7, border: "2px solid #E0DDD5", background: "#fff", cursor: "pointer", display: "grid", placeItems: "center", padding: 0 },
+  typeBadge: { fontSize: 10, color: "var(--text-3)", background: "var(--hover)", padding: "1px 6px", borderRadius: 8, fontWeight: 600 },
+  tick: { width: 26, height: 26, borderRadius: 7, border: "2px solid var(--border)", background: "var(--surface)", cursor: "pointer", display: "grid", placeItems: "center", padding: 0 },
   tickFuture: { opacity: 0.4, cursor: "not-allowed", borderStyle: "dashed" },
   streakPill: { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 700, padding: "3px 9px", borderRadius: 12 },
-  tinyBtn: { border: "none", background: "none", color: "#C3BFB5", cursor: "pointer", padding: "2px 3px", display: "grid", placeItems: "center", borderRadius: 4 },
+  tinyBtn: { border: "none", background: "none", color: "var(--text-3)", cursor: "pointer", padding: "2px 3px", display: "grid", placeItems: "center", borderRadius: 4 },
   statStrip: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(120px,1fr))", gap: 10, marginBottom: 18 },
   stat: { borderRadius: 10, padding: "13px 14px" },
-  statLabel: { fontSize: 11, fontWeight: 600, color: "#6B675E", marginBottom: 5 },
+  statLabel: { fontSize: 11, fontWeight: 600, color: "var(--text-2)", marginBottom: 5 },
   statValue: { fontSize: 19, fontWeight: 700, display: "flex", alignItems: "center", gap: 5, fontFamily: "'Fraunces',Georgia,serif" },
-  monthCard: { background: "#fff", borderRadius: 12, padding: "16px 16px 18px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
+  monthCard: { background: "var(--surface)", borderRadius: 12, padding: "16px 16px 18px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
   monthTitle: { fontSize: 14, fontWeight: 700, marginBottom: 12, fontFamily: "'Fraunces',Georgia,serif" },
   monthDow: { display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 6, marginBottom: 8 },
-  monthDowCell: { fontSize: 10, fontWeight: 600, color: "#9A968C", textAlign: "center", textTransform: "uppercase" },
+  monthDowCell: { fontSize: 10, fontWeight: 600, color: "var(--text-3)", textAlign: "center", textTransform: "uppercase" },
   monthGrid: { display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 6 },
-  monthDay: { aspectRatio: "1", border: "1.5px solid #ECEAE3", background: "#fff", borderRadius: 8, fontSize: 12.5, fontWeight: 600, color: "#6B675E", cursor: "pointer", fontFamily: "inherit", display: "grid", placeItems: "center" },
-  monthDayFuture: { opacity: 0.4, cursor: "not-allowed", background: "#FAFAF8" },
+  monthDay: { aspectRatio: "1", border: "1.5px solid var(--border)", background: "var(--surface)", borderRadius: 8, fontSize: 12.5, fontWeight: 600, color: "var(--text-2)", cursor: "pointer", fontFamily: "inherit", display: "grid", placeItems: "center" },
+  monthDayFuture: { opacity: 0.4, cursor: "not-allowed", background: "var(--surface-2)" },
   noteIndicator: { position: "absolute", top: 3, right: 3, width: 5, height: 5, borderRadius: "50%", background: "#3A7CA5" },
   cellNoteBubble: { position: "absolute", top: 2, right: "calc(50% - 16px)", width: 5, height: 5, borderRadius: "50%", background: "#3A7CA5" },
   countBadge: { position: "absolute", bottom: 2, right: 2, minWidth: 13, height: 13, padding: "0 2px", borderRadius: 7, color: "#fff", fontSize: 9, fontWeight: 700, display: "grid", placeItems: "center", lineHeight: 1 },
-  counterBtn: { width: 44, height: 44, borderRadius: "50%", border: "1.5px solid #E0DDD5", background: "#fff", color: "#26241F", fontSize: 24, fontWeight: 700, cursor: "pointer", display: "grid", placeItems: "center", fontFamily: "inherit", lineHeight: 1 },
+  counterBtn: { width: 44, height: 44, borderRadius: "50%", border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: 24, fontWeight: 700, cursor: "pointer", display: "grid", placeItems: "center", fontFamily: "inherit", lineHeight: 1 },
   chainLine: { position: "absolute", top: "calc(50% - 3px)", left: 0, right: 0, height: 6, zIndex: 0, opacity: 0.9 },
   chainBanner: { display: "flex", alignItems: "center", gap: 8, borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 12.5, fontWeight: 700, fontFamily: "'Inter',system-ui,sans-serif" },
   navBar: { display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 16 },
-  navBtn: { width: 34, height: 34, borderRadius: 9, border: "1px solid #E0DDD5", background: "#fff", color: "#4A463E", cursor: "pointer", display: "grid", placeItems: "center", fontFamily: "inherit" },
+  navBtn: { width: 34, height: 34, borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-2)", cursor: "pointer", display: "grid", placeItems: "center", fontFamily: "inherit" },
   navBtnDisabled: { opacity: 0.4, cursor: "not-allowed" },
-  navLabel: { fontSize: 13, fontWeight: 700, color: "#26241F", minWidth: 180, textAlign: "center", fontFamily: "'Fraunces',Georgia,serif" },
-  noteBox: { background: "#fff", borderRadius: 10, padding: 14, marginTop: 14, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
-  longPressMenu: { position: "absolute", top: "100%", left: 0, zIndex: 50, background: "#fff", border: "1px solid #E0DDD5", borderRadius: 10, boxShadow: "0 4px 16px rgba(0,0,0,0.12)", padding: "4px 0", minWidth: 140 },
-  menuItem: { display: "flex", alignItems: "center", gap: 8, width: "100%", border: "none", background: "none", padding: "8px 14px", fontSize: 13, color: "#26241F", cursor: "pointer", fontFamily: "inherit", textAlign: "left" },
+  navLabel: { fontSize: 13, fontWeight: 700, color: "var(--text)", minWidth: 180, textAlign: "center", fontFamily: "'Fraunces',Georgia,serif" },
+  noteBox: { background: "var(--surface)", borderRadius: 10, padding: 14, marginTop: 14, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
+  longPressMenu: { position: "absolute", top: "100%", left: 0, zIndex: 50, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, boxShadow: "0 4px 16px rgba(0,0,0,0.12)", padding: "4px 0", minWidth: 140 },
+  menuItem: { display: "flex", alignItems: "center", gap: 8, width: "100%", border: "none", background: "none", padding: "8px 14px", fontSize: 13, color: "var(--text)", cursor: "pointer", fontFamily: "inherit", textAlign: "left" },
   modalOverlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 100, display: "grid", placeItems: "center" },
-  modal: { background: "#fff", borderRadius: 14, padding: 24, width: 320, maxWidth: "90vw", display: "flex", flexDirection: "column", gap: 8 },
+  modal: { background: "var(--surface)", borderRadius: 14, padding: 24, width: 320, maxWidth: "90vw", display: "flex", flexDirection: "column", gap: 8 },
   modalHead: { display: "flex", justifyContent: "space-between", alignItems: "center", fontWeight: 700, fontSize: 16, fontFamily: "'Fraunces',Georgia,serif", marginBottom: 6 },
-  modalLabel: { fontSize: 11, fontWeight: 600, color: "#9A968C", textTransform: "uppercase", letterSpacing: "0.08em", marginTop: 4 },
+  modalLabel: { fontSize: 11, fontWeight: 600, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.08em", marginTop: 4 },
 };

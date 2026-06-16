@@ -82,7 +82,7 @@ export default function JournalScreen() {
     setDrafts(Object.fromEntries(SECTIONS.map((s) => [s.id, ""])));
   };
 
-  if (!entry) return <div style={{ padding: 28, color: "#9A968C" }}>Loading…</div>;
+  if (!entry) return <div style={{ padding: 28, color: "var(--text-3)" }}>Loading…</div>;
 
   const loggedToday = entry.mood !== null;
   const streak = (() => {
@@ -182,7 +182,7 @@ export default function JournalScreen() {
       <div style={S.card}>
         <div style={S.cardTitle}>
           {new Date(year, month - 1).toLocaleDateString("en-US", { month: "long", year: "numeric" })} · Mood history
-          <span style={{ fontSize: 11, color: "#9A968C", fontWeight: 400, marginLeft: 8 }}>tap a day to view</span>
+          <span style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 400, marginLeft: 8 }}>tap a day to view</span>
         </div>
         <div style={S.calDow}>
           {["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map((d) => <div key={d} style={S.calDowCell}>{d}</div>)}
@@ -202,13 +202,13 @@ export default function JournalScreen() {
                 disabled={future}
                 style={{
                   ...S.calDay,
-                  background: m ? m.color : (future ? "#FAFAF8" : "#fff"),
-                  borderColor: isSelected ? "#26241F" : "#ECEAE3",
+                  background: m ? m.color : (future ? "var(--surface-2)" : "var(--surface)"),
+                  borderColor: isSelected ? "var(--accent-strong)" : "var(--border)",
                   borderWidth: isSelected ? 2 : 1,
-                  color: m ? "#fff" : "#B5B1A7",
+                  color: m ? "#fff" : "var(--text-3)",
                   opacity: future ? 0.5 : 1,
                   cursor: future ? "not-allowed" : "pointer",
-                  outline: isSelected ? "2px solid #26241F" : "none",
+                  outline: isSelected ? "2px solid var(--accent-strong)" : "none",
                   outlineOffset: 1,
                 }}
                 title={m ? m.label : dateISO}>
@@ -238,38 +238,38 @@ export default function JournalScreen() {
 }
 
 const S = {
-  page: { fontFamily: "'Inter',system-ui,sans-serif", background: "#F7F6F3", minHeight: "100%", padding: "28px 24px", color: "#26241F", boxSizing: "border-box", maxWidth: 680, margin: "0 auto" },
+  page: { fontFamily: "'Inter',system-ui,sans-serif", background: "var(--bg)", minHeight: "100%", padding: "28px 24px", color: "var(--text)", boxSizing: "border-box", maxWidth: 680, margin: "0 auto" },
   head: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 22 },
-  eyebrow: { fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", color: "#9A968C", fontWeight: 600, marginBottom: 4 },
+  eyebrow: { fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--text-3)", fontWeight: 600, marginBottom: 4 },
   backBtn: { display: "inline-flex", alignItems: "center", gap: 4, border: "none", background: "none", color: "#3A7CA5", fontSize: 12.5, fontWeight: 600, cursor: "pointer", padding: "0 0 6px", fontFamily: "inherit" },
   h1: { fontSize: 30, fontWeight: 700, margin: 0, letterSpacing: "-0.02em", fontFamily: "'Fraunces',Georgia,serif" },
-  date: { fontSize: 13, color: "#9A968C", marginTop: 4 },
-  streakBox: { display: "flex", alignItems: "center", gap: 6, background: "#fff", border: "1px solid #ECEAE3", borderRadius: 10, padding: "8px 14px" },
+  date: { fontSize: 13, color: "var(--text-3)", marginTop: 4 },
+  streakBox: { display: "flex", alignItems: "center", gap: 6, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: "8px 14px" },
   streakNum: { fontSize: 20, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif", color: "#C2773B" },
-  streakLabel: { fontSize: 11, color: "#9A968C", fontWeight: 500 },
-  card: { background: "#fff", borderRadius: 12, padding: "18px 20px", marginBottom: 14, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
-  cardTitle: { fontSize: 14, fontWeight: 700, marginBottom: 12, color: "#26241F" },
+  streakLabel: { fontSize: 11, color: "var(--text-3)", fontWeight: 500 },
+  card: { background: "var(--surface)", borderRadius: 12, padding: "18px 20px", marginBottom: 14, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
+  cardTitle: { fontSize: 14, fontWeight: 700, marginBottom: 12, color: "var(--text)" },
   moodRow: { display: "flex", gap: 8, flexWrap: "wrap" },
-  moodBtn: { display: "flex", flexDirection: "column", alignItems: "center", gap: 4, border: "2px solid #ECEAE3", background: "#fff", borderRadius: 10, padding: "10px 12px", cursor: "pointer", flex: "1 1 60px", transition: "transform 0.1s" },
+  moodBtn: { display: "flex", flexDirection: "column", alignItems: "center", gap: 4, border: "2px solid var(--border)", background: "var(--surface)", borderRadius: 10, padding: "10px 12px", cursor: "pointer", flex: "1 1 60px", transition: "transform 0.1s" },
   moodEmoji: { fontSize: 22 },
   moodLabel: { fontSize: 11, fontWeight: 600 },
   sectionHead: { display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 10 },
   sectionIcon: { width: 32, height: 32, borderRadius: 8, display: "grid", placeItems: "center", flexShrink: 0 },
-  sectionHint: { fontSize: 11.5, color: "#9A968C", marginTop: 1 },
+  sectionHint: { fontSize: 11.5, color: "var(--text-3)", marginTop: 1 },
   bulletList: { margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 },
   bullet: { display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, lineHeight: 1.4 },
   bulletDot: { width: 6, height: 6, borderRadius: "50%", flexShrink: 0 },
   bulletText: { flex: 1 },
-  bulletDel: { border: "none", background: "none", color: "#C3BFB5", cursor: "pointer", padding: 2, display: "grid", placeItems: "center" },
+  bulletDel: { border: "none", background: "none", color: "var(--text-3)", cursor: "pointer", padding: 2, display: "grid", placeItems: "center" },
   addRow: { display: "flex", gap: 8 },
-  input: { flex: 1, border: "1px solid #E4E2DA", borderRadius: 8, padding: "9px 12px", fontSize: 13.5, fontFamily: "inherit", outline: "none" },
+  input: { flex: 1, border: "1px solid var(--border)", borderRadius: 8, padding: "9px 12px", fontSize: 13.5, fontFamily: "inherit", outline: "none" },
   addBtn: { width: 36, height: 36, border: "none", borderRadius: 8, color: "#fff", cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0 },
   calDow: { display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 4, marginBottom: 6 },
-  calDowCell: { fontSize: 10, fontWeight: 600, color: "#9A968C", textAlign: "center", textTransform: "uppercase" },
+  calDowCell: { fontSize: 10, fontWeight: 600, color: "var(--text-3)", textAlign: "center", textTransform: "uppercase" },
   calGrid: { display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 4, marginBottom: 12 },
-  calDay: { aspectRatio: "1", border: "1px solid #ECEAE3", borderRadius: 7, fontSize: 13, display: "grid", placeItems: "center", fontWeight: 500, fontFamily: "inherit" },
+  calDay: { aspectRatio: "1", border: "1px solid var(--border)", borderRadius: 7, fontSize: 13, display: "grid", placeItems: "center", fontWeight: 500, fontFamily: "inherit" },
   legend: { display: "flex", gap: 10, flexWrap: "wrap" },
-  legendItem: { display: "flex", alignItems: "center", gap: 5, fontSize: 11.5, color: "#6B675E" },
+  legendItem: { display: "flex", alignItems: "center", gap: 5, fontSize: 11.5, color: "var(--text-2)" },
   legendDot: { width: 8, height: 8, borderRadius: "50%", display: "inline-block" },
-  footer: { fontSize: 12.5, color: "#9A968C", textAlign: "center", marginTop: 8, fontStyle: "italic" },
+  footer: { fontSize: 12.5, color: "var(--text-3)", textAlign: "center", marginTop: 8, fontStyle: "italic" },
 };

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { BookOpen, Youtube, FileText, Plus, X, Check, Trophy, ArrowRight, Sparkles, Lock } from "lucide-react";
+import { BookOpen, Youtube, FileText, Plus, X, Check, Trophy, ArrowRight, Sparkles, Lock, Pencil } from "lucide-react";
 import { api } from "../api.js";
 
 const STAGES = [
@@ -27,6 +27,8 @@ export default function SkillsScreen() {
   const [celebrated, setCelebrated] = useState(null);
   const [newSkill, setNewSkill] = useState({ title: "", type: "book", pillar: "Academic", note: "" });
   const [noteDrafts, setNoteDrafts] = useState({});
+  const [editingNote, setEditingNote] = useState(null); // { id, text }
+  const [editingTitle, setEditingTitle] = useState(null); // draft string or null
 
   const load = useCallback(async () => {
     try {
@@ -59,6 +61,20 @@ export default function SkillsScreen() {
 
   const deleteNote = async (noteId) => {
     await api.deleteSkillNote(noteId);
+    load();
+  };
+
+  const saveTitleEdit = async () => {
+    if (!skill || !editingTitle?.trim()) return;
+    await api.updateSkill(skill.id, { title: editingTitle.trim() });
+    setEditingTitle(null);
+    load();
+  };
+
+  const saveNoteEdit = async () => {
+    if (!editingNote || !editingNote.text.trim()) return;
+    await api.updateSkillNote(editingNote.id, editingNote.text.trim());
+    setEditingNote(null);
     load();
   };
 
@@ -131,7 +147,7 @@ export default function SkillsScreen() {
           const on = filter === f;
           return (
             <button key={f} onClick={() => setFilter(f)}
-              style={{ ...S.filterBtn, ...(on ? { background: stage ? stage.color : "#26241F", color: "#fff", borderColor: "transparent" } : {}) }}>
+              style={{ ...S.filterBtn, ...(on ? { background: stage ? stage.color : "var(--accent-strong)", color: "#fff", borderColor: "transparent" } : {}) }}>
               {stage ? `${f} · ${stage.label}` : "All"}
             </button>
           );
@@ -193,12 +209,12 @@ export default function SkillsScreen() {
                     const stageDone = sk.completed_stages?.[st.id];
                     return (
                       <div key={st.id} style={S.trackItem}>
-                        <div style={{ ...S.trackDot, background: (done || stageDone) ? st.color : (current ? st.color : "#E4E2DA"), boxShadow: current ? `0 0 0 3px ${st.color}33` : "none" }}>
+                        <div style={{ ...S.trackDot, background: (done || stageDone) ? st.color : (current ? st.color : "var(--border)"), boxShadow: current ? `0 0 0 3px ${st.color}33` : "none" }}>
                           {(done || (current && stageDone)) && <Check size={9} color="#fff" strokeWidth={3} />}
                           {current && !stageDone && <span style={S.trackCurrent}>{st.id}</span>}
                           {!done && !current && <Lock size={8} color="#B5B1A7" />}
                         </div>
-                        {i < STAGES.length - 1 && <div style={{ ...S.trackLine, background: done ? STAGES[i+1].color : "#E4E2DA" }} />}
+                        {i < STAGES.length - 1 && <div style={{ ...S.trackLine, background: done ? STAGES[i+1].color : "var(--border)" }} />}
                       </div>
                     );
                   })}
@@ -216,11 +232,28 @@ export default function SkillsScreen() {
         {skill && (
           <div style={S.detail}>
             <div style={S.detailHead}>
-              <div>
+              <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={S.eyebrow}>{srcInfo(skill.type).label} · {skill.pillar}</div>
-                <div style={S.detailTitle}>{skill.title}</div>
+                {editingTitle !== null ? (
+                  <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 4 }}>
+                    <input
+                      autoFocus
+                      value={editingTitle}
+                      onChange={(e) => setEditingTitle(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") saveTitleEdit(); if (e.key === "Escape") setEditingTitle(null); }}
+                      style={{ ...S.input, fontSize: 16, fontWeight: 700, fontFamily: "'Fraunces',Georgia,serif", marginBottom: 0, flex: 1 }}
+                    />
+                    <button onClick={saveTitleEdit} style={{ ...S.noteAddBtn, background: "#4C9A6B", width: 30, height: 30 }}><Check size={13} /></button>
+                    <button onClick={() => setEditingTitle(null)} style={{ ...S.noteAddBtn, background: "var(--border)", color: "var(--text-2)", width: 30, height: 30 }}><X size={13} /></button>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <div style={S.detailTitle}>{skill.title}</div>
+                    <button onClick={() => setEditingTitle(skill.title)} style={S.ghostBtn} title="Edit name"><Pencil size={13} /></button>
+                  </div>
+                )}
               </div>
-              <button onClick={() => setSelected(null)} style={S.closeBtn}><X size={16} /></button>
+              <button onClick={() => { setSelected(null); setEditingTitle(null); }} style={S.closeBtn}><X size={16} /></button>
             </div>
 
             {STAGES.map((st, i) => {
@@ -233,7 +266,7 @@ export default function SkillsScreen() {
               return (
                 <div key={st.id} style={{ ...S.stageBlock, ...(unlocked ? { borderColor: st.color } : {}), opacity: isLocked ? 0.45 : 1 }}>
                   <div style={S.stageBlockHead}>
-                    <div style={{ ...S.stageLetter, background: unlocked ? st.color : "#E4E2DA", color: unlocked ? "#fff" : "#9A968C" }}>
+                    <div style={{ ...S.stageLetter, background: unlocked ? st.color : "var(--border)", color: unlocked ? "#fff" : "#9A968C" }}>
                       {isDone && !isCurrent ? <Check size={12} color="#fff" strokeWidth={3} /> : (isLocked ? <Lock size={11} color="#9A968C" /> : st.id)}
                     </div>
                     <div style={{ flex: 1 }}>
@@ -262,8 +295,27 @@ export default function SkillsScreen() {
                               ) : (
                                 <span style={{ ...S.noteDot, background: st.color }} />
                               )}
-                              <span style={{ ...S.noteText, ...(isWisdom && n.done ? { textDecoration: "line-through", color: "#9A968C" } : {}) }}>{n.text}</span>
-                              <button onClick={() => deleteNote(n.id)} style={S.ghostBtn}><X size={12} /></button>
+                              {editingNote?.id === n.id ? (
+                                <div style={{ flex: 1, display: "flex", gap: 5 }}>
+                                  <input
+                                    autoFocus
+                                    value={editingNote.text}
+                                    onChange={(e) => setEditingNote((en) => ({ ...en, text: e.target.value }))}
+                                    onKeyDown={(e) => { if (e.key === "Enter") saveNoteEdit(); if (e.key === "Escape") setEditingNote(null); }}
+                                    style={{ ...S.noteInput, flex: 1, padding: "4px 8px", fontSize: 12.5 }}
+                                  />
+                                  <button onClick={saveNoteEdit} style={{ ...S.noteAddBtn, background: st.color, width: 28, height: 28 }}><Check size={12} /></button>
+                                  <button onClick={() => setEditingNote(null)} style={{ ...S.noteAddBtn, background: "var(--border)", color: "var(--text-2)", width: 28, height: 28 }}><X size={12} /></button>
+                                </div>
+                              ) : (
+                                <span style={{ ...S.noteText, ...(isWisdom && n.done ? { textDecoration: "line-through", color: "var(--text-3)" } : {}) }}>{n.text}</span>
+                              )}
+                              {editingNote?.id !== n.id && (
+                                <>
+                                  <button onClick={() => setEditingNote({ id: n.id, text: n.text })} style={S.ghostBtn}><Pencil size={12} /></button>
+                                  <button onClick={() => deleteNote(n.id)} style={S.ghostBtn}><X size={12} /></button>
+                                </>
+                              )}
                             </li>
                           ))}
                         </ul>
@@ -317,23 +369,23 @@ export default function SkillsScreen() {
 }
 
 const S = {
-  page: { fontFamily: "'Inter',system-ui,sans-serif", background: "#F7F6F3", minHeight: "100%", padding: "26px 22px", color: "#26241F", boxSizing: "border-box", position: "relative" },
-  eyebrow: { fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", color: "#9A968C", fontWeight: 600, marginBottom: 4 },
+  page: { fontFamily: "'Inter',system-ui,sans-serif", background: "var(--bg)", minHeight: "100%", padding: "26px 22px", color: "var(--text)", boxSizing: "border-box", position: "relative" },
+  eyebrow: { fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--text-3)", fontWeight: 600, marginBottom: 4 },
   h1: { fontSize: 28, fontWeight: 700, margin: 0, letterSpacing: "-0.02em", fontFamily: "'Fraunces',Georgia,serif" },
-  subhead: { fontSize: 12.5, color: "#9A968C", marginTop: 3 },
+  subhead: { fontSize: 12.5, color: "var(--text-3)", marginTop: 3 },
   head: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 18 },
   headRight: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" },
   wisdomBadge: { display: "flex", alignItems: "center", gap: 5, background: "rgba(201,162,39,0.12)", border: "1px solid rgba(201,162,39,0.3)", padding: "6px 12px", borderRadius: 20, fontSize: 12.5, fontWeight: 700, color: "#8A6E1A" },
-  addSkillBtn: { display: "flex", alignItems: "center", gap: 6, border: "none", background: "#26241F", color: "#fff", padding: "8px 14px", borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
+  addSkillBtn: { display: "flex", alignItems: "center", gap: 6, border: "none", background: "var(--accent-strong)", color: "#fff", padding: "8px 14px", borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
   filterBar: { display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16 },
-  filterBtn: { border: "1px solid #E0DDD5", background: "#fff", padding: "6px 12px", borderRadius: 20, fontSize: 12, fontWeight: 600, color: "#4A463E", cursor: "pointer", fontFamily: "inherit" },
+  filterBtn: { border: "1px solid var(--border)", background: "var(--surface)", padding: "6px 12px", borderRadius: 20, fontSize: 12, fontWeight: 600, color: "var(--text-2)", cursor: "pointer", fontFamily: "inherit" },
   layout: { display: "grid", gap: 12 },
   cardList: { display: "flex", flexDirection: "column", gap: 10 },
-  skillCard: { background: "#fff", borderRadius: 12, padding: "14px", border: "1.5px solid #ECEAE3", cursor: "pointer", boxShadow: "0 1px 2px rgba(0,0,0,0.04)" },
+  skillCard: { background: "var(--surface)", borderRadius: 12, padding: "14px", border: "1.5px solid var(--border)", cursor: "pointer", boxShadow: "0 1px 2px rgba(0,0,0,0.04)" },
   skillCardTop: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 },
   skillMeta: { display: "flex", alignItems: "center", gap: 6 },
   pillarDot: { width: 8, height: 8, borderRadius: "50%", flexShrink: 0 },
-  srcLabel: { fontSize: 11, fontWeight: 600, color: "#9A968C" },
+  srcLabel: { fontSize: 11, fontWeight: 600, color: "var(--text-3)" },
   skillTitle: { fontSize: 15, fontWeight: 700, letterSpacing: "-0.01em", marginBottom: 12 },
   cardTitle: { fontSize: 13, fontWeight: 700, marginBottom: 10 },
   track: { display: "flex", alignItems: "center" },
@@ -342,39 +394,39 @@ const S = {
   trackCurrent: { fontSize: 9, fontWeight: 800, color: "#fff" },
   trackLine: { width: 24, height: 3, borderRadius: 2 },
   stageTag: { fontSize: 11, fontWeight: 700, padding: "3px 9px", borderRadius: 12, marginLeft: 10 },
-  detail: { background: "#fff", borderRadius: 14, padding: "18px 16px", boxShadow: "0 1px 4px rgba(0,0,0,0.07)", border: "1.5px solid #ECEAE3", alignSelf: "start" },
+  detail: { background: "var(--surface)", borderRadius: 14, padding: "18px 16px", boxShadow: "0 1px 4px rgba(0,0,0,0.07)", border: "1.5px solid var(--border)", alignSelf: "start" },
   detailHead: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 },
   detailTitle: { fontSize: 18, fontWeight: 700, letterSpacing: "-0.02em", fontFamily: "'Fraunces',Georgia,serif" },
-  closeBtn: { border: "none", background: "#F2F1EC", color: "#6B675E", width: 30, height: 30, borderRadius: 8, cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0 },
-  stageBlock: { border: "1.5px solid #ECEAE3", borderRadius: 10, padding: "12px 13px", marginBottom: 10 },
+  closeBtn: { border: "none", background: "var(--hover)", color: "var(--text-2)", width: 30, height: 30, borderRadius: 8, cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0 },
+  stageBlock: { border: "1.5px solid var(--border)", borderRadius: 10, padding: "12px 13px", marginBottom: 10 },
   stageBlockHead: { display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 8 },
   stageLetter: { width: 28, height: 28, borderRadius: 8, display: "grid", placeItems: "center", fontSize: 13, fontWeight: 800, flexShrink: 0 },
   stageName: { fontSize: 13, fontWeight: 700 },
-  stagePrompt: { fontSize: 11.5, color: "#6B675E", marginTop: 2, lineHeight: 1.4 },
+  stagePrompt: { fontSize: 11.5, color: "var(--text-2)", marginTop: 2, lineHeight: 1.4 },
   doneBadge: { fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 10, marginLeft: "auto", flexShrink: 0 },
   noteList: { margin: "0 0 8px 0", padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 6 },
   noteItem: { display: "flex", alignItems: "flex-start", gap: 8, fontSize: 13, lineHeight: 1.4 },
   noteDot: { width: 6, height: 6, borderRadius: "50%", flexShrink: 0, marginTop: 5 },
-  checkBox: { width: 18, height: 18, borderRadius: 5, border: "2px solid #D9D6CE", background: "#fff", cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0, marginTop: 1, padding: 0 },
-  checklistHint: { fontSize: 11.5, color: "#9A968C", fontWeight: 600, marginTop: 10, textAlign: "center" },
-  noteText: { flex: 1, color: "#26241F" },
-  noNotes: { fontSize: 12, color: "#B5B1A7", fontStyle: "italic", marginBottom: 8 },
+  checkBox: { width: 18, height: 18, borderRadius: 5, border: "2px solid var(--border)", background: "var(--surface)", cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0, marginTop: 1, padding: 0 },
+  checklistHint: { fontSize: 11.5, color: "var(--text-3)", fontWeight: 600, marginTop: 10, textAlign: "center" },
+  noteText: { flex: 1, color: "var(--text)" },
+  noNotes: { fontSize: 12, color: "var(--text-3)", fontStyle: "italic", marginBottom: 8 },
   noteAddRow: { display: "flex", gap: 6 },
-  noteInput: { flex: 1, border: "1px solid #E4E2DA", borderRadius: 7, padding: "7px 10px", fontSize: 13, fontFamily: "inherit", outline: "none" },
+  noteInput: { flex: 1, border: "1px solid var(--border)", borderRadius: 7, padding: "7px 10px", fontSize: 13, fontFamily: "inherit", outline: "none" },
   noteAddBtn: { width: 32, height: 32, border: "none", borderRadius: 7, color: "#fff", cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0 },
   advanceBtn: { display: "flex", alignItems: "center", gap: 8, border: "none", color: "#fff", padding: "10px 16px", borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", width: "100%", justifyContent: "center" },
   wisdomDone: { display: "flex", alignItems: "center", gap: 8, justifyContent: "center", fontSize: 13.5, fontWeight: 700, color: "#4C9A6B", padding: 12, background: "rgba(76,154,107,0.08)", borderRadius: 10, marginTop: 4 },
-  ghostBtn: { border: "none", background: "none", color: "#C3BFB5", cursor: "pointer", padding: 2, display: "grid", placeItems: "center" },
-  input: { border: "1px solid #E4E2DA", borderRadius: 8, padding: "9px 11px", fontSize: 13.5, fontFamily: "inherit", outline: "none", width: "100%", boxSizing: "border-box", marginBottom: 8 },
-  select: { border: "1px solid #E4E2DA", borderRadius: 8, padding: "8px 10px", fontSize: 12.5, fontFamily: "inherit", flex: 1 },
+  ghostBtn: { border: "none", background: "none", color: "var(--text-3)", cursor: "pointer", padding: 2, display: "grid", placeItems: "center" },
+  input: { border: "1px solid var(--border)", borderRadius: 8, padding: "9px 11px", fontSize: 13.5, fontFamily: "inherit", outline: "none", width: "100%", boxSizing: "border-box", marginBottom: 8 },
+  select: { border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px", fontSize: 12.5, fontFamily: "inherit", flex: 1 },
   addRow: { display: "flex", gap: 8, marginBottom: 8 },
   saveBtn: { display: "flex", alignItems: "center", gap: 5, border: "none", background: "#4C9A6B", color: "#fff", padding: "8px 14px", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
-  cancelBtn: { display: "flex", alignItems: "center", gap: 5, border: "1px solid #E4E2DA", background: "#fff", color: "#6B675E", padding: "8px 14px", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
-  empty: { fontSize: 13, color: "#9A968C", padding: "32px 12px", textAlign: "center" },
+  cancelBtn: { display: "flex", alignItems: "center", gap: 5, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-2)", padding: "8px 14px", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
+  empty: { fontSize: 13, color: "var(--text-3)", padding: "32px 12px", textAlign: "center" },
   celebOverlay: { position: "fixed", inset: 0, background: "rgba(38,36,31,0.55)", zIndex: 50, display: "grid", placeItems: "center" },
-  celebBox: { background: "#fff", borderRadius: 20, padding: "40px 32px", textAlign: "center", maxWidth: 320, boxShadow: "0 8px 40px rgba(0,0,0,0.18)" },
+  celebBox: { background: "var(--surface)", borderRadius: 20, padding: "40px 32px", textAlign: "center", maxWidth: 320, boxShadow: "0 8px 40px rgba(0,0,0,0.18)" },
   celebEmoji: { fontSize: 52, marginBottom: 12 },
   celebTitle: { fontSize: 22, fontWeight: 700, fontFamily: "'Fraunces',Georgia,serif", marginBottom: 8 },
-  celebSub: { fontSize: 13.5, color: "#6B675E", lineHeight: 1.5, marginBottom: 22 },
+  celebSub: { fontSize: 13.5, color: "var(--text-2)", lineHeight: 1.5, marginBottom: 22 },
   celebBtn: { border: "none", background: "#4C9A6B", color: "#fff", padding: "11px 28px", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" },
 };

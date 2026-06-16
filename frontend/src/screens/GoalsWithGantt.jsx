@@ -298,7 +298,7 @@ export default function GoalsWithGantt() {
               <Plus size={13} />
             </button>
           )}
-          <button onClick={() => softDelete(goal.id, goal.title)} style={{ ...S.rowAdd, color: "#C3BFB5" }} title="Delete">
+          <button onClick={() => softDelete(goal.id, goal.title)} style={{ ...S.rowAdd, color: "var(--text-3)" }} title="Delete">
             <X size={13} />
           </button>
         </div>
@@ -356,7 +356,7 @@ export default function GoalsWithGantt() {
               const allOn = PILLAR_NAMES.every((n) => ganttPillars.includes(n));
               return (
                 <button onClick={() => setGanttPillars(allOn ? [] : [...PILLAR_NAMES])}
-                  style={{ ...S.msChip, ...(allOn ? { background: "#26241F", color: "#fff", borderColor: "#26241F" } : {}) }}>
+                  style={{ ...S.msChip, ...(allOn ? { background: "var(--accent-strong)", color: "#fff", borderColor: "var(--accent-strong)" } : {}) }}>
                   All
                 </button>
               );
@@ -414,44 +414,44 @@ export default function GoalsWithGantt() {
 }
 
 const S = {
-  page: { fontFamily: "'Inter',system-ui,sans-serif", background: "#F7F6F3", minHeight: "100%", padding: "28px 26px", color: "#26241F", boxSizing: "border-box", maxWidth: "100%", overflowX: "hidden" },
+  page: { fontFamily: "'Inter',system-ui,sans-serif", background: "var(--bg)", minHeight: "100%", padding: "28px 26px", color: "var(--text)", boxSizing: "border-box", maxWidth: "100%", overflowX: "hidden" },
   head: { marginBottom: 18 },
-  eyebrow: { fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", color: "#9A968C", fontWeight: 600, marginBottom: 4 },
+  eyebrow: { fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--text-3)", fontWeight: 600, marginBottom: 4 },
   h1: { fontSize: 28, fontWeight: 700, margin: 0, letterSpacing: "-0.02em", fontFamily: "'Fraunces',Georgia,serif" },
   dot: { width: 9, height: 9, borderRadius: "50%", display: "inline-block", flexShrink: 0 },
   pillarPicker: { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 },
-  pillarChip: { display: "flex", alignItems: "center", gap: 7, border: "1px solid #E0DDD5", background: "#fff", padding: "7px 13px", borderRadius: 20, fontSize: 13, fontWeight: 600, color: "#4A463E", cursor: "pointer", fontFamily: "inherit" },
-  list: { background: "#fff", borderRadius: 12, padding: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.05)", overflowX: "hidden" },
+  pillarChip: { display: "flex", alignItems: "center", gap: 7, border: "1px solid var(--border)", background: "var(--surface)", padding: "7px 13px", borderRadius: 20, fontSize: 13, fontWeight: 600, color: "var(--text-2)", cursor: "pointer", fontFamily: "inherit" },
+  list: { background: "var(--surface)", borderRadius: 12, padding: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.05)", overflowX: "hidden" },
   row: { display: "flex", alignItems: "center", gap: 9, padding: "9px 10px", borderRadius: 8, flexWrap: "nowrap" },
-  caret: { border: "none", background: "none", cursor: "pointer", color: "#6B675E", display: "grid", placeItems: "center", padding: 0, width: 18, height: 18, flexShrink: 0 },
+  caret: { border: "none", background: "none", cursor: "pointer", color: "var(--text-2)", display: "grid", placeItems: "center", padding: 0, width: 18, height: 18, flexShrink: 0 },
   horizonTag: { fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", border: "1px solid", borderRadius: 5, padding: "2px 6px", flexShrink: 0 },
   title: { fontSize: 14, fontWeight: 500, lineHeight: 1.3, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
-  periodTag: { fontSize: 11, fontWeight: 600, color: "#6B675E", background: "#F2F1EC", padding: "3px 8px", borderRadius: 12, flexShrink: 0 },
-  rowAdd: { border: "none", background: "none", color: "#C3BFB5", cursor: "pointer", display: "grid", placeItems: "center", padding: 4, borderRadius: 6, flexShrink: 0 },
-  rootAdd: { display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#6B675E", background: "none", border: "1px dashed #D9D6CE", borderRadius: 8, padding: "9px 12px", cursor: "pointer", fontWeight: 600, fontFamily: "inherit", marginTop: 6, width: "100%", justifyContent: "center" },
+  periodTag: { fontSize: 11, fontWeight: 600, color: "var(--text-2)", background: "var(--hover)", padding: "3px 8px", borderRadius: 12, flexShrink: 0 },
+  rowAdd: { border: "none", background: "none", color: "var(--text-3)", cursor: "pointer", display: "grid", placeItems: "center", padding: 4, borderRadius: 6, flexShrink: 0 },
+  rootAdd: { display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--text-2)", background: "none", border: "1px dashed var(--border)", borderRadius: 8, padding: "9px 12px", cursor: "pointer", fontWeight: 600, fontFamily: "inherit", marginTop: 6, width: "100%", justifyContent: "center" },
   addBox: { display: "flex", alignItems: "center", gap: 6, padding: "6px 0 6px 28px", flexWrap: "wrap" },
-  editBox: { display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", flexWrap: "wrap", background: "#F7F6F3", borderRadius: 8, margin: "4px 0" },
-  input: { border: "1px solid #D9D6CE", borderRadius: 7, padding: "8px 11px", fontSize: 13.5, fontFamily: "inherit", outline: "none", flex: 1, minWidth: 120 },
-  monthSelect: { border: "1px solid #D9D6CE", borderRadius: 7, padding: "8px", fontSize: 12.5, fontFamily: "inherit", flexShrink: 0 },
-  inheritTag: { fontSize: 11.5, fontWeight: 600, color: "#6B675E", background: "#F2F1EC", padding: "6px 9px", borderRadius: 7, flexShrink: 0 },
-  dateInput: { border: "1px solid #D9D6CE", borderRadius: 7, padding: "8px", fontSize: 12, fontFamily: "inherit", flexShrink: 0 },
+  editBox: { display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", flexWrap: "wrap", background: "var(--bg)", borderRadius: 8, margin: "4px 0" },
+  input: { border: "1px solid var(--border)", borderRadius: 7, padding: "8px 11px", fontSize: 13.5, fontFamily: "inherit", outline: "none", flex: 1, minWidth: 120 },
+  monthSelect: { border: "1px solid var(--border)", borderRadius: 7, padding: "8px", fontSize: 12.5, fontFamily: "inherit", flexShrink: 0 },
+  inheritTag: { fontSize: 11.5, fontWeight: 600, color: "var(--text-2)", background: "var(--hover)", padding: "6px 9px", borderRadius: 7, flexShrink: 0 },
+  dateInput: { border: "1px solid var(--border)", borderRadius: 7, padding: "8px", fontSize: 12, fontFamily: "inherit", flexShrink: 0 },
   saveBtn: { border: "none", background: "#4C9A6B", color: "#fff", width: 32, height: 32, borderRadius: 7, cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0 },
-  cancelBtn: { border: "none", background: "#F2F1EC", color: "#6B675E", width: 32, height: 32, borderRadius: 7, cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0 },
-  ganttWrap: { background: "#fff", borderRadius: 12, padding: "16px 14px", marginTop: 18, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
+  cancelBtn: { border: "none", background: "var(--hover)", color: "var(--text-2)", width: 32, height: 32, borderRadius: 7, cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0 },
+  ganttWrap: { background: "var(--surface)", borderRadius: 12, padding: "16px 14px", marginTop: 18, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
   ganttTop: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10, marginBottom: 14 },
-  ganttTitle: { fontSize: 13, fontWeight: 700, color: "#4A463E", fontFamily: "'Fraunces',Georgia,serif" },
+  ganttTitle: { fontSize: 13, fontWeight: 700, color: "var(--text-2)", fontFamily: "'Fraunces',Georgia,serif" },
   ganttMultiSelect: { display: "flex", gap: 6, flexWrap: "wrap" },
-  msChip: { display: "flex", alignItems: "center", gap: 5, border: "1px solid #E0DDD5", background: "#fff", padding: "5px 10px", borderRadius: 16, fontSize: 11.5, fontWeight: 600, color: "#4A463E", cursor: "pointer", fontFamily: "inherit" },
-  ganttEmpty: { fontSize: 13, color: "#9A968C", padding: "24px 12px", textAlign: "center" },
+  msChip: { display: "flex", alignItems: "center", gap: 5, border: "1px solid var(--border)", background: "var(--surface)", padding: "5px 10px", borderRadius: 16, fontSize: 11.5, fontWeight: 600, color: "var(--text-2)", cursor: "pointer", fontFamily: "inherit" },
+  ganttEmpty: { fontSize: 13, color: "var(--text-3)", padding: "24px 12px", textAlign: "center" },
   ganttScroll: { overflowX: "auto" },
   ganttInner: { minWidth: 500 },
   ganttHeader: { display: "flex", marginBottom: 6 },
   ganttLabelCol: { width: 160, flexShrink: 0, display: "flex", alignItems: "center", gap: 7, minWidth: 0 },
   ganttGrid: { position: "relative", flex: 1, display: "grid", gridTemplateColumns: "repeat(12,1fr)" },
-  ganttMonth: { fontSize: 10, fontWeight: 600, color: "#9A968C", textAlign: "center", textTransform: "uppercase", letterSpacing: "0.04em" },
+  ganttMonth: { fontSize: 10, fontWeight: 600, color: "var(--text-3)", textAlign: "center", textTransform: "uppercase", letterSpacing: "0.04em" },
   ganttRow: { display: "flex", alignItems: "center", height: 30 },
   ganttRowDot: { width: 8, height: 8, borderRadius: "50%", flexShrink: 0 },
-  ganttRowLabel: { fontSize: 12, fontWeight: 500, color: "#3A372F", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  ganttRowLabel: { fontSize: 12, fontWeight: 500, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
   ganttCell: { borderLeft: "1px solid #F0EEE8", height: 30 },
   ganttBar: { position: "absolute", top: 7, height: 16, borderRadius: 5, boxShadow: "0 1px 2px rgba(0,0,0,0.12)" },
 };

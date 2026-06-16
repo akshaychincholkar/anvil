@@ -48,6 +48,13 @@ export const api = {
   createFocus: (data) => req("POST", "/focus", data),
   deleteFocus: (id) => req("DELETE", `/focus/${id}`),
 
+  // Vault (finance)
+  getTxns: () => req("GET", "/finance/txns"),
+  createTxn: (data) => req("POST", "/finance/txns", data),
+  updateTxn: (id, data) => req("PUT", `/finance/txns/${id}`, data),
+  deleteTxn: (id) => req("DELETE", `/finance/txns/${id}`),
+  restoreTxn: (id) => req("POST", `/finance/txns/${id}/restore`),
+
   // Per-user settings (key/value)
   getSetting: (key) => req("GET", `/settings/${key}`),
   setSetting: (key, value) => req("PUT", `/settings/${key}`, { value }),
@@ -89,10 +96,12 @@ export const api = {
   // Skills
   getSkills: () => req("GET", "/skills"),
   createSkill: (data) => req("POST", "/skills", data),
+  updateSkill: (id, data) => req("PUT", `/skills/${id}`, data),
   deleteSkill: (id) => req("DELETE", `/skills/${id}`),
   restoreSkill: (id) => req("POST", `/skills/${id}/restore`),
   addSkillNote: (id, stage, text) => req("POST", `/skills/${id}/notes`, { stage, text }),
   deleteSkillNote: (id) => req("DELETE", `/skill-notes/${id}`),
+  updateSkillNote: (id, text) => req("PUT", `/skill-notes/${id}`, { text }),
   toggleSkillNote: (id) => req("PUT", `/skill-notes/${id}/toggle`),
   completeSkillStage: (id, stage) => req("POST", `/skills/${id}/complete-stage`, { stage }),
 

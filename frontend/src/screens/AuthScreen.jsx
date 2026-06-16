@@ -73,18 +73,18 @@ export default function AuthScreen({ onAuthed }) {
 }
 
 const S = {
-  page: { minHeight: "100vh", display: "grid", placeItems: "center", background: "#F7F6F3", fontFamily: "'Inter',system-ui,sans-serif", padding: 20 },
-  card: { width: "100%", maxWidth: 380, background: "#fff", borderRadius: 16, padding: "32px 28px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", display: "flex", flexDirection: "column" },
+  page: { minHeight: "100vh", display: "grid", placeItems: "center", background: "var(--bg)", fontFamily: "'Inter',system-ui,sans-serif", padding: 20 },
+  card: { width: "100%", maxWidth: 380, background: "var(--surface)", borderRadius: 16, padding: "32px 28px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", display: "flex", flexDirection: "column" },
   brand: { display: "flex", alignItems: "center", gap: 9, marginBottom: 20 },
-  logo: { width: 32, height: 32, borderRadius: 8, background: "#26241F", color: "#fff", display: "grid", placeItems: "center", fontSize: 15, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif" },
-  brandName: { fontSize: 18, fontWeight: 700, fontFamily: "'Fraunces',Georgia,serif", color: "#26241F" },
-  title: { fontSize: 22, fontWeight: 700, margin: "0 0 4px", fontFamily: "'Fraunces',Georgia,serif", color: "#26241F" },
-  sub: { fontSize: 13.5, color: "#9A968C", margin: "0 0 22px" },
+  logo: { width: 32, height: 32, borderRadius: 8, background: "var(--accent-strong)", color: "#fff", display: "grid", placeItems: "center", fontSize: 15, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif" },
+  brandName: { fontSize: 18, fontWeight: 700, fontFamily: "'Fraunces',Georgia,serif", color: "var(--text)" },
+  title: { fontSize: 22, fontWeight: 700, margin: "0 0 4px", fontFamily: "'Fraunces',Georgia,serif", color: "var(--text)" },
+  sub: { fontSize: 13.5, color: "var(--text-3)", margin: "0 0 22px" },
   field: { display: "flex", flexDirection: "column", gap: 5, marginBottom: 14 },
-  label: { fontSize: 12, fontWeight: 600, color: "#6B675E" },
-  input: { border: "1px solid #E0DDD5", borderRadius: 9, padding: "11px 12px", fontSize: 14, fontFamily: "inherit", outline: "none", color: "#26241F" },
+  label: { fontSize: 12, fontWeight: 600, color: "var(--text-2)" },
+  input: { border: "1px solid var(--border)", borderRadius: 9, padding: "11px 12px", fontSize: 14, fontFamily: "inherit", outline: "none", color: "var(--text)" },
   error: { background: "rgba(194,83,107,0.10)", color: "#C2536B", fontSize: 13, padding: "9px 12px", borderRadius: 8, marginBottom: 14, fontWeight: 500 },
-  submit: { border: "none", background: "#26241F", color: "#fff", padding: "12px", borderRadius: 10, fontSize: 14.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", marginTop: 4 },
-  switch: { fontSize: 13, color: "#6B675E", textAlign: "center", marginTop: 18 },
+  submit: { border: "none", background: "var(--accent-strong)", color: "#fff", padding: "12px", borderRadius: 10, fontSize: 14.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", marginTop: 4 },
+  switch: { fontSize: 13, color: "var(--text-2)", textAlign: "center", marginTop: 18 },
   link: { border: "none", background: "none", color: "#3A7CA5", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", fontSize: 13, padding: 0 },
 };

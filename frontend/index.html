@@ -20,9 +20,15 @@
       rel="stylesheet"
     />
     <style>
+      :root {
+        --bg: #F7F6F3; --surface: #FFFFFF; --surface-2: #FAFAF8;
+        --hover: #F2F1EC; --border: #ECEAE3;
+        --text: #26241F; --text-2: #6B675E; --text-3: #9A968C;
+        --accent: #4C9A6B; --accent-strong: #26241F; --accent-2: #3A352C;
+      }
       *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
       html, body, #root { height: 100%; }
-      body { font-family: 'Inter', system-ui, sans-serif; background: #F7F6F3; color: #26241F; }
+      body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); transition: background 0.25s ease, color 0.25s ease; }
       button { font-family: inherit; }
       input, select, textarea { font-family: inherit; }
     </style>

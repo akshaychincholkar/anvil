@@ -119,7 +119,7 @@ export default function RevisionScreen() {
               {PILLAR_NAMES.map((p) => <option key={p}>{p}</option>)}
             </select>
             <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-              <label style={{ fontSize: 10, fontWeight: 600, color: "#9A968C", textTransform: "uppercase" }}>Learned on</label>
+              <label style={{ fontSize: 10, fontWeight: 600, color: "var(--text-3)", textTransform: "uppercase" }}>Learned on</label>
               <input type="date" value={newTopic.learned_date}
                 onChange={(e) => setNewTopic((n) => ({ ...n, learned_date: e.target.value }))}
                 style={{ ...S.select, fontSize: 13 }} />
@@ -196,8 +196,8 @@ export default function RevisionScreen() {
                       title={`Review ${r.stage} · ${r.due_date}${r.done ? " · Done" : ""}`}
                       style={{
                         ...S.reviewDot,
-                        background: r.done ? c : (isToday ? soft : "#F2F1EC"),
-                        border: `2px solid ${r.done ? c : (isToday ? c : "#E4E2DA")}`,
+                        background: r.done ? c : (isToday ? soft : "var(--hover)"),
+                        border: `2px solid ${r.done ? c : (isToday ? c : "var(--border)")}`,
                         color: r.done ? "#fff" : c,
                       }}>
                       {r.stage}
@@ -255,14 +255,14 @@ export default function RevisionScreen() {
               <button key={dateStr} onClick={() => setSelectedDay(isSel ? null : dateStr)}
                 style={{
                   ...S.calDay,
-                  background: isSel ? "#26241F" : (isToday ? "#F2F1EC" : "#fff"),
-                  color: isSel ? "#fff" : (isToday ? "#26241F" : (isPast ? "#6B675E" : "#C3BFB5")),
-                  borderColor: isToday ? "#26241F" : (isSel ? "#26241F" : "#ECEAE3"),
+                  background: isSel ? "var(--accent-strong)" : (isToday ? "var(--hover)" : "var(--surface)"),
+                  color: isSel ? "#fff" : (isToday ? "var(--text)" : (isPast ? "var(--text-2)" : "var(--text-3)")),
+                  borderColor: isToday ? "var(--accent-strong)" : (isSel ? "var(--accent-strong)" : "var(--border)"),
                   fontWeight: isToday || isSel ? 700 : 500,
                 }}>
                 {i + 1}
                 {count > 0 && (
-                  <span style={{ ...S.calBadge, background: isSel ? "#fff" : "#C2536B", color: isSel ? "#26241F" : "#fff" }}>{count}</span>
+                  <span style={{ ...S.calBadge, background: isSel ? "var(--surface)" : "#C2536B", color: isSel ? "var(--text)" : "#fff" }}>{count}</span>
                 )}
               </button>
             );
@@ -302,47 +302,47 @@ export default function RevisionScreen() {
 }
 
 const S = {
-  page: { fontFamily: "'Inter',system-ui,sans-serif", background: "#F7F6F3", minHeight: "100%", padding: "26px 22px", color: "#26241F", boxSizing: "border-box" },
+  page: { fontFamily: "'Inter',system-ui,sans-serif", background: "var(--bg)", minHeight: "100%", padding: "26px 22px", color: "var(--text)", boxSizing: "border-box" },
   head: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 20 },
-  eyebrow: { fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", color: "#9A968C", fontWeight: 600, marginBottom: 4 },
+  eyebrow: { fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--text-3)", fontWeight: 600, marginBottom: 4 },
   h1: { fontSize: 28, fontWeight: 700, margin: 0, letterSpacing: "-0.02em", fontFamily: "'Fraunces',Georgia,serif" },
-  addBtn: { display: "flex", alignItems: "center", gap: 6, border: "none", background: "#26241F", color: "#fff", padding: "8px 14px", borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
-  addBox: { background: "#fff", borderRadius: 12, padding: 16, marginBottom: 16, boxShadow: "0 1px 3px rgba(0,0,0,0.05)", display: "flex", flexDirection: "column", gap: 10 },
+  addBtn: { display: "flex", alignItems: "center", gap: 6, border: "none", background: "var(--accent-strong)", color: "#fff", padding: "8px 14px", borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
+  addBox: { background: "var(--surface)", borderRadius: 12, padding: 16, marginBottom: 16, boxShadow: "0 1px 3px rgba(0,0,0,0.05)", display: "flex", flexDirection: "column", gap: 10 },
   addRow: { display: "flex", gap: 8, alignItems: "center" },
-  input: { flex: 1, border: "1px solid #E4E2DA", borderRadius: 8, padding: "9px 11px", fontSize: 13.5, fontFamily: "inherit", outline: "none", minWidth: 0 },
-  select: { border: "1px solid #E4E2DA", borderRadius: 8, padding: "9px 10px", fontSize: 12.5, fontFamily: "inherit", flexShrink: 0 },
+  input: { flex: 1, border: "1px solid var(--border)", borderRadius: 8, padding: "9px 11px", fontSize: 13.5, fontFamily: "inherit", outline: "none", minWidth: 0 },
+  select: { border: "1px solid var(--border)", borderRadius: 8, padding: "9px 10px", fontSize: 12.5, fontFamily: "inherit", flexShrink: 0 },
   saveBtn: { display: "flex", alignItems: "center", gap: 5, border: "none", background: "#4C9A6B", color: "#fff", padding: "8px 14px", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
-  cancelBtn: { display: "flex", alignItems: "center", gap: 5, border: "1px solid #E4E2DA", background: "#fff", color: "#6B675E", padding: "8px 14px", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
+  cancelBtn: { display: "flex", alignItems: "center", gap: 5, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-2)", padding: "8px 14px", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
   section: { marginBottom: 20 },
-  sectionTitle: { display: "flex", alignItems: "center", gap: 7, fontSize: 13, fontWeight: 700, color: "#4A463E", marginBottom: 10 },
-  badge: { fontSize: 11, fontWeight: 700, background: "#F2F1EC", color: "#6B675E", borderRadius: 10, padding: "1px 7px" },
-  reviewCard: { display: "flex", alignItems: "center", gap: 12, background: "#fff", borderRadius: 10, padding: "12px 14px", marginBottom: 8, boxShadow: "0 1px 2px rgba(0,0,0,0.04)" },
-  checkbox: { width: 22, height: 22, borderRadius: 6, border: "2px solid #E0DDD5", background: "#fff", cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0, padding: 0 },
+  sectionTitle: { display: "flex", alignItems: "center", gap: 7, fontSize: 13, fontWeight: 700, color: "var(--text-2)", marginBottom: 10 },
+  badge: { fontSize: 11, fontWeight: 700, background: "var(--hover)", color: "var(--text-2)", borderRadius: 10, padding: "1px 7px" },
+  reviewCard: { display: "flex", alignItems: "center", gap: 12, background: "var(--surface)", borderRadius: 10, padding: "12px 14px", marginBottom: 8, boxShadow: "0 1px 2px rgba(0,0,0,0.04)" },
+  checkbox: { width: 22, height: 22, borderRadius: 6, border: "2px solid var(--border)", background: "var(--surface)", cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0, padding: 0 },
   reviewTopic: { fontSize: 13.5, fontWeight: 600, marginBottom: 4 },
   reviewMeta: { display: "flex", alignItems: "center", gap: 8 },
   stageTag: { fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 10 },
   missedTag: { fontSize: 11, color: "#C2536B", fontWeight: 600 },
-  topicCard: { background: "#fff", borderRadius: 12, padding: "13px 14px", marginBottom: 8, boxShadow: "0 1px 2px rgba(0,0,0,0.04)" },
+  topicCard: { background: "var(--surface)", borderRadius: 12, padding: "13px 14px", marginBottom: 8, boxShadow: "0 1px 2px rgba(0,0,0,0.04)" },
   topicHead: { display: "flex", alignItems: "center", gap: 8, marginBottom: 10 },
   dot: { width: 9, height: 9, borderRadius: "50%", flexShrink: 0, display: "inline-block" },
   topicName: { fontSize: 14, fontWeight: 600, flex: 1 },
-  topicPillar: { fontSize: 11, color: "#9A968C", fontWeight: 500 },
-  topicProgress: { fontSize: 11, fontWeight: 700, color: "#6B675E", background: "#F2F1EC", padding: "2px 7px", borderRadius: 10 },
-  ghostBtn: { border: "none", background: "none", color: "#C3BFB5", cursor: "pointer", padding: 2, display: "grid", placeItems: "center" },
+  topicPillar: { fontSize: 11, color: "var(--text-3)", fontWeight: 500 },
+  topicProgress: { fontSize: 11, fontWeight: 700, color: "var(--text-2)", background: "var(--hover)", padding: "2px 7px", borderRadius: 10 },
+  ghostBtn: { border: "none", background: "none", color: "var(--text-3)", cursor: "pointer", padding: 2, display: "grid", placeItems: "center" },
   reviewDots: { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" },
   reviewDot: { width: 28, height: 28, borderRadius: 8, cursor: "pointer", display: "grid", placeItems: "center", fontSize: 11, fontWeight: 700, padding: 0 },
-  learnedDate: { fontSize: 11, color: "#9A968C", marginLeft: "auto" },
-  cementedToggle: { display: "flex", alignItems: "center", gap: 8, border: "none", background: "none", cursor: "pointer", fontSize: 13, fontWeight: 700, color: "#4A463E", padding: "4px 0", fontFamily: "inherit", marginBottom: 8 },
-  empty: { fontSize: 13, color: "#9A968C", padding: "16px 0", textAlign: "center" },
-  calCard: { background: "#fff", borderRadius: 12, padding: "16px 16px 18px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
+  learnedDate: { fontSize: 11, color: "var(--text-3)", marginLeft: "auto" },
+  cementedToggle: { display: "flex", alignItems: "center", gap: 8, border: "none", background: "none", cursor: "pointer", fontSize: 13, fontWeight: 700, color: "var(--text-2)", padding: "4px 0", fontFamily: "inherit", marginBottom: 8 },
+  empty: { fontSize: 13, color: "var(--text-3)", padding: "16px 0", textAlign: "center" },
+  calCard: { background: "var(--surface)", borderRadius: 12, padding: "16px 16px 18px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
   calHead: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 },
   calTitle: { fontSize: 14, fontWeight: 700, fontFamily: "'Fraunces',Georgia,serif" },
-  calNav: { border: "none", background: "none", fontSize: 20, cursor: "pointer", color: "#6B675E", padding: "0 6px", lineHeight: 1 },
+  calNav: { border: "none", background: "none", fontSize: 20, cursor: "pointer", color: "var(--text-2)", padding: "0 6px", lineHeight: 1 },
   calDow: { display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 4, marginBottom: 6 },
-  calDowCell: { fontSize: 10, fontWeight: 600, color: "#9A968C", textAlign: "center", textTransform: "uppercase" },
+  calDowCell: { fontSize: 10, fontWeight: 600, color: "var(--text-3)", textAlign: "center", textTransform: "uppercase" },
   calGrid: { display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 4 },
-  calDay: { aspectRatio: "1", border: "1.5px solid #ECEAE3", background: "#fff", borderRadius: 8, fontSize: 12, cursor: "pointer", fontFamily: "inherit", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 1, position: "relative", padding: 2 },
+  calDay: { aspectRatio: "1", border: "1.5px solid var(--border)", background: "var(--surface)", borderRadius: 8, fontSize: 12, cursor: "pointer", fontFamily: "inherit", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 1, position: "relative", padding: 2 },
   calBadge: { fontSize: 9, fontWeight: 800, borderRadius: 6, padding: "0 4px", lineHeight: "14px", minWidth: 14, textAlign: "center" },
-  dayDetail: { marginTop: 16, paddingTop: 16, borderTop: "1px solid #ECEAE3" },
-  dayDetailTitle: { fontSize: 13, fontWeight: 700, color: "#4A463E", marginBottom: 10 },
+  dayDetail: { marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--border)" },
+  dayDetailTitle: { fontSize: 13, fontWeight: 700, color: "var(--text-2)", marginBottom: 10 },
 };

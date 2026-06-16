@@ -145,8 +145,8 @@ export default function GroveStats({ sessions = [], onBack }) {
       <Card title="Focus trend" hint={`This ${range} vs the previous two`}>
         <div style={S.trend3}>
           <div style={S.trendCol}><div style={S.trendVal}>{fmtMin(totalMin)}</div><div style={S.trendLbl}>This {range}</div></div>
-          <div style={S.trendCol}><div style={{ ...S.trendVal, color: "#6B675E" }}>{fmtMin(prevMin)}</div><div style={S.trendLbl}>{prevLabel}</div></div>
-          <div style={S.trendCol}><div style={{ ...S.trendVal, color: "#9A968C" }}>{fmtMin(prev2Min)}</div><div style={S.trendLbl}>{prev2Label}</div></div>
+          <div style={S.trendCol}><div style={{ ...S.trendVal, color: "var(--text-2)" }}>{fmtMin(prevMin)}</div><div style={S.trendLbl}>{prevLabel}</div></div>
+          <div style={S.trendCol}><div style={{ ...S.trendVal, color: "var(--text-3)" }}>{fmtMin(prev2Min)}</div><div style={S.trendLbl}>{prev2Label}</div></div>
         </div>
         <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}>
           <div style={{ ...S.trendBadge, color: trendColor, background: trendColor + "1A" }}>
@@ -155,8 +155,8 @@ export default function GroveStats({ sessions = [], onBack }) {
         </div>
         <TrendBars items={[
           { label: `This ${range}`, value: totalMin, color: "#4C9A6B" },
-          { label: prevLabel, value: prevMin, color: "#C3BFB5" },
-          { label: prev2Label, value: prev2Min, color: "#DAD6CC" },
+          { label: prevLabel, value: prevMin, color: "var(--text-3)" },
+          { label: prev2Label, value: prev2Min, color: "var(--text-3)" },
         ]} />
       </Card>
     </div>
@@ -248,61 +248,61 @@ function TrendBars({ items }) {
 }
 
 const S = {
-  page: { fontFamily: "'Inter',system-ui,sans-serif", background: "#F7F6F3", minHeight: "100%", padding: "20px 16px 40px", color: "#26241F", boxSizing: "border-box", maxWidth: 720, margin: "0 auto" },
+  page: { fontFamily: "'Inter',system-ui,sans-serif", background: "var(--bg)", minHeight: "100%", padding: "20px 16px 40px", color: "var(--text)", boxSizing: "border-box", maxWidth: 720, margin: "0 auto" },
   topbar: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 },
-  back: { display: "flex", alignItems: "center", gap: 5, border: "1px solid #E0DDD5", background: "#fff", padding: "8px 12px", borderRadius: 9, fontSize: 13, fontWeight: 600, color: "#4A463E", cursor: "pointer", fontFamily: "inherit" },
+  back: { display: "flex", alignItems: "center", gap: 5, border: "1px solid var(--border)", background: "var(--surface)", padding: "8px 12px", borderRadius: 9, fontSize: 13, fontWeight: 600, color: "var(--text-2)", cursor: "pointer", fontFamily: "inherit" },
   h1: { fontSize: 20, fontWeight: 700, margin: 0, fontFamily: "'Fraunces',Georgia,serif" },
 
-  rangeBar: { display: "flex", gap: 6, background: "#fff", padding: 5, borderRadius: 12, marginBottom: 16, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
-  rangeBtn: { flex: 1, border: "none", background: "none", padding: "9px 0", borderRadius: 8, fontSize: 13.5, fontWeight: 600, color: "#6B675E", cursor: "pointer", fontFamily: "inherit" },
-  rangeOn: { background: "#26241F", color: "#fff" },
+  rangeBar: { display: "flex", gap: 6, background: "var(--surface)", padding: 5, borderRadius: 12, marginBottom: 16, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
+  rangeBtn: { flex: 1, border: "none", background: "none", padding: "9px 0", borderRadius: 8, fontSize: 13.5, fontWeight: 600, color: "var(--text-2)", cursor: "pointer", fontFamily: "inherit" },
+  rangeOn: { background: "var(--accent-strong)", color: "#fff" },
 
   headline: { display: "flex", gap: 12, marginBottom: 16 },
-  bigStat: { flex: 1, background: "#fff", borderRadius: 14, padding: "16px 18px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
+  bigStat: { flex: 1, background: "var(--surface)", borderRadius: 14, padding: "16px 18px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
   bigVal: { fontSize: 26, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif", letterSpacing: "-0.02em" },
-  bigLbl: { fontSize: 12, color: "#9A968C", marginTop: 3, fontWeight: 500 },
+  bigLbl: { fontSize: 12, color: "var(--text-3)", marginTop: 3, fontWeight: 500 },
 
-  card: { background: "#fff", borderRadius: 16, padding: "18px 18px 20px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", marginBottom: 16 },
+  card: { background: "var(--surface)", borderRadius: 16, padding: "18px 18px 20px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", marginBottom: 16 },
   cardHead: { marginBottom: 14 },
   cardTitle: { fontSize: 16, fontWeight: 700, fontFamily: "'Fraunces',Georgia,serif" },
-  cardHint: { fontSize: 12, color: "#9A968C", marginTop: 2 },
-  empty: { fontSize: 13, color: "#9A968C", textAlign: "center", padding: "24px 0" },
+  cardHint: { fontSize: 12, color: "var(--text-3)", marginTop: 2 },
+  empty: { fontSize: 13, color: "var(--text-3)", textAlign: "center", padding: "24px 0" },
 
-  scene: { display: "flex", flexWrap: "wrap", alignItems: "flex-end", justifyContent: "center", gap: "0 2px", padding: "14px 8px 6px", background: "linear-gradient(#FBFAF7 55%, #E9F1E5 100%)", borderRadius: 12, minHeight: 110, border: "1px solid #ECEAE3" },
+  scene: { display: "flex", flexWrap: "wrap", alignItems: "flex-end", justifyContent: "center", gap: "0 2px", padding: "14px 8px 6px", background: "linear-gradient(#FBFAF7 55%, #E9F1E5 100%)", borderRadius: 12, minHeight: 110, border: "1px solid var(--border)" },
   sceneTree: { lineHeight: 0 },
-  sceneEmpty: { fontSize: 13, color: "#9A968C", textAlign: "center", padding: "34px 0", background: "linear-gradient(#FBFAF7 55%, #E9F1E5 100%)", borderRadius: 12, border: "1px solid #ECEAE3" },
-  overflow: { fontSize: 11.5, color: "#9A968C", textAlign: "center", marginTop: 6, fontWeight: 600 },
-  forestNumber: { textAlign: "center", marginTop: 12, fontSize: 18, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif", color: "#26241F" },
+  sceneEmpty: { fontSize: 13, color: "var(--text-3)", textAlign: "center", padding: "34px 0", background: "linear-gradient(#FBFAF7 55%, #E9F1E5 100%)", borderRadius: 12, border: "1px solid var(--border)" },
+  overflow: { fontSize: 11.5, color: "var(--text-3)", textAlign: "center", marginTop: 6, fontWeight: 600 },
+  forestNumber: { textAlign: "center", marginTop: 12, fontSize: 18, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif", color: "var(--text)" },
 
   vcPlot: { position: "relative", height: 180, paddingLeft: 30 },
   vcGridRow: { position: "absolute", left: 0, right: 0, display: "flex", alignItems: "center", height: 0 },
-  vcYLabel: { width: 26, marginRight: 4, textAlign: "right", fontSize: 9, color: "#9A968C", fontWeight: 600, flexShrink: 0 },
+  vcYLabel: { width: 26, marginRight: 4, textAlign: "right", fontSize: 9, color: "var(--text-3)", fontWeight: 600, flexShrink: 0 },
   vcGridLine: { flex: 1, height: 1, background: "#EEEBE4" },
   vcBars: { position: "absolute", left: 30, right: 0, top: 0, bottom: 0, display: "flex", alignItems: "flex-end", gap: 1 },
   vcCell: { flex: 1, height: "100%", display: "flex", alignItems: "flex-end", justifyContent: "center" },
   vcBar: { width: "72%", background: "#4C9A6B", borderRadius: "3px 3px 0 0", transition: "height 0.3s" },
   vcXAxis: { display: "flex", marginLeft: 30, marginTop: 4 },
-  vcXCell: { flex: 1, textAlign: "center", fontSize: 8.5, color: "#9A968C", fontWeight: 600, overflow: "hidden" },
-  vcYTitle: { textAlign: "center", fontSize: 9.5, color: "#9A968C", marginTop: 6, letterSpacing: "0.06em", textTransform: "uppercase", fontWeight: 600 },
+  vcXCell: { flex: 1, textAlign: "center", fontSize: 8.5, color: "var(--text-3)", fontWeight: 600, overflow: "hidden" },
+  vcYTitle: { textAlign: "center", fontSize: 9.5, color: "var(--text-3)", marginTop: 6, letterSpacing: "0.06em", textTransform: "uppercase", fontWeight: 600 },
 
   donutWrap: { display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap", justifyContent: "center" },
-  donutCenterTop: { fontSize: 16, fontWeight: 800, fill: "#26241F", fontFamily: "'Fraunces',Georgia,serif" },
+  donutCenterTop: { fontSize: 16, fontWeight: 800, fill: "var(--text)", fontFamily: "'Fraunces',Georgia,serif" },
   donutCenterSub: { fontSize: 9, fill: "#9A968C", textTransform: "uppercase", letterSpacing: "0.08em" },
   legend: { flex: 1, minWidth: 180, display: "flex", flexDirection: "column", gap: 8 },
   legendRow: { display: "flex", alignItems: "center", gap: 8 },
   legendDot: { width: 11, height: 11, borderRadius: 3, flexShrink: 0 },
-  legendName: { flex: 1, fontSize: 13, fontWeight: 600, color: "#26241F", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
-  legendVal: { fontSize: 12, color: "#9A968C", fontWeight: 600, flexShrink: 0 },
+  legendName: { flex: 1, fontSize: 13, fontWeight: 600, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  legendVal: { fontSize: 12, color: "var(--text-3)", fontWeight: 600, flexShrink: 0 },
 
   trend3: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 12, gap: 8 },
   trendCol: { textAlign: "center", flex: 1 },
   trendVal: { fontSize: 20, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif" },
-  trendLbl: { fontSize: 11, color: "#9A968C", marginTop: 2 },
+  trendLbl: { fontSize: 11, color: "var(--text-3)", marginTop: 2 },
   trendBadge: { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 13, fontWeight: 800, padding: "6px 12px", borderRadius: 20, width: "fit-content" },
   tbWrap: { display: "flex", flexDirection: "column", gap: 8 },
   tbRow: { display: "flex", alignItems: "center", gap: 8 },
-  tbLbl: { width: 78, fontSize: 11, color: "#6B675E", fontWeight: 600, flexShrink: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  tbLbl: { width: 78, fontSize: 11, color: "var(--text-2)", fontWeight: 600, flexShrink: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
   tbTrack: { flex: 1, height: 14, background: "#F2F0EA", borderRadius: 7, overflow: "hidden" },
   tbBar: { height: "100%", borderRadius: 7, transition: "width 0.3s" },
-  tbVal: { width: 56, fontSize: 11, color: "#6B675E", fontWeight: 700, flexShrink: 0, textAlign: "right" },
+  tbVal: { width: 56, fontSize: 11, color: "var(--text-2)", fontWeight: 700, flexShrink: 0, textAlign: "right" },
 };

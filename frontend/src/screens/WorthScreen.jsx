@@ -1,13 +1,13 @@
 import { useState, useEffect, useMemo } from "react";
 import { api } from "../api.js";
 import { TREES, DEFAULT_TREE } from "./grove/trees.jsx";
+import { useCurrency, fmtMoney } from "../currency.js";
 
 const RATE_KEY = "grove_rates";
 const PILLARS = Object.keys(TREES); // financial, academic, relationship, spiritual, health
 
 const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const startOfWeek = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); const off = (x.getDay() + 6) % 7; x.setDate(x.getDate() - off); return x; };
-const rupee = (n) => "₹" + Math.round(n).toLocaleString("en-IN");
 const fmtH = (min) => { const h = Math.floor(min / 60), m = min % 60; return h && m ? `${h}h ${m}m` : h ? `${h}h` : `${m}m`; };
 
 const PRESETS = [
@@ -27,6 +27,8 @@ function presetRange(id) {
 }
 
 export default function WorthScreen() {
+  const cur = useCurrency();
+  const rupee = (n) => fmtMoney(n, cur.code);
   const [rates, setRates] = useState({});
   const [sessions, setSessions] = useState([]);
   const [preset, setPreset] = useState("week");
@@ -144,7 +146,7 @@ export default function WorthScreen() {
               <span style={{ ...S.dot, background: TREES[p].leaf }} />
               <span style={S.rateName}>{TREES[p].label}</span>
               <div style={S.rateInputWrap}>
-                <span style={S.rupeeSign}>₹</span>
+                <span style={S.rupeeSign}>{cur.symbol}</span>
                 <input type="number" min="0" inputMode="numeric" placeholder="0"
                   value={rates[p] ?? ""} onChange={(e) => saveRate(p, e.target.value)} style={S.rateInput} />
                 <span style={S.perHr}>/hr</span>
@@ -158,29 +160,29 @@ export default function WorthScreen() {
 }
 
 const S = {
-  page: { fontFamily: "'Inter',system-ui,sans-serif", background: "#F7F6F3", minHeight: "100%", padding: "28px 20px 40px", color: "#26241F", boxSizing: "border-box", maxWidth: 680, margin: "0 auto" },
+  page: { fontFamily: "'Inter',system-ui,sans-serif", background: "var(--bg)", minHeight: "100%", padding: "28px 20px 40px", color: "var(--text)", boxSizing: "border-box", maxWidth: 680, margin: "0 auto" },
   head: { marginBottom: 16 },
-  eyebrow: { fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", color: "#9A968C", fontWeight: 600, marginBottom: 4 },
+  eyebrow: { fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--text-3)", fontWeight: 600, marginBottom: 4 },
   h1: { fontSize: 28, fontWeight: 700, margin: 0, letterSpacing: "-0.02em", fontFamily: "'Fraunces',Georgia,serif" },
-  subhead: { fontSize: 13, color: "#9A968C", marginTop: 4 },
+  subhead: { fontSize: 13, color: "var(--text-3)", marginTop: 4 },
 
-  hero: { background: "linear-gradient(135deg,#26241F,#3A352C)", borderRadius: 16, padding: "22px 24px", color: "#fff", marginBottom: 16, textAlign: "center" },
+  hero: { background: "linear-gradient(135deg,var(--accent-strong),var(--accent-2))", borderRadius: 16, padding: "22px 24px", color: "#fff", marginBottom: 16, textAlign: "center" },
   heroVal: { fontSize: 38, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif", letterSpacing: "-0.02em" },
-  heroSub: { fontSize: 12.5, color: "#C9C4B8", marginTop: 4 },
+  heroSub: { fontSize: 12.5, color: "var(--text-3)", marginTop: 4 },
 
-  card: { background: "#fff", borderRadius: 16, padding: "18px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", marginBottom: 16 },
+  card: { background: "var(--surface)", borderRadius: 16, padding: "18px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", marginBottom: 16 },
   cardTitle: { fontSize: 16, fontWeight: 700, fontFamily: "'Fraunces',Georgia,serif", marginBottom: 12 },
-  cardHint: { fontSize: 12, color: "#9A968C", marginTop: -8, marginBottom: 12 },
-  muted: { fontSize: 13, color: "#9A968C", textAlign: "center", padding: "16px 0" },
+  cardHint: { fontSize: 12, color: "var(--text-3)", marginTop: -8, marginBottom: 12 },
+  muted: { fontSize: 13, color: "var(--text-3)", textAlign: "center", padding: "16px 0" },
 
   presetRow: { display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 14 },
-  preset: { border: "1px solid #E0DDD5", background: "#fff", padding: "7px 13px", borderRadius: 18, fontSize: 12.5, fontWeight: 600, color: "#4A463E", cursor: "pointer", fontFamily: "inherit" },
-  presetOn: { background: "#26241F", color: "#fff", borderColor: "#26241F" },
+  preset: { border: "1px solid var(--border)", background: "var(--surface)", padding: "7px 13px", borderRadius: 18, fontSize: 12.5, fontWeight: 600, color: "var(--text-2)", cursor: "pointer", fontFamily: "inherit" },
+  presetOn: { background: "var(--accent-strong)", color: "#fff", borderColor: "var(--accent-strong)" },
   dateRow: { display: "flex", alignItems: "flex-end", gap: 10 },
   dateField: { display: "flex", flexDirection: "column", gap: 4, flex: 1 },
-  dateLbl: { fontSize: 11, color: "#6B675E", fontWeight: 600 },
-  dateInput: { border: "1px solid #E0DDD5", borderRadius: 9, padding: "9px 10px", fontSize: 13.5, fontFamily: "inherit", color: "#26241F", outline: "none", width: "100%", boxSizing: "border-box" },
-  dateArrow: { color: "#9A968C", paddingBottom: 9 },
+  dateLbl: { fontSize: 11, color: "var(--text-2)", fontWeight: 600 },
+  dateInput: { border: "1px solid var(--border)", borderRadius: 9, padding: "9px 10px", fontSize: 13.5, fontFamily: "inherit", color: "var(--text)", outline: "none", width: "100%", boxSizing: "border-box" },
+  dateArrow: { color: "var(--text-3)", paddingBottom: 9 },
 
   rows: { display: "flex", flexDirection: "column", gap: 14 },
   row: {},
@@ -190,15 +192,15 @@ const S = {
   rowCost: { fontSize: 15, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif" },
   rowBarTrack: { height: 8, background: "#F2F0EA", borderRadius: 4, overflow: "hidden" },
   rowBar: { height: "100%", borderRadius: 4, transition: "width 0.3s" },
-  rowMeta: { fontSize: 11.5, color: "#9A968C", marginTop: 5, fontWeight: 500 },
-  totalRow: { display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #ECEAE3", paddingTop: 12, marginTop: 2, fontSize: 14, fontWeight: 700 },
+  rowMeta: { fontSize: 11.5, color: "var(--text-3)", marginTop: 5, fontWeight: 500 },
+  totalRow: { display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid var(--border)", paddingTop: 12, marginTop: 2, fontSize: 14, fontWeight: 700 },
   totalVal: { fontSize: 18, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif" },
 
   rateGrid: { display: "flex", flexDirection: "column", gap: 10 },
   rateRow: { display: "flex", alignItems: "center", gap: 8 },
   rateName: { flex: 1, fontSize: 14, fontWeight: 600 },
-  rateInputWrap: { display: "flex", alignItems: "center", gap: 3, border: "1px solid #E0DDD5", borderRadius: 9, padding: "4px 10px", background: "#FAFAF8" },
-  rupeeSign: { fontSize: 14, color: "#6B675E", fontWeight: 600 },
-  rateInput: { border: "none", background: "none", outline: "none", width: 64, fontSize: 14, fontWeight: 700, fontFamily: "inherit", color: "#26241F", textAlign: "right" },
-  perHr: { fontSize: 12, color: "#9A968C", fontWeight: 600 },
+  rateInputWrap: { display: "flex", alignItems: "center", gap: 3, border: "1px solid var(--border)", borderRadius: 9, padding: "4px 10px", background: "var(--surface-2)" },
+  rupeeSign: { fontSize: 14, color: "var(--text-2)", fontWeight: 600 },
+  rateInput: { border: "none", background: "none", outline: "none", width: 64, fontSize: 14, fontWeight: 700, fontFamily: "inherit", color: "var(--text)", textAlign: "right" },
+  perHr: { fontSize: 12, color: "var(--text-3)", fontWeight: 600 },
 };

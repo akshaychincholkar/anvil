@@ -245,6 +245,18 @@ def init_db():
             deleted_at TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE TABLE IF NOT EXISTS finance_txn (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            kind TEXT NOT NULL CHECK(kind IN ('income','expense')),
+            category TEXT NOT NULL DEFAULT 'Other',
+            amount REAL NOT NULL DEFAULT 0,
+            note TEXT NOT NULL DEFAULT '',
+            txn_date TEXT NOT NULL,
+            deleted_at TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
         """)
 
         migrate_db()

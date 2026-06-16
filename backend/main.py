@@ -798,6 +798,10 @@ def update_skill(skill_id: int, body: dict):
     with db() as conn:
         if "stage" in body:
             conn.execute(f"UPDATE skill SET stage=? WHERE id=? AND user_id={cu()}", (body["stage"], skill_id))
+        if "title" in body:
+            title = (body["title"] or "").strip()
+            if title:
+                conn.execute(f"UPDATE skill SET title=? WHERE id=? AND user_id={cu()}", (title, skill_id))
         return _skill_full(conn, skill_id)
 
 @app.delete("/api/skills/{skill_id}", status_code=204)
@@ -824,6 +828,18 @@ def add_skill_note(skill_id: int, body: SkillNoteCreate):
 def delete_skill_note(note_id: int):
     with db() as conn:
         conn.execute("DELETE FROM skill_note WHERE id=?", (note_id,))
+
+@app.put("/api/skill-notes/{note_id}")
+def update_skill_note(note_id: int, body: dict):
+    text = (body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(400, "text required")
+    with db() as conn:
+        row = conn.execute("SELECT skill_id FROM skill_note WHERE id=?", (note_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Note not found")
+        conn.execute("UPDATE skill_note SET text=? WHERE id=?", (text, note_id))
+        return _skill_full(conn, row["skill_id"])
 
 @app.put("/api/skill-notes/{note_id}/toggle")
 def toggle_skill_note(note_id: int):
@@ -1142,6 +1158,76 @@ def restore_affirmation(aff_id: int):
         _restore(conn, "affirmation", aff_id)
         r = conn.execute("SELECT id, category, text, favorite FROM affirmation WHERE id=?", (aff_id,)).fetchone()
         return {"id": r["id"], "category": r["category"], "text": r["text"], "favorite": bool(r["favorite"])} if r else {}
+
+
+# ── Vault (Finance / expenses, income) ───────────────────────────────────────
+
+class TxnCreate(BaseModel):
+    kind: str               # 'income' | 'expense'
+    category: str = "Other"
+    amount: float = 0
+    note: str = ""
+    date: Optional[str] = None   # YYYY-MM-DD
+
+class TxnUpdate(BaseModel):
+    category: Optional[str] = None
+    amount: Optional[float] = None
+    note: Optional[str] = None
+    date: Optional[str] = None
+
+def _txn_row(r):
+    return {"id": r["id"], "kind": r["kind"], "category": r["category"],
+            "amount": r["amount"], "note": r["note"], "date": r["txn_date"]}
+
+@app.get("/api/finance/txns")
+def get_txns():
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT id, kind, category, amount, note, txn_date FROM finance_txn "
+            f"WHERE user_id={cu()} AND deleted_at IS NULL ORDER BY txn_date DESC, id DESC"
+        ).fetchall()
+        return [_txn_row(r) for r in rows]
+
+@app.post("/api/finance/txns", status_code=201)
+def create_txn(body: TxnCreate):
+    if body.kind not in ("income", "expense"):
+        raise HTTPException(400, "kind must be income or expense")
+    d = body.date or date.today().isoformat()
+    with db() as conn:
+        cur = conn.execute(
+            f"INSERT INTO finance_txn (user_id, kind, category, amount, note, txn_date) VALUES ({cu()}, ?, ?, ?, ?, ?)",
+            (body.kind, body.category or "Other", abs(body.amount or 0), body.note or "", d)
+        )
+        r = conn.execute("SELECT id, kind, category, amount, note, txn_date FROM finance_txn WHERE id=?", (cur.lastrowid,)).fetchone()
+        return _txn_row(r)
+
+@app.put("/api/finance/txns/{txn_id}")
+def update_txn(txn_id: int, body: TxnUpdate):
+    updates = {k: v for k, v in body.dict().items() if v is not None}
+    if "date" in updates:
+        updates["txn_date"] = updates.pop("date")
+    if "amount" in updates:
+        updates["amount"] = abs(updates["amount"])
+    with db() as conn:
+        if updates:
+            sets = ", ".join(f"{k}=?" for k in updates)
+            conn.execute(f"UPDATE finance_txn SET {sets} WHERE id=? AND user_id={cu()}", (*updates.values(), txn_id))
+        r = conn.execute("SELECT id, kind, category, amount, note, txn_date FROM finance_txn WHERE id=?", (txn_id,)).fetchone()
+        if not r:
+            raise HTTPException(404)
+        return _txn_row(r)
+
+@app.delete("/api/finance/txns/{txn_id}", status_code=204)
+def delete_txn(txn_id: int):
+    with db() as conn:
+        _soft_delete(conn, "finance_txn", txn_id)
+
+@app.post("/api/finance/txns/{txn_id}/restore")
+def restore_txn(txn_id: int):
+    with db() as conn:
+        _restore(conn, "finance_txn", txn_id)
+        r = conn.execute("SELECT id, kind, category, amount, note, txn_date FROM finance_txn WHERE id=?", (txn_id,)).fetchone()
+        return _txn_row(r) if r else {}
 
 
 # ── Grove (Focus / Pomodoro) ──────────────────────────────────────────────────

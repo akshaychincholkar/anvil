@@ -52,7 +52,7 @@ const S = {
     display: "flex",
     alignItems: "center",
     gap: 12,
-    background: "#26241F",
+    background: "var(--accent-strong)",
     color: "#fff",
     borderRadius: 10,
     padding: "12px 16px",

@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import {
   LayoutGrid, Target, CheckSquare, BookOpen,
   GraduationCap, Star, RotateCcw, Menu, X,
-  Sparkles, ScrollText, ChevronDown, ChevronRight, LogOut, Trees, IndianRupee
+  Sparkles, LogOut, Trees, IndianRupee, Settings, Landmark
 } from "lucide-react";
 import QuadrantView from "./screens/QuadrantView.jsx";
 import GoalsWithGantt from "./screens/GoalsWithGantt.jsx";
@@ -15,7 +15,14 @@ import AffirmationsScreen from "./screens/AffirmationsScreen.jsx";
 import GroveScreen from "./screens/GroveScreen.jsx";
 import WorthScreen from "./screens/WorthScreen.jsx";
 import AuthScreen from "./screens/AuthScreen.jsx";
+import FinanceScreen from "./screens/FinanceScreen.jsx";
+import SettingsModal from "./screens/SettingsModal.jsx";
 import { api, getToken, clearToken } from "./api.js";
+import { applyTheme, getStoredThemeId } from "./theme.js";
+import { getCurrencyCode, setCurrencyCode } from "./currency.js";
+
+// Apply the stored theme immediately so there's no flash before React mounts.
+applyTheme(getStoredThemeId(), false);
 
 // Registry: screen id → metadata + component.
 const SCREENS = {
@@ -24,6 +31,7 @@ const SCREENS = {
   goals:        { label: "Goals",        icon: Target,        component: GoalsWithGantt },
   grove:        { label: "Grove",        icon: Trees,         component: GroveScreen },
   worth:        { label: "Worth",        icon: IndianRupee,   component: WorthScreen },
+  vault:        { label: "Vault",        icon: Landmark,      component: FinanceScreen },
   journal:      { label: "Journal",      icon: BookOpen,      component: JournalScreen },
   revision:     { label: "Revision",     icon: RotateCcw,     component: RevisionScreen },
   affirmations: { label: "Affirmations", icon: Sparkles,      component: AffirmationsScreen },
@@ -31,19 +39,21 @@ const SCREENS = {
   spiritual:    { label: "Spiritual",    icon: Star,          component: SpiritualScreen },
 };
 
-// Sidebar layout (flat items).
-const NAV = [
-  { type: "item", id: "habits" },
-  { type: "item", id: "quadrant" },
-  { type: "item", id: "goals" },
-  { type: "item", id: "grove" },
-  { type: "item", id: "journal" },
-  { type: "item", id: "revision" },
-  { type: "item", id: "affirmations" },
-  { type: "item", id: "skills" },
-  { type: "item", id: "spiritual" },
-  { type: "item", id: "worth" },
+// Default sidebar order (flat items). Users can reorder/hide via Settings.
+const DEFAULT_ORDER = [
+  "habits", "quadrant", "goals", "grove", "journal",
+  "revision", "affirmations", "skills", "spiritual", "worth", "vault",
 ];
+
+// Merge a saved order with the registry so newly-added screens always appear,
+// and stale ids are dropped.
+function normalizeOrder(saved) {
+  const known = DEFAULT_ORDER.filter((id) => SCREENS[id]);
+  const fromSaved = (Array.isArray(saved) ? saved : []).filter((id) => SCREENS[id]);
+  const merged = [...fromSaved];
+  known.forEach((id) => { if (!merged.includes(id)) merged.push(id); });
+  return merged;
+}
 
 function useIsMobile() {
   const [mobile, setMobile] = useState(() => window.innerWidth < 720);
@@ -58,9 +68,13 @@ function useIsMobile() {
 export default function App() {
   const [active, setActive] = useState("habits");
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [openGroups, setOpenGroups] = useState({ spiritual: true });
   const [user, setUser] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [themeId, setThemeId] = useState(getStoredThemeId());
+  const [currency, setCurrency] = useState(getCurrencyCode());
+  const [order, setOrder] = useState(() => normalizeOrder(DEFAULT_ORDER));
+  const [hidden, setHidden] = useState([]);
   const isMobile = useIsMobile();
 
   // Validate any stored token on load; listen for 401s from the API layer.
@@ -78,14 +92,50 @@ export default function App() {
     return () => { cancelled = true; window.removeEventListener("anvil-unauthorized", logout); };
   }, []);
 
+  // Once authed, pull per-user preferences (theme + sidebar layout) from the backend.
+  useEffect(() => {
+    if (!user) return;
+    api.getSetting("theme").then((r) => { if (r?.value) setThemeId(applyTheme(r.value)); }).catch(() => {});
+    api.getSetting("currency").then((r) => { if (r?.value) setCurrency(setCurrencyCode(r.value)); }).catch(() => {});
+    api.getSetting("sidebar_order").then((r) => { if (Array.isArray(r?.value)) setOrder(normalizeOrder(r.value)); }).catch(() => {});
+    api.getSetting("sidebar_hidden").then((r) => { if (Array.isArray(r?.value)) setHidden(r.value); }).catch(() => {});
+  }, [user]);
+
   function navigate(id) {
     setActive(id);
     setDrawerOpen(false);
   }
-  const toggleGroup = (id) => setOpenGroups((g) => ({ ...g, [id]: !g[id] }));
   const logout = () => { clearToken(); setUser(null); };
 
-  if (!authChecked) return <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", fontFamily: "'Inter',system-ui,sans-serif", color: "#9A968C" }}>Loading…</div>;
+  const previewTheme = (id) => { applyTheme(id, false); };       // live preview, not saved
+  const commitTheme = (id) => {                                  // finalize + persist
+    setThemeId(applyTheme(id));
+    api.setSetting("theme", id).catch(() => {});
+    setSettingsOpen(false);
+  };
+  const closeSettings = () => {
+    applyTheme(themeId, false); // revert any unsaved theme preview
+    setSettingsOpen(false);
+  };
+  const selectCurrency = (code) => {
+    setCurrency(setCurrencyCode(code));
+    api.setSetting("currency", code).catch(() => {});
+  };
+  const saveSidebar = (newOrder, newHidden) => {
+    setOrder(normalizeOrder(newOrder));
+    setHidden(newHidden);
+    setSettingsOpen(false);
+    api.setSetting("sidebar_order", newOrder).catch(() => {});
+    api.setSetting("sidebar_hidden", newHidden).catch(() => {});
+    if (newHidden.includes(active)) {
+      const firstVisible = normalizeOrder(newOrder).find((id) => !newHidden.includes(id));
+      if (firstVisible) setActive(firstVisible);
+    }
+  };
+
+  const visibleNav = order.filter((id) => !hidden.includes(id));
+
+  if (!authChecked) return <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", fontFamily: "'Inter',system-ui,sans-serif", color: "var(--text-3)" }}>Loading…</div>;
   if (!user) return <AuthScreen onAuthed={setUser} />;
 
   const screen = SCREENS[active];
@@ -93,47 +143,15 @@ export default function App() {
 
   const NavItems = () => (
     <div style={S.navItems}>
-      {NAV.map((entry) => {
-        if (entry.type === "group") {
-          const open = openGroups[entry.id];
-          const GIcon = entry.icon;
-          const childActive = entry.children.includes(active);
-          return (
-            <div key={entry.id}>
-              <button
-                onClick={() => toggleGroup(entry.id)}
-                style={{ ...S.navItem, ...(childActive && !open ? S.navItemOn : {}) }}
-              >
-                <GIcon size={18} />
-                <span style={S.navLabel}>{entry.label}</span>
-                {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-              </button>
-              {open && entry.children.map((cid) => {
-                const c = SCREENS[cid];
-                const Icon = c.icon;
-                const on = active === cid;
-                return (
-                  <button
-                    key={cid}
-                    onClick={() => navigate(cid)}
-                    title={c.label}
-                    style={{ ...S.navItem, ...S.navChild, ...(on ? S.navItemOn : {}) }}
-                  >
-                    <Icon size={16} />
-                    <span style={S.navLabel}>{c.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          );
-        }
-        const c = SCREENS[entry.id];
+      {visibleNav.map((id) => {
+        const c = SCREENS[id];
+        if (!c) return null;
         const Icon = c.icon;
-        const on = active === entry.id;
+        const on = active === id;
         return (
           <button
-            key={entry.id}
-            onClick={() => navigate(entry.id)}
+            key={id}
+            onClick={() => navigate(id)}
             title={c.label}
             style={{ ...S.navItem, ...(on ? S.navItemOn : {}) }}
           >
@@ -146,15 +164,21 @@ export default function App() {
   );
 
   const UserFooter = () => (
-    <div style={S.userFooter}>
-      <div style={S.userInfo}>
-        <div style={S.userAvatar}>{(user.name || user.email || "?").charAt(0).toUpperCase()}</div>
-        <div style={{ minWidth: 0 }}>
-          <div style={S.userName}>{user.name || "You"}</div>
-          <div style={S.userEmail}>{user.email}</div>
+    <div style={S.footerWrap}>
+      <button onClick={() => setSettingsOpen(true)} style={S.settingsBtn} title="Settings">
+        <Settings size={17} />
+        <span>Settings</span>
+      </button>
+      <div style={S.userFooter}>
+        <div style={S.userInfo}>
+          <div style={S.userAvatar}>{(user.name || user.email || "?").charAt(0).toUpperCase()}</div>
+          <div style={{ minWidth: 0 }}>
+            <div style={S.userName}>{user.name || "You"}</div>
+            <div style={S.userEmail}>{user.email}</div>
+          </div>
         </div>
+        <button onClick={logout} style={S.logoutBtn} title="Sign out"><LogOut size={16} /></button>
       </div>
-      <button onClick={logout} style={S.logoutBtn} title="Sign out"><LogOut size={16} /></button>
     </div>
   );
 
@@ -207,6 +231,21 @@ export default function App() {
           <Screen />
         </main>
       </div>
+
+      {settingsOpen && (
+        <SettingsModal
+          screens={SCREENS}
+          order={order}
+          hidden={hidden}
+          themeId={themeId}
+          currency={currency}
+          onSaveSidebar={saveSidebar}
+          onPreviewTheme={previewTheme}
+          onCommitTheme={commitTheme}
+          onSelectCurrency={selectCurrency}
+          onClose={closeSettings}
+        />
+      )}
     </div>
   );
 }
@@ -217,13 +256,13 @@ const S = {
     height: "100vh",
     overflow: "hidden",
     fontFamily: "'Inter', system-ui, sans-serif",
-    background: "#F7F6F3",
+    background: "var(--bg)",
   },
   nav: {
     width: 200,
     flexShrink: 0,
-    background: "#fff",
-    borderRight: "1px solid #ECEAE3",
+    background: "var(--surface)",
+    borderRight: "1px solid var(--border)",
     display: "flex",
     flexDirection: "column",
     padding: "20px 10px",
@@ -234,14 +273,14 @@ const S = {
     alignItems: "center",
     gap: 9,
     padding: "6px 10px 20px",
-    borderBottom: "1px solid #ECEAE3",
+    borderBottom: "1px solid var(--border)",
     marginBottom: 8,
   },
   brandLogo: {
     width: 30,
     height: 30,
     borderRadius: 8,
-    background: "#26241F",
+    background: "var(--accent-strong)",
     color: "#fff",
     display: "grid",
     placeItems: "center",
@@ -254,7 +293,7 @@ const S = {
     fontSize: 16,
     fontWeight: 700,
     letterSpacing: "-0.01em",
-    color: "#26241F",
+    color: "var(--text)",
     fontFamily: "'Fraunces', Georgia, serif",
   },
   navItems: {
@@ -271,34 +310,53 @@ const S = {
     padding: "10px 12px",
     borderRadius: 9,
     cursor: "pointer",
-    color: "#6B675E",
+    color: "var(--text-2)",
     fontSize: 13.5,
     fontWeight: 500,
     width: "100%",
     textAlign: "left",
   },
   navItemOn: {
-    background: "#F2F1EC",
-    color: "#26241F",
+    background: "var(--hover)",
+    color: "var(--text)",
     fontWeight: 700,
   },
   navChild: {
     paddingLeft: 30,
     fontSize: 13,
   },
-  userFooter: {
+  footerWrap: {
     marginTop: "auto",
+    paddingTop: 8,
+  },
+  settingsBtn: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    border: "none",
+    background: "none",
+    padding: "10px 12px",
+    borderRadius: 9,
+    cursor: "pointer",
+    color: "var(--text-2)",
+    fontSize: 13.5,
+    fontWeight: 500,
+    width: "100%",
+    textAlign: "left",
+  },
+  userFooter: {
+    marginTop: 4,
     paddingTop: 12,
-    borderTop: "1px solid #ECEAE3",
+    borderTop: "1px solid var(--border)",
     display: "flex",
     alignItems: "center",
     gap: 8,
   },
   userInfo: { display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 },
   userAvatar: { width: 30, height: 30, borderRadius: "50%", background: "#8268B0", color: "#fff", display: "grid", placeItems: "center", fontSize: 13, fontWeight: 700, flexShrink: 0 },
-  userName: { fontSize: 13, fontWeight: 600, color: "#26241F", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
-  userEmail: { fontSize: 11, color: "#9A968C", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
-  logoutBtn: { border: "1px solid #E0DDD5", background: "#fff", color: "#6B675E", cursor: "pointer", padding: 7, borderRadius: 8, display: "grid", placeItems: "center", flexShrink: 0 },
+  userName: { fontSize: 13, fontWeight: 600, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  userEmail: { fontSize: 11, color: "var(--text-3)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  logoutBtn: { border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-2)", cursor: "pointer", padding: 7, borderRadius: 8, display: "grid", placeItems: "center", flexShrink: 0 },
   navLabel: {
     flex: 1,
   },
@@ -319,21 +377,21 @@ const S = {
     alignItems: "center",
     justifyContent: "space-between",
     padding: "12px 16px",
-    background: "#fff",
-    borderBottom: "1px solid #ECEAE3",
+    background: "var(--surface)",
+    borderBottom: "1px solid var(--border)",
     flexShrink: 0,
   },
   topBarTitle: {
     fontSize: 16,
     fontWeight: 700,
-    color: "#26241F",
+    color: "var(--text)",
     fontFamily: "'Fraunces', Georgia, serif",
   },
   menuBtn: {
     border: "none",
     background: "none",
     cursor: "pointer",
-    color: "#26241F",
+    color: "var(--text)",
     padding: 8,
     borderRadius: 8,
     display: "grid",
@@ -349,7 +407,7 @@ const S = {
   },
   drawer: {
     width: 220,
-    background: "#fff",
+    background: "var(--surface)",
     height: "100%",
     display: "flex",
     flexDirection: "column",
@@ -367,7 +425,7 @@ const S = {
     border: "none",
     background: "none",
     cursor: "pointer",
-    color: "#6B675E",
+    color: "var(--text-2)",
     padding: 6,
     borderRadius: 8,
     display: "grid",
