@@ -1,12 +1,23 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { X, Eye, EyeOff, ChevronUp, ChevronDown, Check, LayoutList, Palette, Coins } from "lucide-react";
 import { THEMES } from "../theme.js";
 import { CURRENCIES } from "../currency.js";
+
+function useIsMobile(bp = 560) {
+  const [m, setM] = useState(() => window.innerWidth <= bp);
+  useEffect(() => {
+    const h = () => setM(window.innerWidth <= bp);
+    window.addEventListener("resize", h);
+    return () => window.removeEventListener("resize", h);
+  }, [bp]);
+  return m;
+}
 
 export default function SettingsModal({ screens, order, hidden, themeId, currency, onSaveSidebar, onPreviewTheme, onCommitTheme, onSelectCurrency, onClose }) {
   const [tab, setTab] = useState("sidebar");
   const [items, setItems] = useState(() => order.map((id) => ({ id, hidden: hidden.includes(id) })));
   const [pendingTheme, setPendingTheme] = useState(themeId);
+  const isMobile = useIsMobile();
 
   const pickTheme = (id) => { setPendingTheme(id); onPreviewTheme(id); };
 
@@ -31,9 +42,14 @@ export default function SettingsModal({ screens, order, hidden, themeId, currenc
     onSaveSidebar(items.map((i) => i.id), items.filter((i) => i.hidden).map((i) => i.id));
   };
 
+  const overlayStyle = isMobile ? { ...S.overlay, padding: 0 } : S.overlay;
+  const modalStyle = isMobile
+    ? { ...S.modal, width: "100%", maxWidth: "100%", height: "100%", maxHeight: "100%", borderRadius: 0, border: "none" }
+    : S.modal;
+
   return (
-    <div style={S.overlay} onClick={onClose}>
-      <div style={S.modal} onClick={(e) => e.stopPropagation()}>
+    <div style={overlayStyle} onClick={onClose}>
+      <div style={modalStyle} onClick={(e) => e.stopPropagation()}>
         <div style={S.head}>
           <div style={S.title}>Settings</div>
           <button onClick={onClose} style={S.closeBtn}><X size={18} /></button>
@@ -133,7 +149,7 @@ const S = {
   tabs: { display: "flex", flexWrap: "wrap", gap: 6, padding: "12px 18px 0", flexShrink: 0 },
   tab: { display: "flex", alignItems: "center", gap: 6, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-2)", padding: "8px 12px", borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: "pointer" },
   tabOn: { background: "var(--accent-strong)", color: "#fff", borderColor: "transparent" },
-  body: { padding: "16px 18px 20px", overflowY: "auto", flex: 1, minHeight: 0 },
+  body: { padding: "16px 18px 20px", overflowY: "auto", overflowX: "hidden", flex: 1, minHeight: 0 },
   hint: { fontSize: 12.5, color: "var(--text-3)", lineHeight: 1.5, margin: "0 0 14px" },
   list: { display: "flex", flexDirection: "column", gap: 6 },
   row: { display: "flex", alignItems: "center", gap: 10, padding: "9px 11px", background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 9 },

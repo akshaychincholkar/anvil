@@ -257,6 +257,20 @@ def init_db():
             deleted_at TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE TABLE IF NOT EXISTS kickstart_video (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            youtube_id TEXT NOT NULL,
+            title TEXT NOT NULL DEFAULT '',
+            start_sec INTEGER NOT NULL DEFAULT 0,
+            end_sec INTEGER,
+            days TEXT NOT NULL DEFAULT '[]',
+            pillars TEXT NOT NULL DEFAULT '[]',
+            customs TEXT NOT NULL DEFAULT '[]',
+            deleted_at TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
         """)
 
         migrate_db()

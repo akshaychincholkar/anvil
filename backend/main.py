@@ -1283,6 +1283,95 @@ def restore_txn(txn_id: int):
         return _txn_row(r) if r else {}
 
 
+# ── Kickstart (motivation video hub) ─────────────────────────────────────────
+
+class KickstartCreate(BaseModel):
+    youtube_id: str
+    title: str = ""
+    start_sec: int = 0
+    end_sec: Optional[int] = None
+    days: List[str] = []
+    pillars: List[str] = []
+    customs: List[str] = []
+
+class KickstartUpdate(BaseModel):
+    youtube_id: Optional[str] = None
+    title: Optional[str] = None
+    start_sec: Optional[int] = None
+    end_sec: Optional[int] = None
+    days: Optional[List[str]] = None
+    pillars: Optional[List[str]] = None
+    customs: Optional[List[str]] = None
+
+def _ks_row(r):
+    return {
+        "id": r["id"], "youtube_id": r["youtube_id"], "title": r["title"],
+        "start_sec": r["start_sec"], "end_sec": r["end_sec"],
+        "days": json.loads(r["days"]), "pillars": json.loads(r["pillars"]),
+        "customs": json.loads(r["customs"]),
+    }
+
+_KS_COLS = "id, youtube_id, title, start_sec, end_sec, days, pillars, customs"
+
+@app.get("/api/kickstart/videos")
+def get_kickstart():
+    with db() as conn:
+        rows = conn.execute(
+            f"SELECT {_KS_COLS} FROM kickstart_video "
+            f"WHERE user_id={cu()} AND deleted_at IS NULL ORDER BY id DESC"
+        ).fetchall()
+        return [_ks_row(r) for r in rows]
+
+@app.post("/api/kickstart/videos", status_code=201)
+def create_kickstart(body: KickstartCreate):
+    if not body.youtube_id.strip():
+        raise HTTPException(400, "youtube_id required")
+    if not body.days:
+        raise HTTPException(400, "at least one day tag is required")
+    with db() as conn:
+        cur = conn.execute(
+            f"INSERT INTO kickstart_video (user_id, youtube_id, title, start_sec, end_sec, days, pillars, customs) "
+            f"VALUES ({cu()}, ?, ?, ?, ?, ?, ?, ?)",
+            (body.youtube_id.strip(), body.title.strip(), max(0, body.start_sec), body.end_sec,
+             json.dumps(body.days), json.dumps(body.pillars), json.dumps(body.customs))
+        )
+        r = conn.execute(f"SELECT {_KS_COLS} FROM kickstart_video WHERE id=?", (cur.lastrowid,)).fetchone()
+        return _ks_row(r)
+
+@app.put("/api/kickstart/videos/{vid}")
+def update_kickstart(vid: int, body: KickstartUpdate):
+    data = body.dict(exclude_unset=True)  # only fields the client actually sent
+    if "days" in data and not data["days"]:
+        raise HTTPException(400, "at least one day tag is required")
+    updates = {}
+    for k in ("youtube_id", "title", "start_sec", "end_sec"):
+        if k in data:
+            updates[k] = data[k]   # end_sec=None is allowed → clears the trim end
+    for k in ("days", "pillars", "customs"):
+        if k in data:
+            updates[k] = json.dumps(data[k])
+    with db() as conn:
+        if updates:
+            sets = ", ".join(f"{k}=?" for k in updates)
+            conn.execute(f"UPDATE kickstart_video SET {sets} WHERE id=? AND user_id={cu()}", (*updates.values(), vid))
+        r = conn.execute(f"SELECT {_KS_COLS} FROM kickstart_video WHERE id=?", (vid,)).fetchone()
+        if not r:
+            raise HTTPException(404)
+        return _ks_row(r)
+
+@app.delete("/api/kickstart/videos/{vid}", status_code=204)
+def delete_kickstart(vid: int):
+    with db() as conn:
+        _soft_delete(conn, "kickstart_video", vid)
+
+@app.post("/api/kickstart/videos/{vid}/restore")
+def restore_kickstart(vid: int):
+    with db() as conn:
+        _restore(conn, "kickstart_video", vid)
+        r = conn.execute(f"SELECT {_KS_COLS} FROM kickstart_video WHERE id=?", (vid,)).fetchone()
+        return _ks_row(r) if r else {}
+
+
 # ── Grove (Focus / Pomodoro) ──────────────────────────────────────────────────
 
 class FocusCreate(BaseModel):

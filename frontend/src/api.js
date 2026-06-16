@@ -48,6 +48,13 @@ export const api = {
   createFocus: (data) => req("POST", "/focus", data),
   deleteFocus: (id) => req("DELETE", `/focus/${id}`),
 
+  // Kickstart (motivation videos)
+  getKickstart: () => req("GET", "/kickstart/videos"),
+  createKickstart: (data) => req("POST", "/kickstart/videos", data),
+  updateKickstart: (id, data) => req("PUT", `/kickstart/videos/${id}`, data),
+  deleteKickstart: (id) => req("DELETE", `/kickstart/videos/${id}`),
+  restoreKickstart: (id) => req("POST", `/kickstart/videos/${id}/restore`),
+
   // Vault (finance)
   getTxns: () => req("GET", "/finance/txns"),
   createTxn: (data) => req("POST", "/finance/txns", data),
