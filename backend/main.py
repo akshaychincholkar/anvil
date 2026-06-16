@@ -1049,6 +1049,56 @@ def create_topic(body: TopicCreate):
             )
         return _topic_full(conn, topic_id)
 
+class TopicUpdate(BaseModel):
+    pillar: Optional[str] = None
+    topic: Optional[str] = None
+    learned_date: Optional[str] = None
+    intervals: Optional[List[int]] = None
+
+@app.put("/api/revision/topics/{topic_id}")
+def update_topic(topic_id: int, body: TopicUpdate):
+    if body.intervals is not None and len(body.intervals) == 0:
+        raise HTTPException(400, "intervals cannot be empty")
+    with db() as conn:
+        row = conn.execute(
+            f"SELECT learned_date, intervals FROM revision_topic WHERE id=? AND user_id={cu()} AND deleted_at IS NULL",
+            (topic_id,)
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "Topic not found")
+
+        new_learned = body.learned_date if body.learned_date is not None else row["learned_date"]
+        new_intervals = body.intervals if body.intervals is not None else json.loads(row["intervals"])
+        schedule_changed = (
+            (body.learned_date is not None and body.learned_date != row["learned_date"]) or
+            (body.intervals is not None)
+        )
+
+        sets, vals = [], []
+        if body.pillar is not None:
+            sets.append("pillar_id=?"); vals.append(pillar_id(conn, body.pillar))
+        if body.topic is not None:
+            sets.append("topic=?"); vals.append(body.topic.strip())
+        if body.learned_date is not None:
+            sets.append("learned_date=?"); vals.append(new_learned)
+        if body.intervals is not None:
+            sets.append("intervals=?"); vals.append(json.dumps(new_intervals))
+        if sets:
+            conn.execute(f"UPDATE revision_topic SET {', '.join(sets)} WHERE id=? AND user_id={cu()}", (*vals, topic_id))
+
+        # Regenerate the review schedule, preserving each stage's done flag where it still exists.
+        if schedule_changed:
+            done_by_stage = {r["stage"]: r["done"] for r in
+                             conn.execute("SELECT stage, done FROM review WHERE topic_id=?", (topic_id,)).fetchall()}
+            conn.execute("DELETE FROM review WHERE topic_id=?", (topic_id,))
+            base = date.fromisoformat(new_learned)
+            for i, days in enumerate(new_intervals, 1):
+                conn.execute(
+                    "INSERT INTO review (topic_id,stage,due_date,done) VALUES (?,?,?,?)",
+                    (topic_id, i, str(base + timedelta(days=days)), done_by_stage.get(i, 0))
+                )
+        return _topic_full(conn, topic_id)
+
 @app.delete("/api/revision/topics/{topic_id}", status_code=204)
 def delete_topic(topic_id: int):
     with db() as conn:
@@ -1170,6 +1220,7 @@ class TxnCreate(BaseModel):
     date: Optional[str] = None   # YYYY-MM-DD
 
 class TxnUpdate(BaseModel):
+    kind: Optional[str] = None
     category: Optional[str] = None
     amount: Optional[float] = None
     note: Optional[str] = None
@@ -1204,6 +1255,8 @@ def create_txn(body: TxnCreate):
 @app.put("/api/finance/txns/{txn_id}")
 def update_txn(txn_id: int, body: TxnUpdate):
     updates = {k: v for k, v in body.dict().items() if v is not None}
+    if "kind" in updates and updates["kind"] not in ("income", "expense"):
+        raise HTTPException(400, "kind must be income or expense")
     if "date" in updates:
         updates["txn_date"] = updates.pop("date")
     if "amount" in updates:

@@ -403,10 +403,6 @@ function AllHabitsWeekly({ habits, dayAction, logSet, onDelete, onEdit }) {
                   <span style={{ ...S.sideDot, background: c }} />
                   <span style={S.weekHabitName}>{h.name}</span>
                 </div>
-                <div style={{ display: "flex", gap: 4, paddingLeft: 15 }}>
-                  <button onClick={() => onEdit(h)} style={S.tinyBtn} title="Edit"><Pencil size={10} /></button>
-                  <button onClick={() => onDelete(h.id, h.name)} style={S.tinyBtn} title="Delete"><X size={10} /></button>
-                </div>
                 {h.type !== "regular" && (
                   <span style={S.typeBadge}>{h.type === "minimum" ? `≥${h.target_count}/${h.period}` : `≤${h.target_count}/${h.period}`}</span>
                 )}

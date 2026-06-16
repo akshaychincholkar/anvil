@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   TrendingUp, TrendingDown, Wallet, Plus, X, ArrowDownLeft, ArrowUpRight,
-  Calculator, PiggyBank, HeartPulse, LineChart, Landmark, Check
+  Calculator, PiggyBank, HeartPulse, LineChart, Landmark, Check, Pencil
 } from "lucide-react";
 import { api } from "../api.js";
 import { useCurrency, fmtMoney, fmtCompact } from "../currency.js";
@@ -137,7 +137,18 @@ function SumCard({ icon, label, value, color }) {
 }
 
 function CatChart({ title, subtitle, total, data, accent, cur }) {
-  const max = Math.max(1, ...data.map((d) => d.amount));
+  // Build conic-gradient pie segments.
+  let acc = 0;
+  const segs = data.map((d) => {
+    const start = total > 0 ? (acc / total) * 100 : 0;
+    acc += d.amount;
+    const end = total > 0 ? (acc / total) * 100 : 0;
+    return { ...d, start, end, color: catColor(d.category), pct: total > 0 ? (d.amount / total) * 100 : 0 };
+  });
+  const gradient = segs.length
+    ? `conic-gradient(${segs.map((s) => `${s.color} ${s.start}% ${s.end}%`).join(", ")})`
+    : "var(--surface-2)";
+
   return (
     <div style={S.card}>
       <div style={S.cardTitleRow}>
@@ -148,20 +159,24 @@ function CatChart({ title, subtitle, total, data, accent, cur }) {
         <div style={{ ...S.cardTotal, color: accent }}>{fmtMoney(total, cur.code)}</div>
       </div>
       {data.length === 0 ? <div style={S.muted}>Nothing logged.</div> : (
-        <div style={S.barList}>
-          {data.map((d) => (
-            <div key={d.category}>
-              <div style={S.barTop}>
-                <span style={{ ...S.dot, background: catColor(d.category) }} />
-                <span style={S.barName}>{d.category}</span>
-                <span style={S.barPct}>{total > 0 ? Math.round((d.amount / total) * 100) : 0}%</span>
-                <span style={S.barAmt}>{fmtMoney(d.amount, cur.code)}</span>
-              </div>
-              <div style={S.barTrack}>
-                <div style={{ ...S.bar, width: `${(d.amount / max) * 100}%`, background: catColor(d.category) }} />
-              </div>
+        <div style={S.pieWrap}>
+          <div style={S.pieChart}>
+            <div style={{ ...S.pieDisc, background: gradient }} />
+            <div style={S.pieHole}>
+              <span style={S.pieHoleVal}>{fmtCompact(total, cur.code)}</span>
+              <span style={S.pieHoleLbl}>total</span>
             </div>
-          ))}
+          </div>
+          <div style={S.pieLegend}>
+            {segs.map((s) => (
+              <div key={s.category} style={S.legendRow}>
+                <span style={{ ...S.dot, background: s.color }} />
+                <span style={S.legendName}>{s.category}</span>
+                <span style={S.legendPct}>{Math.round(s.pct)}%</span>
+                <span style={S.legendAmt}>{fmtMoney(s.amount, cur.code)}</span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -227,6 +242,7 @@ function MoneyTab({ txns, reload, money }) {
   const [category, setCategory] = useState("Bills");
   const [date, setDate] = useState(TODAY);
   const [note, setNote] = useState("");
+  const [edit, setEdit] = useState(null); // { id, kind, amount, category, date, note }
 
   const { deleteItem, toasts, handleUndo, handleDismiss } = useUndoableDelete(api.deleteTxn, api.restoreTxn, reload);
 
@@ -238,6 +254,17 @@ function MoneyTab({ txns, reload, money }) {
     if (!amt || amt <= 0) return;
     await api.createTxn({ kind, category, amount: amt, note: note.trim(), date });
     setAmount(""); setNote("");
+    reload();
+  };
+
+  const startEdit = (t) => setEdit({ id: t.id, kind: t.kind, amount: String(t.amount), category: t.category, date: t.date, note: t.note || "" });
+  const editCats = edit?.kind === "income" ? INCOME_CATS : EXPENSE_CATS;
+  const setEditKind = (k) => setEdit((e) => ({ ...e, kind: k, category: editCats.includes(e.category) ? e.category : (k === "income" ? "Salary" : "Bills") }));
+  const saveEdit = async () => {
+    const amt = parseFloat(edit.amount);
+    if (!amt || amt <= 0) return;
+    await api.updateTxn(edit.id, { kind: edit.kind, category: edit.category, amount: amt, note: edit.note.trim(), date: edit.date });
+    setEdit(null);
     reload();
   };
 
@@ -285,17 +312,44 @@ function MoneyTab({ txns, reload, money }) {
               <div key={d}>
                 <div style={S.dateHead}>{fmtDate(d)}</div>
                 {list.map((t) => (
-                  <div key={t.id} style={S.txnRow}>
-                    <span style={{ ...S.txnDot, background: catColor(t.category) }} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={S.txnCat}>{t.category}</div>
-                      {t.note && <div style={S.txnNote}>{t.note}</div>}
+                  edit?.id === t.id ? (
+                    <div key={t.id} style={S.editTxn}>
+                      <div style={S.kindToggle}>
+                        <button onClick={() => setEditKind("expense")} style={{ ...S.kindBtn, ...(edit.kind === "expense" ? { background: EXPENSE, color: "#fff", borderColor: EXPENSE } : {}) }}>
+                          <ArrowUpRight size={14} /> Expense
+                        </button>
+                        <button onClick={() => setEditKind("income")} style={{ ...S.kindBtn, ...(edit.kind === "income" ? { background: INCOME, color: "#fff", borderColor: INCOME } : {}) }}>
+                          <ArrowDownLeft size={14} /> Income
+                        </button>
+                      </div>
+                      <div style={S.formGrid}>
+                        <input type="number" inputMode="decimal" value={edit.amount} onChange={(e) => setEdit({ ...edit, amount: e.target.value })} style={S.input} />
+                        <select value={edit.category} onChange={(e) => setEdit({ ...edit, category: e.target.value })} style={S.input}>
+                          {editCats.map((c) => <option key={c}>{c}</option>)}
+                        </select>
+                        <input type="date" value={edit.date} max={TODAY} onChange={(e) => setEdit({ ...edit, date: e.target.value })} style={S.input} />
+                      </div>
+                      <input placeholder="Note (optional)" value={edit.note} onChange={(e) => setEdit({ ...edit, note: e.target.value })}
+                        onKeyDown={(e) => e.key === "Enter" && saveEdit()} style={{ ...S.input, marginTop: 8 }} />
+                      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                        <button onClick={() => setEdit(null)} style={S.editCancel}><X size={14} /> Cancel</button>
+                        <button onClick={saveEdit} style={{ ...S.addBtn, marginTop: 0, flex: 1, background: edit.kind === "income" ? INCOME : EXPENSE }}><Check size={15} /> Save</button>
+                      </div>
                     </div>
-                    <span style={{ ...S.txnAmt, color: t.kind === "income" ? INCOME : EXPENSE }}>
-                      {t.kind === "income" ? "+" : "−"}{money(t.amount)}
-                    </span>
-                    <button onClick={() => deleteItem(t.id, t.category)} style={S.delBtn}><X size={14} /></button>
-                  </div>
+                  ) : (
+                    <div key={t.id} style={S.txnRow}>
+                      <span style={{ ...S.txnDot, background: catColor(t.category) }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={S.txnCat}>{t.category}</div>
+                        {t.note && <div style={S.txnNote}>{t.note}</div>}
+                      </div>
+                      <span style={{ ...S.txnAmt, color: t.kind === "income" ? INCOME : EXPENSE }}>
+                        {t.kind === "income" ? "+" : "−"}{money(t.amount)}
+                      </span>
+                      <button onClick={() => startEdit(t)} style={S.delBtn}><Pencil size={13} /></button>
+                      <button onClick={() => deleteItem(t.id, t.category)} style={S.delBtn}><X size={14} /></button>
+                    </div>
+                  )
                 ))}
               </div>
             ))}
@@ -407,24 +461,80 @@ function SIPCalc({ money, cur }) {
   );
 }
 
+// Amortize a balance and return months taken, total interest, total paid.
+function amortize(principalStart, i, payment, extraMonthly = 0, lumpNow = 0) {
+  let bal = Math.max(0, principalStart - lumpNow);
+  let totalInterest = 0, months = 0, totalPaid = lumpNow;
+  const MAX = 1200;
+  while (bal > 0.01 && months < MAX) {
+    const interest = bal * i;
+    let pay = payment + extraMonthly;
+    let principalPaid = pay - interest;
+    if (principalPaid <= 0) return { months: Infinity, totalInterest: Infinity, totalPaid: Infinity };
+    if (principalPaid > bal) { principalPaid = bal; pay = bal + interest; }
+    bal -= principalPaid; totalInterest += interest; totalPaid += pay; months++;
+  }
+  return { months, totalInterest, totalPaid };
+}
+
+const ymLabel = (m) => {
+  if (!isFinite(m)) return "—";
+  const y = Math.floor(m / 12), mo = m % 12;
+  return (y ? `${y}y ` : "") + `${mo}m`;
+};
+const finishLabel = (m) => {
+  if (!isFinite(m)) return "—";
+  const d = new Date(); d.setMonth(d.getMonth() + m);
+  return d.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+};
+
 function EMICalc({ money, cur }) {
   const [principal, setPrincipal] = useState(2000000);
   const [rate, setRate] = useState(9);
   const [years, setYears] = useState(20);
+  const [prepay, setPrepay] = useState(500000);
+  const [prepayType, setPrepayType] = useState("once");   // once | monthly
+  const [strategy, setStrategy] = useState("tenure");     // tenure | emi
 
-  const { emi, totalPay, totalInterest } = useMemo(() => {
+  const base = useMemo(() => {
     const P = Math.max(0, parseFloat(principal) || 0);
-    const annual = Math.max(0, parseFloat(rate) || 0);
+    const i = Math.max(0, parseFloat(rate) || 0) / 12 / 100;
     const n = Math.max(1, Math.round((parseFloat(years) || 0) * 12));
-    const i = annual / 12 / 100;
-    let emi;
-    if (i === 0) emi = P / n;
-    else emi = (P * i * Math.pow(1 + i, n)) / (Math.pow(1 + i, n) - 1);
-    const totalPay = emi * n;
-    return { emi, totalPay, totalInterest: totalPay - P };
+    const emi = i === 0 ? P / n : (P * i * Math.pow(1 + i, n)) / (Math.pow(1 + i, n) - 1);
+    return { P, i, n, emi, totalPay: emi * n, totalInterest: emi * n - P };
   }, [principal, rate, years]);
 
-  const pPct = totalPay > 0 ? (principal / totalPay) * 100 : 0;
+  // Extra monthly payment can only shorten the tenure, never lower the EMI.
+  const effStrategy = prepayType === "monthly" ? "tenure" : strategy;
+
+  const result = useMemo(() => {
+    const { P, i, n, emi, totalInterest: baseInt } = base;
+    const X = Math.max(0, parseFloat(prepay) || 0);
+    if (X <= 0) return null;
+
+    let newEMI = emi, newMonths = n, newInterest = baseInt, totalPaid = base.totalPay;
+    if (prepayType === "once" && effStrategy === "emi") {
+      const Pp = Math.max(0, P - X);
+      newEMI = i === 0 ? Pp / n : (Pp * i * Math.pow(1 + i, n)) / (Math.pow(1 + i, n) - 1);
+      newMonths = n;
+      newInterest = newEMI * n - Pp;
+      totalPaid = X + newEMI * n;
+    } else if (prepayType === "once") {
+      const s = amortize(P, i, emi, 0, X);
+      newMonths = s.months; newInterest = s.totalInterest; totalPaid = s.totalPaid;
+    } else { // monthly → reduce tenure
+      const s = amortize(P, i, emi, X, 0);
+      newMonths = s.months; newInterest = s.totalInterest; totalPaid = s.totalPaid;
+    }
+    return {
+      newEMI, newMonths, newInterest, totalPaid,
+      interestSaved: Math.max(0, baseInt - newInterest),
+      monthsSaved: Math.max(0, n - (isFinite(newMonths) ? newMonths : n)),
+    };
+  }, [base, prepay, prepayType, effStrategy]);
+
+  const pPct = base.totalPay > 0 ? (base.P / base.totalPay) * 100 : 0;
+  const prepayMax = prepayType === "once" ? Math.max(100000, Math.round(base.P)) : Math.max(50000, Math.round(base.emi * 3));
 
   return (
     <div style={S.card}>
@@ -441,7 +551,7 @@ function EMICalc({ money, cur }) {
 
       <div style={S.resultHero}>
         <div style={S.resultLabel}>Monthly EMI</div>
-        <div style={{ ...S.resultVal, color: "#C2536B" }}>{money(emi)}</div>
+        <div style={{ ...S.resultVal, color: "#C2536B" }}>{money(base.emi)}</div>
       </div>
 
       {/* principal vs interest split */}
@@ -450,11 +560,76 @@ function EMICalc({ money, cur }) {
         <div style={{ width: `${100 - pPct}%`, background: "#C2536B", height: "100%" }} />
       </div>
       <div style={S.splitRow}>
-        <div style={S.splitItem}><span style={{ ...S.splitV, color: "#5B7C99" }}>{money(principal)}</span><span style={S.splitL}>Principal</span></div>
-        <div style={S.splitItem}><span style={{ ...S.splitV, color: "#C2536B" }}>{money(totalInterest)}</span><span style={S.splitL}>Total interest</span></div>
-        <div style={S.splitItem}><span style={S.splitV}>{money(totalPay)}</span><span style={S.splitL}>Total payable</span></div>
+        <div style={S.splitItem}><span style={{ ...S.splitV, color: "#5B7C99" }}>{money(base.P)}</span><span style={S.splitL}>Principal</span></div>
+        <div style={S.splitItem}><span style={{ ...S.splitV, color: "#C2536B" }}>{money(base.totalInterest)}</span><span style={S.splitL}>Total interest</span></div>
+        <div style={S.splitItem}><span style={S.splitV}>{money(base.totalPay)}</span><span style={S.splitL}>Total payable</span></div>
       </div>
+
+      {/* ── Prepayment planner ── */}
+      <div style={S.subDivider} />
+      <div style={S.subTitle}>Prepayment planner</div>
+      <div style={S.cardSub}>See what an extra payment does to your loan.</div>
+
+      <div style={{ marginTop: 14 }}>
+        <Field label="Prepayment amount" value={prepay} set={setPrepay} min={0} max={prepayMax} step={prepayType === "once" ? 25000 : 1000} suffix={cur.symbol} />
+      </div>
+
+      <div style={S.segGroup}>
+        <span style={S.segLbl}>Type</span>
+        <div style={S.segRow}>
+          <Seg label="One-time" on={prepayType === "once"} onClick={() => setPrepayType("once")} />
+          <Seg label="Every month" on={prepayType === "monthly"} onClick={() => setPrepayType("monthly")} />
+        </div>
+      </div>
+
+      <div style={S.segGroup}>
+        <span style={S.segLbl}>Strategy</span>
+        <div style={S.segRow}>
+          <Seg label="Reduce tenure" on={effStrategy === "tenure"} onClick={() => setStrategy("tenure")} />
+          <Seg label="Reduce EMI" on={effStrategy === "emi"} disabled={prepayType === "monthly"} onClick={() => setStrategy("emi")} />
+        </div>
+      </div>
+
+      {prepayType === "monthly" && (
+        <div style={S.note}>An extra monthly payment always shortens the tenure. Switch to a one-time prepayment to reduce your EMI instead.</div>
+      )}
+
+      {result ? (
+        <div style={S.cmpCard}>
+          <div style={S.cmpRow}>
+            <span style={S.cmpLbl}>New EMI</span>
+            <span style={S.cmpVal}>{money(result.newEMI)}{result.newEMI < base.emi - 1 && <span style={S.cmpWas}> was {money(base.emi)}</span>}</span>
+          </div>
+          <div style={S.cmpRow}>
+            <span style={S.cmpLbl}>New tenure</span>
+            <span style={S.cmpVal}>{ymLabel(result.newMonths)} <span style={S.cmpWas}>· paid off {finishLabel(result.newMonths)}</span></span>
+          </div>
+          <div style={S.cmpRow}>
+            <span style={S.cmpLbl}>Total interest</span>
+            <span style={S.cmpVal}>{money(result.newInterest)}</span>
+          </div>
+          <div style={S.cmpRow}>
+            <span style={S.cmpLbl}>Total payable</span>
+            <span style={S.cmpVal}>{money(result.totalPaid)}</span>
+          </div>
+          <div style={S.saveRow}>
+            You save {money(result.interestSaved)} in interest
+            {result.monthsSaved > 0 ? ` · ${ymLabel(result.monthsSaved)} sooner` : ""}
+          </div>
+        </div>
+      ) : (
+        <div style={S.muted}>Enter a prepayment amount to see the impact.</div>
+      )}
     </div>
+  );
+}
+
+function Seg({ label, on, onClick, disabled }) {
+  return (
+    <button onClick={disabled ? undefined : onClick} disabled={disabled}
+      style={{ ...S.seg, ...(on ? S.segOn : {}), ...(disabled ? S.segDisabled : {}) }}>
+      {label}
+    </button>
   );
 }
 
@@ -499,6 +674,18 @@ const S = {
   barTrack: { height: 8, background: "var(--surface-2)", borderRadius: 4, overflow: "hidden" },
   bar: { height: "100%", borderRadius: 4, transition: "width 0.3s", minWidth: 3 },
 
+  pieWrap: { display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap" },
+  pieChart: { position: "relative", width: 132, height: 132, flexShrink: 0, margin: "0 auto" },
+  pieDisc: { width: "100%", height: "100%", borderRadius: "50%" },
+  pieHole: { position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: 80, height: 80, borderRadius: "50%", background: "var(--surface)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" },
+  pieHoleVal: { fontSize: 15, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif" },
+  pieHoleLbl: { fontSize: 10, color: "var(--text-3)", fontWeight: 600 },
+  pieLegend: { flex: 1, minWidth: 160, display: "flex", flexDirection: "column", gap: 8 },
+  legendRow: { display: "flex", alignItems: "center", gap: 8 },
+  legendName: { flex: 1, fontSize: 12.5, fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  legendPct: { fontSize: 11.5, color: "var(--text-3)", fontWeight: 600, width: 34, textAlign: "right" },
+  legendAmt: { fontSize: 12.5, fontWeight: 700, fontFamily: "'Fraunces',Georgia,serif", minWidth: 64, textAlign: "right" },
+
   healthScore: { fontSize: 32, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif", lineHeight: 1 },
   healthStatus: { fontSize: 12.5, fontWeight: 700, marginTop: 2 },
   gaugeTrack: { height: 10, background: "var(--surface-2)", borderRadius: 6, overflow: "hidden", marginBottom: 14 },
@@ -522,6 +709,8 @@ const S = {
   txnNote: { fontSize: 11.5, color: "var(--text-3)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
   txnAmt: { fontSize: 14, fontWeight: 700, fontFamily: "'Fraunces',Georgia,serif", whiteSpace: "nowrap" },
   delBtn: { border: "none", background: "none", color: "var(--text-3)", cursor: "pointer", padding: 4, display: "grid", placeItems: "center", flexShrink: 0 },
+  editTxn: { background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 12, padding: 12, margin: "6px 0" },
+  editCancel: { display: "flex", alignItems: "center", justifyContent: "center", gap: 5, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-2)", padding: "10px 14px", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" },
 
   field: { marginBottom: 16 },
   fieldTop: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
@@ -550,4 +739,20 @@ const S = {
   legendDot: { width: 10, height: 10, borderRadius: 3 },
 
   emiSplitTrack: { display: "flex", height: 12, borderRadius: 6, overflow: "hidden", marginTop: 16, border: "1px solid var(--border)" },
+
+  subDivider: { height: 1, background: "var(--border)", margin: "20px 0 14px" },
+  subTitle: { fontSize: 15, fontWeight: 700, fontFamily: "'Fraunces',Georgia,serif" },
+  segGroup: { marginBottom: 12 },
+  segLbl: { fontSize: 12, fontWeight: 600, color: "var(--text-3)", display: "block", marginBottom: 6 },
+  segRow: { display: "flex", gap: 8 },
+  seg: { flex: 1, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-2)", padding: "9px", borderRadius: 9, fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" },
+  segOn: { background: "var(--accent-strong)", color: "#fff", borderColor: "var(--accent-strong)" },
+  segDisabled: { opacity: 0.4, cursor: "not-allowed" },
+  note: { fontSize: 12, lineHeight: 1.5, color: "var(--text-3)", background: "var(--surface-2)", borderRadius: 9, padding: "9px 11px", marginBottom: 12 },
+  cmpCard: { background: "var(--surface-2)", borderRadius: 12, padding: "12px 14px", marginTop: 4 },
+  cmpRow: { display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "6px 0", borderBottom: "1px solid var(--border)", gap: 10 },
+  cmpLbl: { fontSize: 12.5, color: "var(--text-2)", fontWeight: 600 },
+  cmpVal: { fontSize: 14, fontWeight: 700, fontFamily: "'Fraunces',Georgia,serif", textAlign: "right" },
+  cmpWas: { fontSize: 11, color: "var(--text-3)", fontWeight: 500, fontFamily: "'Inter',system-ui,sans-serif" },
+  saveRow: { marginTop: 12, background: "rgba(62,158,107,0.12)", color: "#3E9E6B", borderRadius: 9, padding: "10px 12px", fontSize: 13, fontWeight: 700, textAlign: "center" },
 };

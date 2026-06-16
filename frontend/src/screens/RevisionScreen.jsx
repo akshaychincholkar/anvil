@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
-import { Plus, X, Check, ChevronDown, ChevronRight, RotateCcw, Trophy } from "lucide-react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { Plus, X, Check, ChevronDown, ChevronRight, RotateCcw, Trophy, Pencil } from "lucide-react";
 import { api } from "../api.js";
 import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
 import UndoToast from "../components/UndoToast.jsx";
@@ -42,6 +42,7 @@ export default function RevisionScreen() {
   const [cementedOpen, setCementedOpen] = useState(false);
   const [adding, setAdding] = useState(false);
   const [newTopic, setNewTopic] = useState({ topic: "", pillar: "Academic", intervals: "1,3,7,15,30", learned_date: today });
+  const [editing, setEditing] = useState(null); // { id, topic, pillar, intervals, learned_date }
 
   const load = useCallback(async () => {
     const [t, d, c] = await Promise.all([
@@ -75,6 +76,21 @@ export default function RevisionScreen() {
   );
   const deleteTopic = (id, topic) => softDeleteTopic(id, topic);
 
+  const startEdit = (t) => setEditing({ id: t.id, topic: t.topic, pillar: t.pillar, intervals: (t.intervals || []).join(", "), learned_date: t.learned_date });
+  const commitEdit = async () => {
+    if (!editing) return;
+    const intervalArr = editing.intervals.split(",").map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n) && n >= 0);
+    if (!editing.topic.trim() || intervalArr.length === 0) return;
+    await api.updateTopic(editing.id, {
+      topic: editing.topic.trim(),
+      pillar: editing.pillar,
+      learned_date: editing.learned_date,
+      intervals: intervalArr,
+    });
+    setEditing(null);
+    load();
+  };
+
   const prevMonth = () => {
     if (month === 1) { setYear((y) => y - 1); setMonth(12); }
     else setMonth((m) => m - 1);
@@ -91,6 +107,16 @@ export default function RevisionScreen() {
 
   const dates = monthDates(year, month);
   const offset = monthStartOffset(year, month);
+
+  // Pending reviews due per date — used to list the actual topics in each calendar cell.
+  const reviewsByDate = useMemo(() => {
+    const m = {};
+    topics.forEach((t) => t.reviews.forEach((r) => {
+      if (r.done) return;
+      (m[r.due_date] = m[r.due_date] || []).push({ topic: t.topic, pillar: t.pillar, stage: r.stage });
+    }));
+    return m;
+  }, [topics]);
 
   // Reviews for selected day (from topics list)
   const selectedDayReviews = selectedDay
@@ -178,6 +204,37 @@ export default function RevisionScreen() {
           const c = PILLARS[t.pillar]?.dot || "#9A968C";
           const soft = PILLARS[t.pillar]?.soft || "rgba(0,0,0,0.05)";
           const done = t.reviews.filter((r) => r.done).length;
+          if (editing?.id === t.id) {
+            return (
+              <div key={t.id} style={S.addBox}>
+                <input autoFocus value={editing.topic}
+                  onChange={(e) => setEditing((n) => ({ ...n, topic: e.target.value }))}
+                  onKeyDown={(e) => e.key === "Enter" && commitEdit()}
+                  placeholder="Topic" style={S.input} />
+                <div style={S.addRow}>
+                  <select value={editing.pillar} onChange={(e) => setEditing((n) => ({ ...n, pillar: e.target.value }))} style={S.select}>
+                    {PILLAR_NAMES.map((p) => <option key={p}>{p}</option>)}
+                  </select>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                    <label style={{ fontSize: 10, fontWeight: 600, color: "var(--text-3)", textTransform: "uppercase" }}>Learned on</label>
+                    <input type="date" value={editing.learned_date}
+                      onChange={(e) => setEditing((n) => ({ ...n, learned_date: e.target.value }))}
+                      style={{ ...S.select, fontSize: 13 }} />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <input value={editing.intervals}
+                      onChange={(e) => setEditing((n) => ({ ...n, intervals: e.target.value }))}
+                      placeholder="Intervals (days): 1,3,7,15,30" style={S.input} />
+                  </div>
+                </div>
+                <div style={S.editHint}>Changing the date or intervals reschedules the reviews (completed steps are kept where they still apply).</div>
+                <div style={S.addRow}>
+                  <button onClick={commitEdit} style={S.saveBtn}><Check size={14} /> Save plan</button>
+                  <button onClick={() => setEditing(null)} style={S.cancelBtn}><X size={14} /> Cancel</button>
+                </div>
+              </div>
+            );
+          }
           return (
             <div key={t.id} style={S.topicCard}>
               <div style={S.topicHead}>
@@ -185,7 +242,8 @@ export default function RevisionScreen() {
                 <span style={S.topicName}>{t.topic}</span>
                 <span style={S.topicPillar}>{t.pillar}</span>
                 <span style={S.topicProgress}>{done}/{t.reviews.length} done</span>
-                <button onClick={() => deleteTopic(t.id, t.topic)} style={S.ghostBtn}><X size={13} /></button>
+                <button onClick={() => startEdit(t)} style={S.ghostBtn} title="Edit plan"><Pencil size={12} /></button>
+                <button onClick={() => deleteTopic(t.id, t.topic)} style={S.ghostBtn} title="Delete"><X size={13} /></button>
               </div>
               <div style={S.reviewDots}>
                 {t.reviews.map((r) => {
@@ -247,22 +305,27 @@ export default function RevisionScreen() {
         <div style={S.calGrid}>
           {Array.from({ length: offset }).map((_, i) => <div key={`p${i}`} />)}
           {dates.map((dateStr, i) => {
-            const count = calendar[dateStr] || 0;
+            const dayItems = reviewsByDate[dateStr] || [];
             const isToday = dateStr === today;
             const isSel = dateStr === selectedDay;
             const isPast = dateStr < today;
+            const numColor = isSel ? "#fff" : (isToday ? "var(--text)" : (isPast ? "var(--text-2)" : "var(--text-3)"));
             return (
               <button key={dateStr} onClick={() => setSelectedDay(isSel ? null : dateStr)}
                 style={{
                   ...S.calDay,
                   background: isSel ? "var(--accent-strong)" : (isToday ? "var(--hover)" : "var(--surface)"),
-                  color: isSel ? "#fff" : (isToday ? "var(--text)" : (isPast ? "var(--text-2)" : "var(--text-3)")),
                   borderColor: isToday ? "var(--accent-strong)" : (isSel ? "var(--accent-strong)" : "var(--border)"),
-                  fontWeight: isToday || isSel ? 700 : 500,
                 }}>
-                {i + 1}
-                {count > 0 && (
-                  <span style={{ ...S.calBadge, background: isSel ? "var(--surface)" : "#C2536B", color: isSel ? "var(--text)" : "#fff" }}>{count}</span>
+                <span style={{ ...S.calDayNum, color: numColor, fontWeight: isToday || isSel ? 700 : 600 }}>{i + 1}</span>
+                {dayItems.slice(0, 2).map((it, idx) => (
+                  <span key={idx} title={it.topic}
+                    style={{ ...S.calItem, color: isSel ? "#fff" : (PILLARS[it.pillar]?.dot || "var(--text-2)") }}>
+                    {idx + 1}. {it.topic}
+                  </span>
+                ))}
+                {dayItems.length > 2 && (
+                  <span style={{ ...S.calMore, color: isSel ? "#fff" : "var(--text-3)" }}>+{dayItems.length - 2} more</span>
                 )}
               </button>
             );
@@ -275,7 +338,7 @@ export default function RevisionScreen() {
             {selectedDayReviews.length === 0 ? (
               <div style={S.empty}>No reviews scheduled for this day.</div>
             ) : (
-              selectedDayReviews.map((r) => {
+              selectedDayReviews.map((r, idx) => {
                 const c = PILLARS[r.pillar]?.dot || "#9A968C";
                 return (
                   <div key={r.id} style={{ ...S.reviewCard, borderLeft: `3px solid ${c}` }}>
@@ -284,7 +347,7 @@ export default function RevisionScreen() {
                       {r.done && <Check size={12} color="#fff" strokeWidth={3} />}
                     </button>
                     <div>
-                      <div style={S.reviewTopic}>{r.topic}</div>
+                      <div style={S.reviewTopic}>{idx + 1}. {r.topic}</div>
                       <span style={{ ...S.stageTag, background: PILLARS[r.pillar]?.soft || "rgba(0,0,0,0.05)", color: c }}>
                         Review {r.stage}/{r.total}
                       </span>
@@ -309,6 +372,7 @@ const S = {
   addBtn: { display: "flex", alignItems: "center", gap: 6, border: "none", background: "var(--accent-strong)", color: "#fff", padding: "8px 14px", borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
   addBox: { background: "var(--surface)", borderRadius: 12, padding: 16, marginBottom: 16, boxShadow: "0 1px 3px rgba(0,0,0,0.05)", display: "flex", flexDirection: "column", gap: 10 },
   addRow: { display: "flex", gap: 8, alignItems: "center" },
+  editHint: { fontSize: 11.5, color: "var(--text-3)", lineHeight: 1.4 },
   input: { flex: 1, border: "1px solid var(--border)", borderRadius: 8, padding: "9px 11px", fontSize: 13.5, fontFamily: "inherit", outline: "none", minWidth: 0 },
   select: { border: "1px solid var(--border)", borderRadius: 8, padding: "9px 10px", fontSize: 12.5, fontFamily: "inherit", flexShrink: 0 },
   saveBtn: { display: "flex", alignItems: "center", gap: 5, border: "none", background: "#4C9A6B", color: "#fff", padding: "8px 14px", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
@@ -341,8 +405,10 @@ const S = {
   calDow: { display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 4, marginBottom: 6 },
   calDowCell: { fontSize: 10, fontWeight: 600, color: "var(--text-3)", textAlign: "center", textTransform: "uppercase" },
   calGrid: { display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 4 },
-  calDay: { aspectRatio: "1", border: "1.5px solid var(--border)", background: "var(--surface)", borderRadius: 8, fontSize: 12, cursor: "pointer", fontFamily: "inherit", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 1, position: "relative", padding: 2 },
-  calBadge: { fontSize: 9, fontWeight: 800, borderRadius: 6, padding: "0 4px", lineHeight: "14px", minWidth: 14, textAlign: "center" },
+  calDay: { minHeight: 62, border: "1.5px solid var(--border)", background: "var(--surface)", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", display: "flex", flexDirection: "column", alignItems: "stretch", justifyContent: "flex-start", gap: 1, position: "relative", padding: "3px 4px", overflow: "hidden", textAlign: "left" },
+  calDayNum: { fontSize: 11, lineHeight: 1.1, marginBottom: 1 },
+  calItem: { fontSize: 8.5, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", lineHeight: 1.3, textAlign: "left" },
+  calMore: { fontSize: 8, fontWeight: 700, opacity: 0.85, lineHeight: 1.2 },
   dayDetail: { marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--border)" },
   dayDetailTitle: { fontSize: 13, fontWeight: 700, color: "var(--text-2)", marginBottom: 10 },
 };

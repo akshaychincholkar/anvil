@@ -120,6 +120,7 @@ export const api = {
   // Revision
   getTopics: () => req("GET", "/revision/topics"),
   createTopic: (data) => req("POST", "/revision/topics", data),
+  updateTopic: (id, data) => req("PUT", `/revision/topics/${id}`, data),
   deleteTopic: (id) => req("DELETE", `/revision/topics/${id}`),
   restoreTopic: (id) => req("POST", `/revision/topics/${id}/restore`),
   getDueToday: () => req("GET", "/revision/due-today"),

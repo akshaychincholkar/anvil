@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { ChevronRight, ChevronDown, Plus, Target, X, Check, Pencil } from "lucide-react";
+import { ChevronRight, ChevronDown, Plus, Target, X, Check, Pencil, Eye, EyeOff } from "lucide-react";
 import { api } from "../api.js";
 import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
 import UndoToast from "../components/UndoToast.jsx";
@@ -21,6 +21,22 @@ const QUARTERS = [
   { label: "Q4 · Oct–Dec", startMonth: 9 },
 ];
 const YEAR = new Date().getFullYear();
+
+// Daily Gantt geometry
+const DAY_MS = 86400000;
+const COL_W = 30;       // px per day column
+const GLABEL_W = 190;   // gantt label column width
+const parseD = (s) => new Date(s + "T00:00:00");
+const shortDate = (d) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+
+// Gantt is grouped into horizon bands, in this order.
+const GANTT_GROUPS = [
+  { key: "yearly",    label: "Yearly",            horizons: ["Yearly"] },
+  { key: "quarterly", label: "Quarterly",         horizons: ["Quarterly"] },
+  { key: "mw",        label: "Monthly & Weekly",  horizons: ["Monthly", "Weekly"] },
+];
+const HZ_ABBR = { Yearly: "Yr", Quarterly: "Q", Monthly: "Mo", Weekly: "Wk" };
+const HZ_RANK = { Yearly: 0, Quarterly: 1, Monthly: 2, Weekly: 3 };
 
 const nextHorizon = (h) => HORIZONS[Math.min(HORIZONS.indexOf(h) + 1, HORIZONS.length - 1)];
 
@@ -105,7 +121,7 @@ const periodLabel = (g) => {
 export default function GoalsWithGantt() {
   const [goals, setGoals] = useState([]);
   const [pillar, setPillar] = useState("Financial");
-  const [ganttPillars, setGanttPillars] = useState(["Academic"]);
+  const [ganttOverride, setGanttOverride] = useState({}); // goalId → bool (overrides the horizon default)
   const [open, setOpen] = useState({});
   const [adding, setAdding] = useState(null);
   const [draft, setDraft] = useState("");
@@ -122,13 +138,17 @@ export default function GoalsWithGantt() {
     api.deleteGoal, api.restoreGoal, load
   );
 
-  const p = PILLARS[pillar];
-  const pillarGoals = goals.filter((g) => g.pillar === pillar);
+  const isAll = pillar === "All";
+  const p = PILLARS[pillar] || { dot: "var(--text-3)", soft: "transparent" };
+  const pillarGoals = isAll ? goals : goals.filter((g) => g.pillar === pillar);
   const roots = pillarGoals.filter((g) => !g.parent_goal_id);
   const childrenOf = (parentId) => pillarGoals.filter((g) => g.parent_goal_id === parentId);
   const toggle = (id) => setOpen((o) => ({ ...o, [id]: !o[id] }));
-  const toggleGanttPillar = (name) =>
-    setGanttPillars((cur) => cur.includes(name) ? cur.filter((n) => n !== name) : [...cur, name]);
+
+  // Per-goal Gantt visibility: Monthly/Weekly show by default, Yearly/Quarterly hidden.
+  const defaultOnGantt = (g) => g.horizon === "Monthly" || g.horizon === "Weekly";
+  const isOnGantt = (g) => (ganttOverride[g.id] !== undefined ? ganttOverride[g.id] : defaultOnGantt(g));
+  const toggleGantt = (g) => setGanttOverride((m) => ({ ...m, [g.id]: !isOnGantt(g) }));
 
   const startAdd = (parentId, parentGoal = null) => {
     setAdding(parentId);
@@ -140,12 +160,15 @@ export default function GoalsWithGantt() {
     setDraftMonth(horizon === "Quarterly" ? Math.floor(months[0] / 3) * 3 : months[0] ?? 0);
   };
 
-  const commitAdd = async (parentId, parentHorizon) => {
+  const commitAdd = async (parentId, parentGoal) => {
     if (!draft.trim()) return;
+    const parentHorizon = parentGoal?.horizon ?? null;
     const horizon = parentId === "ROOT" ? "Yearly" : nextHorizon(parentHorizon);
+    // Sub-goals inherit their parent's pillar; top-level uses the selected pillar.
+    const goalPillar = parentId === "ROOT" ? pillar : (parentGoal?.pillar || pillar);
     const { start_date, end_date } = horizonDates(horizon, draftMonth, draftWeek);
     await api.createGoal({
-      pillar,
+      pillar: goalPillar,
       title: draft.trim(),
       horizon,
       parent_goal_id: parentId === "ROOT" ? null : parentId,
@@ -189,8 +212,7 @@ export default function GoalsWithGantt() {
   };
 
   const AddInline = ({ parentId, parentGoal, depth }) => {
-    const parentHorizon = parentGoal?.horizon ?? null;
-    const horizon = parentId === "ROOT" ? "Yearly" : nextHorizon(parentHorizon);
+    const horizon = parentId === "ROOT" ? "Yearly" : nextHorizon(parentGoal?.horizon ?? null);
     const months = parentId === "ROOT" ? Array.from({ length: 12 }, (_, i) => i) : allowedMonths(parentGoal);
     const quarters = QUARTERS.filter((q) => months.includes(q.startMonth));
     return (
@@ -201,7 +223,7 @@ export default function GoalsWithGantt() {
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") commitAdd(parentId, parentHorizon);
+            if (e.key === "Enter") commitAdd(parentId, parentGoal);
             if (e.key === "Escape") setAdding(null);
           }}
           style={S.input}
@@ -224,7 +246,7 @@ export default function GoalsWithGantt() {
             </select>
           </>
         )}
-        <button onClick={() => commitAdd(parentId, parentHorizon)} style={S.saveBtn}><Check size={14} /></button>
+        <button onClick={() => commitAdd(parentId, parentGoal)} style={S.saveBtn}><Check size={14} /></button>
         <button onClick={() => setAdding(null)} style={S.cancelBtn}><X size={14} /></button>
       </div>
     );
@@ -277,7 +299,7 @@ export default function GoalsWithGantt() {
 
     return (
       <div>
-        <div style={{ ...S.row, marginLeft: depth * 24, background: depth === 0 ? p.soft : "transparent" }}>
+        <div style={{ ...S.row, marginLeft: depth * 24, background: depth === 0 ? (PILLARS[goal.pillar]?.soft || "transparent") : "transparent" }}>
           {kids.length > 0 ? (
             <button onClick={() => toggle(goal.id)} style={S.caret}>
               {isOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
@@ -288,6 +310,13 @@ export default function GoalsWithGantt() {
           <span style={{ ...S.horizonTag, color: PILLARS[goal.pillar]?.dot || p.dot, borderColor: PILLARS[goal.pillar]?.dot || p.dot }}>{goal.horizon}</span>
           <span style={S.title}>{goal.title}</span>
           <span style={S.periodTag}>{periodLabel(goal)}</span>
+          <button
+            onClick={() => toggleGantt(goal)}
+            style={{ ...S.rowAdd, color: isOnGantt(goal) ? (PILLARS[goal.pillar]?.dot || p.dot) : "var(--text-3)" }}
+            title={isOnGantt(goal) ? "Showing on timeline — click to hide" : "Hidden from timeline — click to show"}
+          >
+            {isOnGantt(goal) ? <Eye size={13} /> : <EyeOff size={13} />}
+          </button>
           <button onClick={() => startEdit(goal)} style={S.rowAdd} title="Edit"><Pencil size={12} /></button>
           {canNest && (
             <button
@@ -310,20 +339,69 @@ export default function GoalsWithGantt() {
     );
   };
 
-  // Gantt: weekly goals across selected pillars
-  const ganttRows = goals
-    .filter((g) => g.horizon === "Weekly" && ganttPillars.includes(g.pillar))
-    .sort((a, b) => a.pillar.localeCompare(b.pillar) || a.start_date.localeCompare(b.start_date));
+  // Daily PM-style Gantt — every enabled, dated goal that's toggled on.
+  const ganttGoals = goals.filter((g) => isOnGantt(g) && g.start_date && g.end_date);
+
+  // Grouped into horizon bands (Yearly, Quarterly, Monthly & Weekly), each sorted
+  // by pillar then chronologically.
+  const ganttGroups = GANTT_GROUPS
+    .map((grp) => ({
+      ...grp,
+      items: ganttGoals
+        .filter((g) => grp.horizons.includes(g.horizon))
+        .sort((a, b) =>
+          a.pillar.localeCompare(b.pillar) ||
+          a.start_date.localeCompare(b.start_date) ||
+          (HZ_RANK[a.horizon] - HZ_RANK[b.horizon]) ||
+          a.end_date.localeCompare(b.end_date)),
+    }))
+    .filter((grp) => grp.items.length > 0);
+
+  // Timeline window = min start → max end of the displayed goals.
+  const gRange = (() => {
+    if (!ganttGoals.length) return null;
+    let min = ganttGoals[0].start_date, max = ganttGoals[0].end_date;
+    ganttGoals.forEach((g) => { if (g.start_date < min) min = g.start_date; if (g.end_date > max) max = g.end_date; });
+    return { start: parseD(min), end: parseD(max) };
+  })();
+
+  const gDays = (() => {
+    if (!gRange) return [];
+    const arr = [];
+    for (let t = gRange.start.getTime(); t <= gRange.end.getTime(); t += DAY_MS) arr.push(new Date(t));
+    return arr;
+  })();
+  const totalDays = gDays.length;
+
+  const monthGroups = (() => {
+    const groups = [];
+    gDays.forEach((d) => {
+      const key = `${d.getFullYear()}-${d.getMonth()}`;
+      const last = groups[groups.length - 1];
+      if (last && last.key === key) last.days++;
+      else groups.push({ key, label: `${MONTHS[d.getMonth()]} '${String(d.getFullYear()).slice(2)}`, days: 1 });
+    });
+    return groups;
+  })();
+
+  const gToday = new Date(); gToday.setHours(0, 0, 0, 0);
+  const todayIdx = gRange ? Math.round((gToday - gRange.start) / DAY_MS) : -1;
+  const todayInRange = todayIdx >= 0 && todayIdx < totalDays;
+  const dayDuration = (g) => Math.round((parseD(g.end_date) - parseD(g.start_date)) / DAY_MS) + 1;
 
   return (
     <div style={S.page}>
       <div style={S.head}>
         <div style={S.eyebrow}>Anvil · Goals</div>
-        <h1 style={S.h1}>{pillar} Goals</h1>
+        <h1 style={S.h1}>{isAll ? "All Goals" : `${pillar} Goals`}</h1>
       </div>
 
       {/* Item 6: flex-wrap ensures mobile containment */}
       <div style={S.pillarPicker}>
+        <button onClick={() => { setPillar("All"); setAdding(null); setEditing(null); }}
+          style={{ ...S.pillarChip, ...(isAll ? { background: "var(--accent-strong)", color: "#fff", borderColor: "var(--accent-strong)" } : {}) }}>
+          All Goals
+        </button>
         {PILLAR_NAMES.map((name) => {
           const on = name === pillar;
           return (
@@ -338,72 +416,94 @@ export default function GoalsWithGantt() {
 
       <div style={S.list}>
         {roots.map((g) => <Node key={g.id} goal={g} depth={0} />)}
-        {adding === "ROOT" && <AddInline parentId="ROOT" parentGoal={null} depth={0} />}
-        {adding !== "ROOT" && (
+        {roots.length === 0 && <div style={S.ganttEmpty}>No goals yet{isAll ? "" : ` for ${pillar}`}.</div>}
+        {!isAll && adding === "ROOT" && <AddInline parentId="ROOT" parentGoal={null} depth={0} />}
+        {!isAll && adding !== "ROOT" && (
           <button onClick={() => startAdd("ROOT", null)} style={S.rootAdd}>
             <Plus size={14} /> Add top-level goal
           </button>
         )}
+        {isAll && <div style={S.allHint}>Pick a pillar above to add new goals.</div>}
       </div>
 
       {/* Gantt */}
       <div style={S.ganttWrap}>
         <div style={S.ganttTop}>
-          <div style={S.ganttTitle}>{YEAR} · Weekly Timeline</div>
-          {/* Item 6: flex-wrap on multi-select chips */}
-          <div style={S.ganttMultiSelect}>
-            {(() => {
-              const allOn = PILLAR_NAMES.every((n) => ganttPillars.includes(n));
-              return (
-                <button onClick={() => setGanttPillars(allOn ? [] : [...PILLAR_NAMES])}
-                  style={{ ...S.msChip, ...(allOn ? { background: "var(--accent-strong)", color: "#fff", borderColor: "var(--accent-strong)" } : {}) }}>
-                  All
-                </button>
-              );
-            })()}
-            {PILLAR_NAMES.map((name) => {
-              const on = ganttPillars.includes(name);
-              return (
-                <button key={name} onClick={() => toggleGanttPillar(name)}
-                  style={{ ...S.msChip, ...(on ? { background: PILLARS[name].dot, color: "#fff", borderColor: PILLARS[name].dot } : {}) }}>
-                  <span style={{ ...S.dot, width: 7, height: 7, background: on ? "#fff" : PILLARS[name].dot }} />
-                  {name}
-                </button>
-              );
-            })}
-          </div>
+          <div style={S.ganttTitle}>Daily Timeline{gRange ? ` · ${shortDate(gRange.start)} – ${shortDate(gRange.end)}` : ""}</div>
+          <div style={S.ganttHint}>Toggle the <Eye size={12} style={{ verticalAlign: "-2px" }} /> on any goal to show or hide it here.</div>
         </div>
-        {ganttRows.length === 0 ? (
-          <div style={S.ganttEmpty}>Select pillars above to see their weekly goals on the timeline.</div>
+        {!gRange ? (
+          <div style={S.ganttEmpty}>No goals on the timeline. Click the eye icon on a goal to show it here.</div>
         ) : (
           <div style={S.ganttScroll}>
-            <div style={S.ganttInner}>
-              <div style={S.ganttHeader}>
-                <div style={S.ganttLabelCol} />
-                <div style={S.ganttGrid}>
-                  {MONTHS.map((m) => <div key={m} style={S.ganttMonth}>{m}</div>)}
+            <div style={{ minWidth: GLABEL_W + totalDays * COL_W }}>
+              {/* Month band */}
+              <div style={S.gBandRow}>
+                <div style={{ ...S.gLabelHead, zIndex: 4 }}>Goal</div>
+                <div style={{ display: "flex" }}>
+                  {monthGroups.map((mg, i) => (
+                    <div key={i} style={{ ...S.gMonthCell, width: mg.days * COL_W }}>{mg.label}</div>
+                  ))}
                 </div>
               </div>
-              {ganttRows.map((g) => {
-                const c = PILLARS[g.pillar].dot;
-                const startFM = toFractM(g.start_date, false);
-                const endFM = toFractM(g.end_date, true);
-                const left = (startFM / 12) * 100;
-                const width = Math.max(((endFM - startFM) / 12) * 100, 1.5);
-                return (
-                  <div key={g.id} style={S.ganttRow}>
-                    <div style={{ ...S.ganttLabelCol, paddingLeft: 8 }}>
-                      <span style={{ ...S.ganttRowDot, background: c }} />
-                      <span style={S.ganttRowLabel}>{g.title}</span>
-                    </div>
-                    <div style={S.ganttGrid}>
-                      {MONTHS.map((_, i) => <div key={i} style={S.ganttCell} />)}
-                      <div style={{ ...S.ganttBar, left: `${left}%`, width: `${width}%`, background: c }} title={`${g.pillar} · ${periodLabel(g)}`} />
-                    </div>
+              {/* Day band */}
+              <div style={S.gBandRow}>
+                <div style={{ ...S.gLabelHead, zIndex: 4, fontSize: 10, color: "var(--text-3)", fontWeight: 600 }}>days →</div>
+                <div style={{ display: "flex" }}>
+                  {gDays.map((d, i) => {
+                    const wknd = d.getDay() === 0 || d.getDay() === 6;
+                    const isToday = i === todayIdx;
+                    return (
+                      <div key={i} style={{ ...S.gDayCell, ...(wknd ? S.gWeekend : {}), ...(isToday ? S.gTodayCell : {}) }}>
+                        {d.getDate()}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              {/* Rows, grouped by horizon band */}
+              {ganttGroups.map((grp) => (
+                <div key={grp.key}>
+                  <div style={S.gGroupRow}>
+                    <div style={S.gGroupLabel}>{grp.label}<span style={S.gGroupCount}>{grp.items.length}</span></div>
+                    <div style={{ width: totalDays * COL_W, flexShrink: 0 }} />
                   </div>
-                );
-              })}
+                  {grp.items.map((g) => {
+                    const c = PILLARS[g.pillar]?.dot || "#9A968C";
+                    const sIdx = Math.round((parseD(g.start_date) - gRange.start) / DAY_MS);
+                    const dur = dayDuration(g);
+                    const barW = dur * COL_W - 4;
+                    const labelInside = barW >= 54;
+                    const tip = `${g.title} · ${g.start_date} → ${g.end_date} · ${dur} day${dur > 1 ? "s" : ""}`;
+                    return (
+                      <div key={g.id} style={S.gRow}>
+                        <div style={{ ...S.gLabel, paddingLeft: 12 }}>
+                          <span style={{ ...S.ganttRowDot, background: c }} />
+                          <span style={{ ...S.gHzTag, color: c, borderColor: c }}>{HZ_ABBR[g.horizon]}</span>
+                          <span style={S.gLabelText} title={g.title}>{g.title}</span>
+                          <span style={S.gDurChip}>{dur}d</span>
+                        </div>
+                        <div style={{ ...S.gTrack, width: totalDays * COL_W }}>
+                          {todayInRange && <div style={{ ...S.gTodayLine, left: todayIdx * COL_W }} />}
+                          <div style={{ ...S.gBar, left: sIdx * COL_W + 2, width: barW, background: c }} title={tip}>
+                            {labelInside && <span style={S.gBarLabel}>{g.title}</span>}
+                          </div>
+                          {!labelInside && (
+                            <span style={{ ...S.gBarOutside, left: sIdx * COL_W + barW + 8 }} title={tip}>{g.title}</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
             </div>
+          </div>
+        )}
+        {gRange && (
+          <div style={S.gLegend}>
+            <span style={S.gLegendItem}><span style={{ ...S.gLegendBar }} /> bar length = number of days</span>
+            <span style={S.gLegendItem}><span style={S.gLegendToday} /> today</span>
           </div>
         )}
       </div>
@@ -440,6 +540,8 @@ const S = {
   ganttWrap: { background: "var(--surface)", borderRadius: 12, padding: "16px 14px", marginTop: 18, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
   ganttTop: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10, marginBottom: 14 },
   ganttTitle: { fontSize: 13, fontWeight: 700, color: "var(--text-2)", fontFamily: "'Fraunces',Georgia,serif" },
+  ganttHint: { fontSize: 11.5, color: "var(--text-3)", fontWeight: 500 },
+  allHint: { fontSize: 12, color: "var(--text-3)", fontStyle: "italic", padding: "10px 12px" },
   ganttMultiSelect: { display: "flex", gap: 6, flexWrap: "wrap" },
   msChip: { display: "flex", alignItems: "center", gap: 5, border: "1px solid var(--border)", background: "var(--surface)", padding: "5px 10px", borderRadius: 16, fontSize: 11.5, fontWeight: 600, color: "var(--text-2)", cursor: "pointer", fontFamily: "inherit" },
   ganttEmpty: { fontSize: 13, color: "var(--text-3)", padding: "24px 12px", textAlign: "center" },
@@ -454,4 +556,29 @@ const S = {
   ganttRowLabel: { fontSize: 12, fontWeight: 500, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
   ganttCell: { borderLeft: "1px solid #F0EEE8", height: 30 },
   ganttBar: { position: "absolute", top: 7, height: 16, borderRadius: 5, boxShadow: "0 1px 2px rgba(0,0,0,0.12)" },
+
+  // Daily PM Gantt
+  gBandRow: { display: "flex", alignItems: "stretch", borderBottom: "1px solid var(--border)" },
+  gLabelHead: { width: GLABEL_W, flexShrink: 0, position: "sticky", left: 0, background: "var(--surface)", borderRight: "1px solid var(--border)", display: "flex", alignItems: "center", padding: "6px 10px", fontSize: 12, fontWeight: 700, color: "var(--text-2)" },
+  gMonthCell: { flexShrink: 0, borderLeft: "1px solid var(--border)", fontSize: 10.5, fontWeight: 700, color: "var(--text-2)", textAlign: "center", padding: "5px 0", whiteSpace: "nowrap", overflow: "hidden" },
+  gDayCell: { width: COL_W, flexShrink: 0, textAlign: "center", fontSize: 10, color: "var(--text-3)", padding: "4px 0", borderLeft: "1px solid var(--border)", fontWeight: 600 },
+  gWeekend: { background: "var(--surface-2)" },
+  gTodayCell: { background: "var(--hover)", color: "var(--accent)", fontWeight: 800 },
+  gGroupRow: { display: "flex", alignItems: "stretch", background: "var(--surface-2)", borderBottom: "1px solid var(--border)", borderTop: "1px solid var(--border)" },
+  gGroupLabel: { width: GLABEL_W, flexShrink: 0, position: "sticky", left: 0, background: "var(--surface-2)", zIndex: 3, padding: "6px 12px", fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-2)", borderRight: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 7 },
+  gGroupCount: { fontSize: 10, fontWeight: 700, color: "var(--text-3)", background: "var(--hover)", borderRadius: 9, padding: "1px 6px" },
+  gHzTag: { fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", border: "1px solid", borderRadius: 4, padding: "1px 4px", flexShrink: 0 },
+  gRow: { display: "flex", alignItems: "stretch", minHeight: 36, borderBottom: "1px solid var(--border)" },
+  gLabel: { width: GLABEL_W, flexShrink: 0, display: "flex", alignItems: "center", gap: 7, position: "sticky", left: 0, background: "var(--surface)", zIndex: 2, borderRight: "1px solid var(--border)", paddingRight: 8, overflow: "hidden" },
+  gLabelText: { flex: 1, minWidth: 0, fontSize: 12, fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: "var(--text)" },
+  gDurChip: { fontSize: 10, fontWeight: 700, color: "var(--text-2)", background: "var(--hover)", borderRadius: 10, padding: "1px 6px", flexShrink: 0, marginRight: 6 },
+  gTrack: { position: "relative", flexShrink: 0, minHeight: 36, backgroundImage: `repeating-linear-gradient(to right, var(--border) 0, var(--border) 1px, transparent 1px, transparent ${COL_W}px)` },
+  gBar: { position: "absolute", top: 9, height: 18, borderRadius: 5, display: "flex", alignItems: "center", padding: "0 7px", boxShadow: "0 1px 2px rgba(0,0,0,0.15)", overflow: "hidden", zIndex: 1 },
+  gBarLabel: { fontSize: 11, fontWeight: 600, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  gBarOutside: { position: "absolute", top: 9, height: 18, display: "flex", alignItems: "center", fontSize: 11, fontWeight: 600, color: "var(--text)", whiteSpace: "nowrap", pointerEvents: "none", zIndex: 1 },
+  gTodayLine: { position: "absolute", top: 0, bottom: 0, width: 2, background: "#C2536B", zIndex: 0, opacity: 0.6 },
+  gLegend: { display: "flex", gap: 16, marginTop: 12, fontSize: 11, color: "var(--text-3)", flexWrap: "wrap" },
+  gLegendItem: { display: "flex", alignItems: "center", gap: 6, fontWeight: 600 },
+  gLegendBar: { width: 18, height: 8, borderRadius: 3, background: "var(--accent)", display: "inline-block" },
+  gLegendToday: { width: 2, height: 12, background: "#C2536B", display: "inline-block" },
 };
