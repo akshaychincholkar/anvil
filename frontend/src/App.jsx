@@ -19,6 +19,7 @@ import FinanceScreen from "./screens/FinanceScreen.jsx";
 import KickstartScreen from "./screens/KickstartScreen.jsx";
 import GoldenBookScreen from "./screens/GoldenBookScreen.jsx";
 import SettingsModal from "./screens/SettingsModal.jsx";
+import Ticker from "./components/Ticker.jsx";
 import { api, getToken, clearToken } from "./api.js";
 import { applyTheme, getStoredThemeId } from "./theme.js";
 import { getCurrencyCode, setCurrencyCode } from "./currency.js";
@@ -77,6 +78,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [themeId, setThemeId] = useState(getStoredThemeId());
   const [currency, setCurrency] = useState(getCurrencyCode());
+  const [ticker, setTicker] = useState({ enabled: false, statements: [], speed: 60, delay: 3 });
   const [order, setOrder] = useState(() => normalizeOrder(DEFAULT_ORDER));
   const [hidden, setHidden] = useState([]);
   const isMobile = useIsMobile();
@@ -101,6 +103,7 @@ export default function App() {
     if (!user) return;
     api.getSetting("theme").then((r) => { if (r?.value) setThemeId(applyTheme(r.value)); }).catch(() => {});
     api.getSetting("currency").then((r) => { if (r?.value) setCurrency(setCurrencyCode(r.value)); }).catch(() => {});
+    api.getSetting("ticker").then((r) => { if (r?.value) setTicker((t) => ({ ...t, ...r.value })); }).catch(() => {});
     api.getSetting("sidebar_order").then((r) => { if (Array.isArray(r?.value)) setOrder(normalizeOrder(r.value)); }).catch(() => {});
     api.getSetting("sidebar_hidden").then((r) => { if (Array.isArray(r?.value)) setHidden(r.value); }).catch(() => {});
   }, [user]);
@@ -124,6 +127,10 @@ export default function App() {
   const selectCurrency = (code) => {
     setCurrency(setCurrencyCode(code));
     api.setSetting("currency", code).catch(() => {});
+  };
+  const saveTicker = (cfg) => {
+    setTicker(cfg);
+    api.setSetting("ticker", cfg).catch(() => {});
   };
   const saveSidebar = (newOrder, newHidden) => {
     setOrder(normalizeOrder(newOrder));
@@ -231,6 +238,8 @@ export default function App() {
           </div>
         )}
 
+        {ticker.enabled && <Ticker statements={ticker.statements} speed={ticker.speed} delay={ticker.delay} />}
+
         <main style={S.main}>
           <Screen />
         </main>
@@ -243,10 +252,12 @@ export default function App() {
           hidden={hidden}
           themeId={themeId}
           currency={currency}
+          ticker={ticker}
           onSaveSidebar={saveSidebar}
           onPreviewTheme={previewTheme}
           onCommitTheme={commitTheme}
           onSelectCurrency={selectCurrency}
+          onSaveTicker={saveTicker}
           onClose={closeSettings}
         />
       )}

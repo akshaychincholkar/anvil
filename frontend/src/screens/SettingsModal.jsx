@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, Eye, EyeOff, ChevronUp, ChevronDown, Check, LayoutList, Palette, Coins, Music } from "lucide-react";
+import { X, Eye, EyeOff, ChevronUp, ChevronDown, Check, LayoutList, Palette, Coins, Music, Megaphone, Plus } from "lucide-react";
 import { THEMES } from "../theme.js";
 import { CURRENCIES } from "../currency.js";
 import { api } from "../api.js";
@@ -14,13 +14,32 @@ function useIsMobile(bp = 560) {
   return m;
 }
 
-export default function SettingsModal({ screens, order, hidden, themeId, currency, onSaveSidebar, onPreviewTheme, onCommitTheme, onSelectCurrency, onClose }) {
+export default function SettingsModal({ screens, order, hidden, themeId, currency, ticker, onSaveSidebar, onPreviewTheme, onCommitTheme, onSelectCurrency, onSaveTicker, onClose }) {
   const [tab, setTab] = useState("sidebar");
   const [items, setItems] = useState(() => order.map((id) => ({ id, hidden: hidden.includes(id) })));
   const [pendingTheme, setPendingTheme] = useState(themeId);
   const [musicUrl, setMusicUrl] = useState("");
   const [musicSaved, setMusicSaved] = useState(false);
   const isMobile = useIsMobile();
+
+  // Reminder ticker editor state
+  const [tEnabled, setTEnabled] = useState(!!ticker?.enabled);
+  const [tStatements, setTStatements] = useState(() => {
+    const s = Array.isArray(ticker?.statements) ? ticker.statements.slice(0, 5) : [];
+    return s.length ? s : [""];
+  });
+  const [tSpeed, setTSpeed] = useState(ticker?.speed ?? 60);
+  const [tDelay, setTDelay] = useState(ticker?.delay ?? 3);
+  const [tSaved, setTSaved] = useState(false);
+
+  const setStatement = (i, v) => setTStatements((a) => a.map((x, j) => (j === i ? v : x)));
+  const addStatement = () => setTStatements((a) => (a.length < 5 ? [...a, ""] : a));
+  const removeStatement = (i) => setTStatements((a) => (a.length > 1 ? a.filter((_, j) => j !== i) : a));
+  const saveReminders = () => {
+    const statements = tStatements.map((s) => s.trim()).filter(Boolean).slice(0, 5);
+    onSaveTicker({ enabled: tEnabled, statements, speed: Number(tSpeed), delay: Number(tDelay) });
+    setTSaved(true); setTimeout(() => setTSaved(false), 1500);
+  };
 
   useEffect(() => { api.getSetting("golden_music").then((r) => setMusicUrl(r?.value || "")).catch(() => {}); }, []);
   const saveMusic = () => {
@@ -78,6 +97,9 @@ export default function SettingsModal({ screens, order, hidden, themeId, currenc
           <button onClick={() => setTab("music")} style={{ ...S.tab, ...(tab === "music" ? S.tabOn : {}) }}>
             <Music size={15} /> Music
           </button>
+          <button onClick={() => setTab("reminders")} style={{ ...S.tab, ...(tab === "reminders" ? S.tabOn : {}) }}>
+            <Megaphone size={15} /> Reminders
+          </button>
         </div>
 
         <div style={S.body}>
@@ -128,6 +150,41 @@ export default function SettingsModal({ screens, order, hidden, themeId, currenc
               <input value={musicUrl} onChange={(e) => setMusicUrl(e.target.value)}
                 placeholder="https://youtube.com/watch?v=…" style={S.musicInput} />
               <button onClick={saveMusic} style={S.saveBtn}><Check size={15} /> {musicSaved ? "Saved" : "Save music"}</button>
+            </>
+          ) : tab === "reminders" ? (
+            <>
+              <p style={S.hint}>Up to 5 reminders scroll across the top of every screen — a gentle nudge toward your goals.</p>
+
+              <button onClick={() => setTEnabled((v) => !v)}
+                style={{ ...S.row, cursor: "pointer", width: "100%", justifyContent: "space-between", ...(tEnabled ? { borderColor: "var(--accent)" } : {}) }}>
+                <span style={S.rowLabel}>Show reminder banner</span>
+                <span style={{ ...S.switch, ...(tEnabled ? S.switchOn : {}) }}>{tEnabled ? "On" : "Off"}</span>
+              </button>
+
+              <div style={{ marginTop: 14 }}>
+                <div style={S.fieldLbl}>Reminders ({tStatements.filter((s) => s.trim()).length}/5)</div>
+                {tStatements.map((s, i) => (
+                  <div key={i} style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                    <input value={s} onChange={(e) => setStatement(i, e.target.value)} maxLength={120}
+                      placeholder={`Reminder ${i + 1}`} style={{ ...S.musicInput, marginBottom: 0 }} />
+                    <button onClick={() => removeStatement(i)} style={S.iconBtn} title="Remove"><X size={15} /></button>
+                  </div>
+                ))}
+                {tStatements.length < 5 && (
+                  <button onClick={addStatement} style={S.addRowBtn}><Plus size={14} /> Add reminder</button>
+                )}
+              </div>
+
+              <div style={{ marginTop: 16 }}>
+                <div style={S.sliderHead}><span style={S.fieldLbl}>Scroll speed</span><span style={S.sliderVal}>{tSpeed} px/s</span></div>
+                <input type="range" min={20} max={200} step={5} value={tSpeed} onChange={(e) => setTSpeed(e.target.value)} style={S.range} />
+              </div>
+              <div style={{ marginTop: 12 }}>
+                <div style={S.sliderHead}><span style={S.fieldLbl}>Delay between reminders</span><span style={S.sliderVal}>{tDelay}s</span></div>
+                <input type="range" min={0} max={15} step={1} value={tDelay} onChange={(e) => setTDelay(e.target.value)} style={S.range} />
+              </div>
+
+              <button onClick={saveReminders} style={{ ...S.saveBtn, marginTop: 16 }}><Check size={15} /> {tSaved ? "Saved" : "Save reminders"}</button>
             </>
           ) : (
             <>
@@ -181,6 +238,13 @@ const S = {
   saveBtn: { display: "flex", alignItems: "center", justifyContent: "center", gap: 7, width: "100%", marginTop: 16, border: "none", background: "var(--accent)", color: "#fff", padding: "11px", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer" },
   saveBtnDisabled: { background: "var(--border)", color: "var(--text-3)", cursor: "default" },
   musicInput: { width: "100%", boxSizing: "border-box", border: "1px solid var(--border)", borderRadius: 9, padding: "10px 12px", fontSize: 13.5, fontFamily: "inherit", color: "var(--text)", background: "var(--surface)", outline: "none", marginBottom: 12 },
+  switch: { fontSize: 12, fontWeight: 700, color: "var(--text-3)", background: "var(--hover)", borderRadius: 20, padding: "3px 12px", minWidth: 44, textAlign: "center" },
+  switchOn: { background: "var(--accent)", color: "#fff" },
+  fieldLbl: { fontSize: 12, fontWeight: 700, color: "var(--text-2)", marginBottom: 7 },
+  addRowBtn: { display: "flex", alignItems: "center", justifyContent: "center", gap: 6, width: "100%", border: "1px dashed var(--border)", background: "none", color: "var(--text-2)", padding: "9px", borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
+  sliderHead: { display: "flex", justifyContent: "space-between", alignItems: "baseline" },
+  sliderVal: { fontSize: 12, fontWeight: 700, color: "var(--accent)" },
+  range: { width: "100%", accentColor: "var(--accent)", cursor: "pointer" },
   themeGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 },
   themeCard: { textAlign: "left", border: "2px solid var(--border)", background: "var(--surface-2)", borderRadius: 12, padding: 12, cursor: "pointer", display: "flex", flexDirection: "column", gap: 6, outline: "none", WebkitTapHighlightColor: "transparent", transition: "border-color .15s ease, box-shadow .15s ease" },
   themeCardOn: { borderColor: "var(--accent)", boxShadow: "0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent)" },
