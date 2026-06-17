@@ -1372,6 +1372,159 @@ def restore_kickstart(vid: int):
         return _ks_row(r) if r else {}
 
 
+# ── Golden Book (manifestation journal) ──────────────────────────────────────
+
+class GoldenCreate(BaseModel):
+    title: str
+    image: str = ""
+    created_date: Optional[str] = None
+
+class GoldenUpdate(BaseModel):
+    title: Optional[str] = None
+    image: Optional[str] = None
+
+class GoldenEntryBody(BaseModel):
+    date: Optional[str] = None
+    text: str = ""
+
+def _golden_streak(conn, goal_id: int) -> int:
+    rows = conn.execute(
+        "SELECT entry_date FROM golden_entry WHERE goal_id=? AND text<>'' ", (goal_id,)
+    ).fetchall()
+    dates = {r["entry_date"] for r in rows}
+    if not dates:
+        return 0
+    today = date.today()
+    if today.isoformat() in dates:
+        cur = today
+    elif (today - timedelta(days=1)).isoformat() in dates:
+        cur = today - timedelta(days=1)
+    else:
+        return 0
+    streak = 0
+    while cur.isoformat() in dates:
+        streak += 1
+        cur = cur - timedelta(days=1)
+    return streak
+
+def _golden_summary(conn, r) -> dict:
+    gid = r["id"]
+    total = conn.execute("SELECT COUNT(*) FROM golden_entry WHERE goal_id=? AND text<>''", (gid,)).fetchone()[0]
+    days_to = None
+    if r["achieved"] and r["achieved_date"]:
+        try:
+            days_to = (date.fromisoformat(r["achieved_date"]) - date.fromisoformat(r["created_date"])).days
+        except Exception:
+            days_to = None
+    return {
+        "id": gid, "title": r["title"], "image": r["image"], "created_date": r["created_date"],
+        "achieved": bool(r["achieved"]), "achieved_date": r["achieved_date"],
+        "streak": _golden_streak(conn, gid), "total_days": total, "days_to_manifest": days_to,
+    }
+
+def _golden_get(conn, gid):
+    return conn.execute(
+        f"SELECT id, title, image, created_date, achieved, achieved_date FROM golden_goal "
+        f"WHERE id=? AND user_id={cu()} AND deleted_at IS NULL", (gid,)
+    ).fetchone()
+
+def _golden_detail(conn, gid):
+    r = _golden_get(conn, gid)
+    if not r:
+        raise HTTPException(404)
+    d = _golden_summary(conn, r)
+    entries = conn.execute(
+        "SELECT entry_date AS date, text FROM golden_entry WHERE goal_id=? ORDER BY entry_date DESC", (gid,)
+    ).fetchall()
+    d["entries"] = [{"date": e["date"], "text": e["text"]} for e in entries]
+    return d
+
+@app.get("/api/golden/goals")
+def get_golden_goals():
+    with db() as conn:
+        rows = conn.execute(
+            f"SELECT id, title, image, created_date, achieved, achieved_date FROM golden_goal "
+            f"WHERE user_id={cu()} AND deleted_at IS NULL ORDER BY achieved ASC, id DESC"
+        ).fetchall()
+        return [_golden_summary(conn, r) for r in rows]
+
+@app.get("/api/golden/goals/{gid}")
+def get_golden_goal(gid: int):
+    with db() as conn:
+        return _golden_detail(conn, gid)
+
+@app.post("/api/golden/goals", status_code=201)
+def create_golden(body: GoldenCreate):
+    if not body.title.strip():
+        raise HTTPException(400, "title required")
+    cdate = body.created_date or str(date.today())
+    with db() as conn:
+        cur = conn.execute(
+            f"INSERT INTO golden_goal (user_id, title, image, created_date) VALUES ({cu()}, ?, ?, ?)",
+            (body.title.strip(), body.image or "", cdate)
+        )
+        return _golden_summary(conn, _golden_get(conn, cur.lastrowid))
+
+@app.put("/api/golden/goals/{gid}")
+def update_golden(gid: int, body: GoldenUpdate):
+    data = body.dict(exclude_unset=True)
+    with db() as conn:
+        if not _golden_get(conn, gid):
+            raise HTTPException(404)
+        sets, vals = [], []
+        if "title" in data and data["title"] is not None:
+            sets.append("title=?"); vals.append(data["title"].strip())
+        if "image" in data and data["image"] is not None:
+            sets.append("image=?"); vals.append(data["image"])
+        if sets:
+            conn.execute(f"UPDATE golden_goal SET {', '.join(sets)} WHERE id=? AND user_id={cu()}", (*vals, gid))
+        return _golden_summary(conn, _golden_get(conn, gid))
+
+@app.post("/api/golden/goals/{gid}/achieve")
+def achieve_golden(gid: int):
+    with db() as conn:
+        if not _golden_get(conn, gid):
+            raise HTTPException(404)
+        conn.execute(
+            f"UPDATE golden_goal SET achieved=1, achieved_date=? WHERE id=? AND user_id={cu()}",
+            (str(date.today()), gid)
+        )
+        return _golden_summary(conn, _golden_get(conn, gid))
+
+@app.post("/api/golden/goals/{gid}/unachieve")
+def unachieve_golden(gid: int):
+    with db() as conn:
+        if not _golden_get(conn, gid):
+            raise HTTPException(404)
+        conn.execute(f"UPDATE golden_goal SET achieved=0, achieved_date=NULL WHERE id=? AND user_id={cu()}", (gid,))
+        return _golden_summary(conn, _golden_get(conn, gid))
+
+@app.put("/api/golden/goals/{gid}/entry")
+def upsert_golden_entry(gid: int, body: GoldenEntryBody):
+    d = body.date or str(date.today())
+    with db() as conn:
+        if not _golden_get(conn, gid):
+            raise HTTPException(404)
+        conn.execute(
+            "INSERT INTO golden_entry (goal_id, entry_date, text) VALUES (?,?,?) "
+            "ON CONFLICT(goal_id, entry_date) DO UPDATE SET text=excluded.text",
+            (gid, d, body.text)
+        )
+        return _golden_detail(conn, gid)
+
+@app.delete("/api/golden/goals/{gid}", status_code=204)
+def delete_golden(gid: int):
+    with db() as conn:
+        _soft_delete(conn, "golden_goal", gid)
+
+@app.post("/api/golden/goals/{gid}/restore")
+def restore_golden(gid: int):
+    with db() as conn:
+        _restore(conn, "golden_goal", gid)
+        r = _golden_get(conn, gid)
+        return _golden_summary(conn, r) if r else {}
+
+
 # ── Grove (Focus / Pomodoro) ──────────────────────────────────────────────────
 
 class FocusCreate(BaseModel):

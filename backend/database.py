@@ -271,6 +271,27 @@ def init_db():
             deleted_at TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE TABLE IF NOT EXISTS golden_goal (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            title TEXT NOT NULL DEFAULT '',
+            image TEXT NOT NULL DEFAULT '',
+            created_date TEXT NOT NULL,
+            achieved INTEGER NOT NULL DEFAULT 0,
+            achieved_date TEXT,
+            deleted_at TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS golden_entry (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            goal_id INTEGER NOT NULL,
+            entry_date TEXT NOT NULL,
+            text TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(goal_id, entry_date)
+        );
         """)
 
         migrate_db()

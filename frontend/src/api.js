@@ -48,6 +48,17 @@ export const api = {
   createFocus: (data) => req("POST", "/focus", data),
   deleteFocus: (id) => req("DELETE", `/focus/${id}`),
 
+  // Golden Book (manifestation)
+  getGoldenGoals: () => req("GET", "/golden/goals"),
+  getGoldenGoal: (id) => req("GET", `/golden/goals/${id}`),
+  createGolden: (data) => req("POST", "/golden/goals", data),
+  updateGolden: (id, data) => req("PUT", `/golden/goals/${id}`, data),
+  achieveGolden: (id) => req("POST", `/golden/goals/${id}/achieve`),
+  unachieveGolden: (id) => req("POST", `/golden/goals/${id}/unachieve`),
+  upsertGoldenEntry: (id, data) => req("PUT", `/golden/goals/${id}/entry`, data),
+  deleteGolden: (id) => req("DELETE", `/golden/goals/${id}`),
+  restoreGolden: (id) => req("POST", `/golden/goals/${id}/restore`),
+
   // Kickstart (motivation videos)
   getKickstart: () => req("GET", "/kickstart/videos"),
   createKickstart: (data) => req("POST", "/kickstart/videos", data),

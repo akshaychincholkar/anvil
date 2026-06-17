@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
-import { X, Eye, EyeOff, ChevronUp, ChevronDown, Check, LayoutList, Palette, Coins } from "lucide-react";
+import { X, Eye, EyeOff, ChevronUp, ChevronDown, Check, LayoutList, Palette, Coins, Music } from "lucide-react";
 import { THEMES } from "../theme.js";
 import { CURRENCIES } from "../currency.js";
+import { api } from "../api.js";
 
 function useIsMobile(bp = 560) {
   const [m, setM] = useState(() => window.innerWidth <= bp);
@@ -17,7 +18,16 @@ export default function SettingsModal({ screens, order, hidden, themeId, currenc
   const [tab, setTab] = useState("sidebar");
   const [items, setItems] = useState(() => order.map((id) => ({ id, hidden: hidden.includes(id) })));
   const [pendingTheme, setPendingTheme] = useState(themeId);
+  const [musicUrl, setMusicUrl] = useState("");
+  const [musicSaved, setMusicSaved] = useState(false);
   const isMobile = useIsMobile();
+
+  useEffect(() => { api.getSetting("golden_music").then((r) => setMusicUrl(r?.value || "")).catch(() => {}); }, []);
+  const saveMusic = () => {
+    api.setSetting("golden_music", musicUrl.trim())
+      .then(() => { setMusicSaved(true); setTimeout(() => setMusicSaved(false), 1500); })
+      .catch(() => {});
+  };
 
   const pickTheme = (id) => { setPendingTheme(id); onPreviewTheme(id); };
 
@@ -65,6 +75,9 @@ export default function SettingsModal({ screens, order, hidden, themeId, currenc
           <button onClick={() => setTab("currency")} style={{ ...S.tab, ...(tab === "currency" ? S.tabOn : {}) }}>
             <Coins size={15} /> Currency
           </button>
+          <button onClick={() => setTab("music")} style={{ ...S.tab, ...(tab === "music" ? S.tabOn : {}) }}>
+            <Music size={15} /> Music
+          </button>
         </div>
 
         <div style={S.body}>
@@ -108,6 +121,13 @@ export default function SettingsModal({ screens, order, hidden, themeId, currenc
                   );
                 })}
               </div>
+            </>
+          ) : tab === "music" ? (
+            <>
+              <p style={S.hint}>Paste a YouTube link to play softly while you write in the <b>Golden Book</b>. It plays only on that screen (audio only).</p>
+              <input value={musicUrl} onChange={(e) => setMusicUrl(e.target.value)}
+                placeholder="https://youtube.com/watch?v=…" style={S.musicInput} />
+              <button onClick={saveMusic} style={S.saveBtn}><Check size={15} /> {musicSaved ? "Saved" : "Save music"}</button>
             </>
           ) : (
             <>
@@ -160,6 +180,7 @@ const S = {
   iconBtn: { border: "none", background: "none", color: "var(--text-2)", cursor: "pointer", padding: 4, display: "grid", placeItems: "center", borderRadius: 6 },
   saveBtn: { display: "flex", alignItems: "center", justifyContent: "center", gap: 7, width: "100%", marginTop: 16, border: "none", background: "var(--accent)", color: "#fff", padding: "11px", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer" },
   saveBtnDisabled: { background: "var(--border)", color: "var(--text-3)", cursor: "default" },
+  musicInput: { width: "100%", boxSizing: "border-box", border: "1px solid var(--border)", borderRadius: 9, padding: "10px 12px", fontSize: 13.5, fontFamily: "inherit", color: "var(--text)", background: "var(--surface)", outline: "none", marginBottom: 12 },
   themeGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 },
   themeCard: { textAlign: "left", border: "2px solid var(--border)", background: "var(--surface-2)", borderRadius: 12, padding: 12, cursor: "pointer", display: "flex", flexDirection: "column", gap: 6, outline: "none", WebkitTapHighlightColor: "transparent", transition: "border-color .15s ease, box-shadow .15s ease" },
   themeCardOn: { borderColor: "var(--accent)", boxShadow: "0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent)" },

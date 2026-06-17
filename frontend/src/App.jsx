@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import {
   LayoutGrid, Target, CheckSquare, BookOpen,
   GraduationCap, Star, RotateCcw, Menu, X,
-  Sparkles, LogOut, Trees, IndianRupee, Settings, Landmark, Rocket
+  Sparkles, LogOut, Trees, IndianRupee, Settings, Landmark, Rocket, Crown
 } from "lucide-react";
 import QuadrantView from "./screens/QuadrantView.jsx";
 import GoalsWithGantt from "./screens/GoalsWithGantt.jsx";
@@ -17,6 +17,7 @@ import WorthScreen from "./screens/WorthScreen.jsx";
 import AuthScreen from "./screens/AuthScreen.jsx";
 import FinanceScreen from "./screens/FinanceScreen.jsx";
 import KickstartScreen from "./screens/KickstartScreen.jsx";
+import GoldenBookScreen from "./screens/GoldenBookScreen.jsx";
 import SettingsModal from "./screens/SettingsModal.jsx";
 import { api, getToken, clearToken } from "./api.js";
 import { applyTheme, getStoredThemeId } from "./theme.js";
@@ -28,6 +29,7 @@ applyTheme(getStoredThemeId(), false);
 // Registry: screen id → metadata + component.
 const SCREENS = {
   kickstart:    { label: "Kickstart",    icon: Rocket,        component: KickstartScreen },
+  golden:       { label: "Golden Book",  icon: Crown,         component: GoldenBookScreen },
   habits:       { label: "Habits",       icon: CheckSquare,   component: HabitTracker },
   quadrant:     { label: "Quadrant",     icon: LayoutGrid,    component: QuadrantView },
   goals:        { label: "Goals",        icon: Target,        component: GoalsWithGantt },
@@ -43,7 +45,7 @@ const SCREENS = {
 
 // Default sidebar order (flat items). Users can reorder/hide via Settings.
 const DEFAULT_ORDER = [
-  "kickstart", "habits", "quadrant", "goals", "grove", "journal",
+  "kickstart", "golden", "habits", "quadrant", "goals", "grove", "journal",
   "revision", "affirmations", "skills", "spiritual", "worth", "vault",
 ];
 
