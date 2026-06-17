@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
-import { Menu, X, ChevronLeft, ChevronRight, Plus, Check, ImagePlus, Trash2, FileText, Images } from "lucide-react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { Menu, X, ChevronLeft, ChevronRight, Plus, Check, ImagePlus, Trash2, FileText, Images, Pencil, Home, ChevronUp, ChevronDown } from "lucide-react";
 import { SPIRITUAL_ITEMS } from "./spiritual/spiritualContent.js";
 import { api } from "../api.js";
 
@@ -64,9 +64,53 @@ export default function SpiritualScreen() {
   const [activeId, setActiveId] = useState("dss");
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ title: "", type: "text", content: "", images: [] });
+  const [order, setOrder] = useState([]);       // saved id order
+  const [defaultId, setDefaultId] = useState(null);
+  const [editMode, setEditMode] = useState(false);
+  const appliedRef = useRef(false);
 
-  const load = useCallback(() => api.getDecks().then(setDecks).catch(() => {}), []);
+  const load = useCallback(async () => {
+    try {
+      const [d, ord, def] = await Promise.all([
+        api.getDecks(),
+        api.getSetting("spiritual_order"),
+        api.getSetting("spiritual_default"),
+      ]);
+      setDecks(d);
+      if (Array.isArray(ord?.value)) setOrder(ord.value);
+      if (def?.value) setDefaultId(def.value);
+      if (!appliedRef.current) {
+        appliedRef.current = true;
+        const ids = new Set([...SPIRITUAL_ITEMS.map((x) => x.id), ...d.map((x) => `deck-${x.id}`)]);
+        if (def?.value && ids.has(def.value)) setActiveId(def.value);
+      }
+    } catch { /* offline */ }
+  }, []);
   useEffect(() => { load(); }, [load]);
+
+  // Unified, ordered list of built-in items + user decks.
+  const allItems = [
+    ...SPIRITUAL_ITEMS.map((it) => ({ id: it.id, title: it.title })),
+    ...decks.map((d) => ({ id: `deck-${d.id}`, title: d.title })),
+  ];
+  const ordered = (() => {
+    if (!order.length) return allItems;
+    const map = new Map(allItems.map((i) => [i.id, i]));
+    const out = [];
+    order.forEach((id) => { if (map.has(id)) { out.push(map.get(id)); map.delete(id); } });
+    map.forEach((v) => out.push(v));
+    return out;
+  })();
+
+  const move = (idx, dir) => {
+    const ids = ordered.map((i) => i.id);
+    const j = idx + dir;
+    if (j < 0 || j >= ids.length) return;
+    [ids[idx], ids[j]] = [ids[j], ids[idx]];
+    setOrder(ids);
+    api.setSetting("spiritual_order", ids).catch(() => {});
+  };
+  const chooseDefault = (id) => { setDefaultId(id); api.setSetting("spiritual_default", id).catch(() => {}); };
 
   const deckId = activeId.startsWith("deck-") ? Number(activeId.slice(5)) : null;
   const deck = deckId != null ? decks.find((d) => d.id === deckId) : null;
@@ -117,23 +161,34 @@ export default function SpiritualScreen() {
       <aside style={sidebarStyle}>
         <div style={S.sideHead}>
           <div style={S.brand}>Anvil · Spiritual</div>
-          {isMobile && <button onClick={() => setSidebarOpen(false)} style={S.iconBtn}><X size={17} /></button>}
+          <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+            <button onClick={() => setEditMode((v) => !v)} style={S.iconBtn} title="Rearrange & set default">
+              {editMode ? <Check size={16} /> : <Pencil size={15} />}
+            </button>
+            {isMobile && <button onClick={() => setSidebarOpen(false)} style={S.iconBtn}><X size={17} /></button>}
+          </div>
         </div>
+        {editMode && <div style={S.editHint}>Arrows reorder · <Home size={11} style={{ verticalAlign: "-1px" }} /> sets what opens by default</div>}
         <div style={S.sideScroll}>
-          {SPIRITUAL_ITEMS.map((it) => (
-            <button key={it.id} onClick={() => pick(it.id)}
-              style={{ ...S.sideItem, ...(it.id === activeId && !creating ? S.sideItemOn : {}) }}>
-              {it.title}
-            </button>
-          ))}
-
-          <div style={S.sideDivider}>My Decks</div>
-          {decks.map((d) => (
-            <button key={d.id} onClick={() => pick(`deck-${d.id}`)}
-              style={{ ...S.sideItem, ...(activeId === `deck-${d.id}` && !creating ? S.sideItemOn : {}) }}>
-              {d.title}
-            </button>
-          ))}
+          {ordered.map((it, i) => {
+            const on = it.id === activeId && !creating;
+            const isDef = defaultId === it.id;
+            return (
+              <div key={it.id} style={S.sideRow}>
+                <button onClick={() => pick(it.id)} style={{ ...S.sideItem, flex: 1, ...(on ? S.sideItemOn : {}) }}>
+                  {it.title}{isDef && <span style={S.defStar} title="Opens by default"> ★</span>}
+                </button>
+                {editMode && (
+                  <div style={S.editControls}>
+                    <button onClick={() => chooseDefault(it.id)} title="Set as default"
+                      style={{ ...S.miniBtn, ...(isDef ? { color: "#8268B0" } : {}) }}><Home size={13} /></button>
+                    <button onClick={() => move(i, -1)} disabled={i === 0} style={{ ...S.miniBtn, opacity: i === 0 ? 0.3 : 1 }}><ChevronUp size={13} /></button>
+                    <button onClick={() => move(i, 1)} disabled={i === ordered.length - 1} style={{ ...S.miniBtn, opacity: i === ordered.length - 1 ? 0.3 : 1 }}><ChevronDown size={13} /></button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
           <button onClick={openCreate} style={{ ...S.newDeckBtn, ...(creating ? S.sideItemOn : {}) }}>
             <Plus size={14} /> New deck
           </button>
@@ -245,6 +300,11 @@ const S = {
   sideScroll: { flex: 1, overflowY: "auto", padding: "0 8px 16px" },
   sideItem: { display: "block", width: "100%", border: "none", background: "none", padding: "10px 12px", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", fontSize: 13.5, fontWeight: 500, color: "var(--text-2)", textAlign: "left", marginBottom: 2 },
   sideItemOn: { background: "rgba(130,104,176,0.12)", color: "#8268B0", fontWeight: 700 },
+  sideRow: { display: "flex", alignItems: "center", gap: 2 },
+  editControls: { display: "flex", alignItems: "center", gap: 1, flexShrink: 0 },
+  miniBtn: { border: "none", background: "none", color: "var(--text-3)", cursor: "pointer", padding: 3, display: "grid", placeItems: "center", borderRadius: 5 },
+  defStar: { color: "#C9A227", fontWeight: 700 },
+  editHint: { fontSize: 10.5, color: "var(--text-3)", padding: "0 14px 8px", lineHeight: 1.4 },
   sideDivider: { fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--text-3)", padding: "14px 12px 6px", borderTop: "1px solid var(--border)", marginTop: 10 },
   newDeckBtn: { display: "flex", alignItems: "center", justifyContent: "center", gap: 6, width: "100%", border: "1px dashed var(--border)", background: "none", padding: "9px", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 600, color: "var(--text-2)", marginTop: 6 },
   main: { flex: 1, padding: "26px 22px", overflowY: "auto", minWidth: 0 },

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, Eye, EyeOff, ChevronUp, ChevronDown, Check, LayoutList, Palette, Coins, Music, Megaphone, Plus } from "lucide-react";
+import { X, Eye, EyeOff, ChevronUp, ChevronDown, Check, LayoutList, Palette, Coins, Music, Megaphone, Plus, Home } from "lucide-react";
 import { THEMES } from "../theme.js";
 import { CURRENCIES } from "../currency.js";
 import { api } from "../api.js";
@@ -14,7 +14,7 @@ function useIsMobile(bp = 560) {
   return m;
 }
 
-export default function SettingsModal({ screens, order, hidden, themeId, currency, ticker, onSaveSidebar, onPreviewTheme, onCommitTheme, onSelectCurrency, onSaveTicker, onClose }) {
+export default function SettingsModal({ screens, order, hidden, themeId, currency, ticker, defaultScreen, onSetDefault, onSaveSidebar, onPreviewTheme, onCommitTheme, onSelectCurrency, onSaveTicker, onClose }) {
   const [tab, setTab] = useState("sidebar");
   const [items, setItems] = useState(() => order.map((id) => ({ id, hidden: hidden.includes(id) })));
   const [pendingTheme, setPendingTheme] = useState(themeId);
@@ -105,16 +105,21 @@ export default function SettingsModal({ screens, order, hidden, themeId, currenc
         <div style={S.body}>
           {tab === "sidebar" ? (
             <>
-              <p style={S.hint}>Reorder items with the arrows, and hide the ones you don't use. Hidden items disappear from the sidebar but stay accessible here.</p>
+              <p style={S.hint}>Reorder with the arrows, hide ones you don't use, and tap <Home size={11} style={{ verticalAlign: "-1px" }} /> to set the screen that opens on launch.</p>
               <div style={S.list}>
                 {items.map((it, i) => {
                   const sc = screens[it.id];
                   const Icon = sc.icon;
+                  const isDefault = defaultScreen === it.id;
                   return (
-                    <div key={it.id} style={{ ...S.row, opacity: it.hidden ? 0.5 : 1 }}>
+                    <div key={it.id} style={{ ...S.row, opacity: it.hidden ? 0.5 : 1, ...(isDefault ? { borderColor: "var(--accent)" } : {}) }}>
                       <span style={S.rowNum}>{i + 1}</span>
                       <Icon size={16} />
-                      <span style={S.rowLabel}>{sc.label}</span>
+                      <span style={S.rowLabel}>{sc.label}{isDefault && <span style={S.defaultTag}>default</span>}</span>
+                      <button onClick={() => onSetDefault(it.id)} title={isDefault ? "Opens on launch" : "Set as default"}
+                        style={{ ...S.iconBtn, ...(isDefault ? { color: "var(--accent)" } : {}) }}>
+                        <Home size={15} />
+                      </button>
                       <button onClick={() => toggleHide(i)} title={it.hidden ? "Show" : "Hide"}
                         style={{ ...S.iconBtn, ...(it.hidden ? {} : { color: "var(--accent)" }) }}>
                         {it.hidden ? <EyeOff size={15} /> : <Eye size={15} />}
@@ -231,7 +236,8 @@ const S = {
   list: { display: "flex", flexDirection: "column", gap: 6 },
   row: { display: "flex", alignItems: "center", gap: 10, padding: "9px 11px", background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 9 },
   rowNum: { fontSize: 11, fontWeight: 700, color: "var(--text-3)", width: 16, textAlign: "center" },
-  rowLabel: { flex: 1, fontSize: 13.5, fontWeight: 500 },
+  rowLabel: { flex: 1, fontSize: 13.5, fontWeight: 500, display: "flex", alignItems: "center", gap: 7 },
+  defaultTag: { fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--accent)", background: "color-mix(in srgb, var(--accent) 14%, transparent)", padding: "1px 6px", borderRadius: 6 },
   curSymbol: { width: 22, textAlign: "center", fontSize: 15, fontWeight: 700, color: "var(--text)" },
   curCode: { fontSize: 11, color: "var(--text-3)", fontWeight: 600, marginLeft: 4 },
   iconBtn: { border: "none", background: "none", color: "var(--text-2)", cursor: "pointer", padding: 4, display: "grid", placeItems: "center", borderRadius: 6 },

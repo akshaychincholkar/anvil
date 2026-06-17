@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { ChevronRight, ChevronDown, Plus, Target, X, Check, Pencil, Eye, EyeOff, PanelLeftClose, PanelLeftOpen, GripVertical } from "lucide-react";
+import { ChevronRight, ChevronDown, Plus, Target, X, Check, Pencil, Eye, EyeOff, PanelLeftClose, PanelLeftOpen, GripVertical, Settings } from "lucide-react";
 import { api } from "../api.js";
 import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
 import UndoToast from "../components/UndoToast.jsx";
@@ -47,6 +47,7 @@ const GANTT_GROUPS = [
   { key: "mw",        label: "Monthly & Weekly",  horizons: ["Monthly", "Weekly"] },
 ];
 const HZ_ABBR = { Yearly: "Yr", Quarterly: "Q", Monthly: "Mo", Weekly: "Wk" };
+const HZ_SHORT = { Yearly: "Y", Quarterly: "Q", Monthly: "M", Weekly: "W" }; // compact, for mobile
 const HZ_RANK = { Yearly: 0, Quarterly: 1, Monthly: 2, Weekly: 3 };
 
 const nextHorizon = (h) => HORIZONS[Math.min(HORIZONS.indexOf(h) + 1, HORIZONS.length - 1)];
@@ -112,6 +113,23 @@ const addDaysISO = (iso, n) => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
 
+const spanDays = (a, b) => Math.round((new Date(b + "T00:00:00") - new Date(a + "T00:00:00")) / DAY_MS) + 1;
+const daysInMonthOf = (y, m) => new Date(y, m + 1, 0).getDate();
+
+// Natural (un-extended) length of a goal's period, in days.
+const naturalDays = (g) => {
+  const s = new Date(g.start_date + "T00:00:00");
+  if (g.horizon === "Monthly") return daysInMonthOf(s.getFullYear(), s.getMonth());
+  if (g.horizon === "Weekly") {
+    const wk = Math.min(Math.max(Math.ceil(s.getDate() / 7), 1), 4);
+    const w = weekDates(s.getFullYear(), s.getMonth(), wk);
+    return spanDays(w.start_date, w.end_date);
+  }
+  return spanDays(g.start_date, g.end_date);
+};
+const maxDaysFor = (g) => Math.round(naturalDays(g) * 1.5);      // tail can stretch to 1.5×
+const canExtend = (g) => g.horizon === "Monthly" || g.horizon === "Weekly";
+
 // Snap a free date to the goal's natural period (used when dragging on the timeline).
 const snapDates = (horizon, d) => {
   const y = d.getFullYear(), m = d.getMonth();
@@ -164,6 +182,28 @@ export default function GoalsWithGantt() {
   const [drag, setDrag] = useState(null); // { id, startX, dx, g }
   const dragRef = useRef(null);
   useEffect(() => { dragRef.current = drag; }, [drag]);
+  const [resize, setResize] = useState(null); // { id, startX, dx, g }
+  const resizeRef = useRef(null);
+  useEffect(() => { resizeRef.current = resize; }, [resize]);
+  const scrollRef = useRef(null);
+
+  // Press-and-hold a goal name to reveal its full text (for truncated names on mobile).
+  const [held, setHeld] = useState(null);
+  const holdTimer = useRef(null);
+  const [menuFor, setMenuFor] = useState(null); // goal id whose mobile action menu is open
+  const [menuPos, setMenuPos] = useState(null); // fixed-position coords for that menu
+  const openGoalMenu = (e, id) => {
+    if (menuFor === id) { setMenuFor(null); return; }
+    const r = e.currentTarget.getBoundingClientRect();
+    const below = r.bottom + 220 < window.innerHeight;
+    setMenuPos({
+      right: Math.max(8, window.innerWidth - r.right),
+      ...(below ? { top: r.bottom + 4 } : { bottom: window.innerHeight - r.top + 4 }),
+    });
+    setMenuFor(id);
+  };
+  const startHold = (id) => { clearTimeout(holdTimer.current); holdTimer.current = setTimeout(() => setHeld(id), 350); };
+  const endHold = () => { clearTimeout(holdTimer.current); setHeld(null); };
 
   const load = useCallback(() => {
     api.getGoals().then(setGoals).catch(console.error);
@@ -197,6 +237,32 @@ export default function GoalsWithGantt() {
     window.addEventListener("pointerup", up);
     return () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
   }, [dragging, finalizeDrag]);
+
+  // Tail resize: extend a Monthly/Weekly goal up to 1.5× its natural length.
+  const finalizeResize = useCallback(async () => {
+    const r = resizeRef.current;
+    setResize(null);
+    if (!r) return;
+    const g = r.g;
+    const natural = naturalDays(g);
+    const maxDays = maxDaysFor(g);
+    const newDur = Math.max(natural, Math.min(maxDays, spanDays(g.start_date, g.end_date) + Math.round(r.dx / COL_W)));
+    const newEnd = addDaysISO(g.start_date, newDur - 1);
+    if (newEnd !== g.end_date) {
+      await api.updateGoal(g.id, { end_date: newEnd });
+      load();
+    }
+  }, [load]);
+
+  const resizing = !!resize;
+  useEffect(() => {
+    if (!resizing) return;
+    const move = (e) => setResize((r) => (r ? { ...r, dx: e.clientX - r.startX } : r));
+    const up = () => finalizeResize();
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    return () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+  }, [resizing, finalizeResize]);
 
   const isAll = pillar === "All";
   const p = PILLARS[pillar] || { dot: "var(--text-3)", soft: "transparent" };
@@ -385,29 +451,67 @@ export default function GoalsWithGantt() {
           ) : (
             <span style={{ ...S.caret, opacity: 0.25 }}><Target size={12} /></span>
           )}
-          <span style={{ ...S.horizonTag, color: PILLARS[goal.pillar]?.dot || p.dot, borderColor: PILLARS[goal.pillar]?.dot || p.dot }}>{goal.horizon}</span>
-          <span style={S.title}>{goal.title}</span>
-          <span style={S.periodTag}>{periodLabel(goal)}</span>
-          <button
-            onClick={() => toggleGantt(goal)}
-            style={{ ...S.rowAdd, color: isOnGantt(goal) ? (PILLARS[goal.pillar]?.dot || p.dot) : "var(--text-3)" }}
-            title={isOnGantt(goal) ? "Showing on timeline — click to hide" : "Hidden from timeline — click to show"}
-          >
-            {isOnGantt(goal) ? <Eye size={13} /> : <EyeOff size={13} />}
-          </button>
-          <button onClick={() => startEdit(goal)} style={S.rowAdd} title="Edit"><Pencil size={12} /></button>
-          {canNest && (
-            <button
-              onClick={() => { setOpen((o) => ({ ...o, [goal.id]: true })); startAdd(goal.id, goal); }}
-              style={S.rowAdd}
-              title="Add sub-goal"
-            >
-              <Plus size={13} />
-            </button>
+          <span style={{ ...S.horizonTag, color: PILLARS[goal.pillar]?.dot || p.dot, borderColor: PILLARS[goal.pillar]?.dot || p.dot }}
+            title={goal.horizon}>{isMobile ? HZ_SHORT[goal.horizon] : goal.horizon}</span>
+          <span
+            style={{ ...S.title, ...(held === goal.id ? S.titleFull : {}) }}
+            title={goal.title}
+            onPointerDown={() => startHold(goal.id)}
+            onPointerUp={endHold}
+            onPointerLeave={endHold}
+            onPointerCancel={endHold}
+          >{goal.title}</span>
+          {!isMobile && <span style={S.periodTag}>{periodLabel(goal)}</span>}
+
+          {isMobile ? (
+            <div style={{ position: "relative", flexShrink: 0 }}>
+              <button onClick={(e) => openGoalMenu(e, goal.id)} style={S.rowAdd} title="Options">
+                <Settings size={15} />
+              </button>
+              {menuFor === goal.id && (
+                <>
+                  <div style={S.menuBackdrop} onClick={() => setMenuFor(null)} />
+                  <div style={{ ...S.goalMenu, ...menuPos }}>
+                    <button style={S.menuItem} onClick={() => { toggleGantt(goal); setMenuFor(null); }}>
+                      {isOnGantt(goal) ? <EyeOff size={14} /> : <Eye size={14} />} {isOnGantt(goal) ? "Hide from timeline" : "Show on timeline"}
+                    </button>
+                    <button style={S.menuItem} onClick={() => { startEdit(goal); setMenuFor(null); }}><Pencil size={14} /> Edit</button>
+                    {canNest && (
+                      <button style={S.menuItem} onClick={() => { setOpen((o) => ({ ...o, [goal.id]: true })); startAdd(goal.id, goal); setMenuFor(null); }}>
+                        <Plus size={14} /> Add sub-goal
+                      </button>
+                    )}
+                    <button style={{ ...S.menuItem, color: "#C2536B" }} onClick={() => { softDelete(goal.id, goal.title); setMenuFor(null); }}>
+                      <X size={14} /> Delete
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          ) : (
+            <>
+              <button
+                onClick={() => toggleGantt(goal)}
+                style={{ ...S.rowAdd, color: isOnGantt(goal) ? (PILLARS[goal.pillar]?.dot || p.dot) : "var(--text-3)" }}
+                title={isOnGantt(goal) ? "Showing on timeline — click to hide" : "Hidden from timeline — click to show"}
+              >
+                {isOnGantt(goal) ? <Eye size={13} /> : <EyeOff size={13} />}
+              </button>
+              <button onClick={() => startEdit(goal)} style={S.rowAdd} title="Edit"><Pencil size={12} /></button>
+              {canNest && (
+                <button
+                  onClick={() => { setOpen((o) => ({ ...o, [goal.id]: true })); startAdd(goal.id, goal); }}
+                  style={S.rowAdd}
+                  title="Add sub-goal"
+                >
+                  <Plus size={13} />
+                </button>
+              )}
+              <button onClick={() => softDelete(goal.id, goal.title)} style={{ ...S.rowAdd, color: "var(--text-3)" }} title="Delete">
+                <X size={13} />
+              </button>
+            </>
           )}
-          <button onClick={() => softDelete(goal.id, goal.title)} style={{ ...S.rowAdd, color: "var(--text-3)" }} title="Delete">
-            <X size={13} />
-          </button>
         </div>
         {isOpen && kids.map((k) => <Node key={k.id} goal={k} depth={depth + 1} />)}
         {isOpen && adding === goal.id && (
@@ -467,6 +571,17 @@ export default function GoalsWithGantt() {
   const todayInRange = todayIdx >= 0 && todayIdx < totalDays;
   const dayDuration = (g) => Math.round((parseD(g.end_date) - parseD(g.start_date)) / DAY_MS) + 1;
 
+  // Auto-scroll the timeline so today sits in view on open / when the range changes.
+  const todayX = (showLabels ? GLABEL_W : 0) + todayIdx * COL_W;
+  const rangeKey = gRange ? `${gRange.start.getTime()}-${gRange.end.getTime()}` : "";
+  useEffect(() => {
+    if (!todayInRange) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollLeft = Math.max(0, todayX - el.clientWidth / 2 + COL_W / 2);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rangeKey, todayIdx, showLabels, todayInRange]);
+
   return (
     <div style={S.page}>
       <div style={S.head}>
@@ -519,8 +634,11 @@ export default function GoalsWithGantt() {
         {!gRange ? (
           <div style={S.ganttEmpty}>No goals on the timeline. Click the eye icon on a goal to show it here.</div>
         ) : (
-          <div style={S.ganttScroll}>
-            <div style={{ minWidth: (showLabels ? GLABEL_W : 0) + totalDays * COL_W }}>
+          <div style={S.ganttScroll} ref={scrollRef}>
+            <div style={{ minWidth: (showLabels ? GLABEL_W : 0) + totalDays * COL_W, position: "relative" }}>
+              {todayInRange && (
+                <div style={{ position: "absolute", top: 0, bottom: 0, left: todayX, width: COL_W, background: "color-mix(in srgb, var(--accent) 14%, transparent)", pointerEvents: "none", zIndex: 3 }} />
+              )}
               {/* Month band */}
               <div style={S.gBandRow}>
                 {showLabels && <div style={{ ...S.gLabelHead, zIndex: 4 }}>Goal</div>}
@@ -558,11 +676,19 @@ export default function GoalsWithGantt() {
                     const c = PILLARS[g.pillar]?.dot || "#9A968C";
                     const sIdx = Math.round((parseD(g.start_date) - gRange.start) / DAY_MS);
                     const dur = dayDuration(g);
-                    const barW = dur * COL_W - 4;
-                    const labelInside = barW >= 54;
                     const isDragging = drag?.id === g.id;
                     const dx = isDragging ? drag.dx : 0;
-                    const tip = `${g.title} · ${g.start_date} → ${g.end_date} · ${dur} day${dur > 1 ? "s" : ""}`;
+                    // tail resize (Monthly/Weekly): live width clamped to [natural, 1.5×]
+                    const extendable = canExtend(g);
+                    const isResizing = resize?.id === g.id;
+                    const natD = extendable ? naturalDays(g) : dur;
+                    const maxD = extendable ? maxDaysFor(g) : dur;
+                    const dispDur = isResizing
+                      ? Math.max(natD, Math.min(maxD, dur + Math.round(resize.dx / COL_W)))
+                      : dur;
+                    const barW = dispDur * COL_W - 4;
+                    const labelInside = barW >= 54;
+                    const tip = `${g.title} · ${g.start_date} → ${g.end_date} · ${dispDur} day${dispDur > 1 ? "s" : ""}${extendable ? ` (max ${maxD})` : ""}`;
                     return (
                       <div key={g.id} style={S.gRow}>
                         {showLabels && (
@@ -570,7 +696,7 @@ export default function GoalsWithGantt() {
                             <span style={{ ...S.ganttRowDot, background: c }} />
                             <span style={{ ...S.gHzTag, color: c, borderColor: c }}>{HZ_ABBR[g.horizon]}</span>
                             <span style={S.gLabelText} title={g.title}>{g.title}</span>
-                            <span style={S.gDurChip}>{dur}d</span>
+                            <span style={S.gDurChip}>{dispDur}d</span>
                           </div>
                         )}
                         <div style={{ ...S.gTrack, width: totalDays * COL_W }}>
@@ -581,13 +707,24 @@ export default function GoalsWithGantt() {
                               ...S.gBar, left: sIdx * COL_W + 2, width: barW, background: c,
                               cursor: isDragging ? "grabbing" : "grab",
                               transform: dx ? `translateX(${dx}px)` : "none",
-                              zIndex: isDragging ? 6 : 1,
-                              boxShadow: isDragging ? "0 4px 12px rgba(0,0,0,0.28)" : "0 1px 2px rgba(0,0,0,0.15)",
+                              zIndex: (isDragging || isResizing) ? 6 : 1,
+                              boxShadow: (isDragging || isResizing) ? "0 4px 12px rgba(0,0,0,0.28)" : "0 1px 2px rgba(0,0,0,0.15)",
                               touchAction: "none",
                             }}
                             title={tip}>
-                            <GripVertical size={12} style={{ opacity: 0.7, flexShrink: 0, marginRight: 2, color: "#fff" }} />
-                            {labelInside && <span style={S.gBarLabel}>{g.title}</span>}
+                            {extendable && dispDur > natD && (
+                              <div style={{ position: "absolute", left: natD * COL_W, top: 0, bottom: 0, right: 0, background: "#C2536B", borderRadius: "0 5px 5px 0" }} />
+                            )}
+                            <GripVertical size={12} style={{ opacity: 0.7, flexShrink: 0, marginRight: 2, color: "#fff", position: "relative", zIndex: 1 }} />
+                            {labelInside && <span style={{ ...S.gBarLabel, position: "relative", zIndex: 1 }}>{g.title}</span>}
+                            {extendable && (
+                              <div
+                                onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setResize({ id: g.id, startX: e.clientX, dx: 0, g }); }}
+                                style={S.resizeHandle}
+                                title={`Drag to extend up to ${maxD} days`}>
+                                <div style={S.resizeGrip} />
+                              </div>
+                            )}
                           </div>
                           {!labelInside && (
                             <span style={{ ...S.gBarOutside, left: sIdx * COL_W + barW + 8 + dx }} title={tip}>{g.title}</span>
@@ -626,9 +763,13 @@ const S = {
   row: { display: "flex", alignItems: "center", gap: 9, padding: "9px 10px", borderRadius: 8, flexWrap: "nowrap" },
   caret: { border: "none", background: "none", cursor: "pointer", color: "var(--text-2)", display: "grid", placeItems: "center", padding: 0, width: 18, height: 18, flexShrink: 0 },
   horizonTag: { fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", border: "1px solid", borderRadius: 5, padding: "2px 6px", flexShrink: 0 },
-  title: { fontSize: 14, fontWeight: 500, lineHeight: 1.3, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  title: { fontSize: 14, fontWeight: 500, lineHeight: 1.3, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", userSelect: "none", WebkitUserSelect: "none", cursor: "default" },
+  titleFull: { whiteSpace: "normal", overflow: "visible", textOverflow: "clip", wordBreak: "break-word" },
   periodTag: { fontSize: 11, fontWeight: 600, color: "var(--text-2)", background: "var(--hover)", padding: "3px 8px", borderRadius: 12, flexShrink: 0 },
   rowAdd: { border: "none", background: "none", color: "var(--text-3)", cursor: "pointer", display: "grid", placeItems: "center", padding: 4, borderRadius: 6, flexShrink: 0 },
+  menuBackdrop: { position: "fixed", inset: 0, zIndex: 40 },
+  goalMenu: { position: "fixed", zIndex: 41, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, boxShadow: "0 6px 24px rgba(0,0,0,0.18)", padding: 4, minWidth: 180, display: "flex", flexDirection: "column" },
+  menuItem: { display: "flex", alignItems: "center", gap: 9, width: "100%", border: "none", background: "none", padding: "10px 12px", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontSize: 13.5, fontWeight: 500, color: "var(--text)", textAlign: "left" },
   rootAdd: { display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--text-2)", background: "none", border: "1px dashed var(--border)", borderRadius: 8, padding: "9px 12px", cursor: "pointer", fontWeight: 600, fontFamily: "inherit", marginTop: 6, width: "100%", justifyContent: "center" },
   addBox: { display: "flex", alignItems: "center", gap: 6, padding: "6px 0 6px 28px", flexWrap: "wrap" },
   editBox: { display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", flexWrap: "wrap", background: "var(--bg)", borderRadius: 8, margin: "4px 0" },
@@ -679,6 +820,8 @@ const S = {
   gBar: { position: "absolute", top: 9, height: 18, borderRadius: 5, display: "flex", alignItems: "center", padding: "0 7px", boxShadow: "0 1px 2px rgba(0,0,0,0.15)", overflow: "hidden", zIndex: 1 },
   gBarLabel: { fontSize: 11, fontWeight: 600, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
   gBarOutside: { position: "absolute", top: 9, height: 18, display: "flex", alignItems: "center", fontSize: 11, fontWeight: 600, color: "var(--text)", whiteSpace: "nowrap", pointerEvents: "none", zIndex: 1 },
+  resizeHandle: { position: "absolute", right: 0, top: 0, bottom: 0, width: 12, cursor: "ew-resize", display: "grid", placeItems: "center", touchAction: "none", zIndex: 2 },
+  resizeGrip: { width: 2, height: 11, background: "rgba(255,255,255,0.9)", borderRadius: 1, boxShadow: "3px 0 0 rgba(255,255,255,0.6)" },
   gTodayLine: { position: "absolute", top: 0, bottom: 0, width: 2, background: "#C2536B", zIndex: 0, opacity: 0.6 },
   gLegend: { display: "flex", gap: 16, marginTop: 12, fontSize: 11, color: "var(--text-3)", flexWrap: "wrap" },
   gLegendItem: { display: "flex", alignItems: "center", gap: 6, fontWeight: 600 },

@@ -27,6 +27,9 @@ import { getCurrencyCode, setCurrencyCode } from "./currency.js";
 // Apply the stored theme immediately so there's no flash before React mounts.
 applyTheme(getStoredThemeId(), false);
 
+const DEFAULT_SCREEN_KEY = "anvil_default_screen";
+const getStoredDefault = () => { try { return localStorage.getItem(DEFAULT_SCREEN_KEY); } catch { return null; } };
+
 // Registry: screen id → metadata + component.
 const SCREENS = {
   kickstart:    { label: "Kickstart",    icon: Rocket,        component: KickstartScreen },
@@ -71,7 +74,11 @@ function useIsMobile() {
 }
 
 export default function App() {
-  const [active, setActive] = useState("habits");
+  const [active, setActive] = useState(() => {
+    const d = getStoredDefault();
+    return d && SCREENS[d] ? d : "habits";
+  });
+  const [defaultScreen, setDefaultScreen] = useState(() => getStoredDefault() || "habits");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [user, setUser] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
@@ -104,6 +111,9 @@ export default function App() {
     api.getSetting("theme").then((r) => { if (r?.value) setThemeId(applyTheme(r.value)); }).catch(() => {});
     api.getSetting("currency").then((r) => { if (r?.value) setCurrency(setCurrencyCode(r.value)); }).catch(() => {});
     api.getSetting("ticker").then((r) => { if (r?.value) setTicker((t) => ({ ...t, ...r.value })); }).catch(() => {});
+    api.getSetting("default_screen").then((r) => {
+      if (r?.value && SCREENS[r.value]) { setDefaultScreen(r.value); try { localStorage.setItem(DEFAULT_SCREEN_KEY, r.value); } catch { /* ignore */ } }
+    }).catch(() => {});
     api.getSetting("sidebar_order").then((r) => { if (Array.isArray(r?.value)) setOrder(normalizeOrder(r.value)); }).catch(() => {});
     api.getSetting("sidebar_hidden").then((r) => { if (Array.isArray(r?.value)) setHidden(r.value); }).catch(() => {});
   }, [user]);
@@ -131,6 +141,11 @@ export default function App() {
   const saveTicker = (cfg) => {
     setTicker(cfg);
     api.setSetting("ticker", cfg).catch(() => {});
+  };
+  const setDefault = (id) => {
+    setDefaultScreen(id);
+    try { localStorage.setItem(DEFAULT_SCREEN_KEY, id); } catch { /* ignore */ }
+    api.setSetting("default_screen", id).catch(() => {});
   };
   const saveSidebar = (newOrder, newHidden) => {
     setOrder(normalizeOrder(newOrder));
@@ -253,6 +268,8 @@ export default function App() {
           themeId={themeId}
           currency={currency}
           ticker={ticker}
+          defaultScreen={defaultScreen}
+          onSetDefault={setDefault}
           onSaveSidebar={saveSidebar}
           onPreviewTheme={previewTheme}
           onCommitTheme={commitTheme}
