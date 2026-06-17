@@ -90,6 +90,20 @@ export default function GroveScreen() {
     return () => document.removeEventListener("visibilitychange", onHide);
   }, [phase, deepFocus, fail]);
 
+  // Keep the grove in sync across devices: refetch whenever the tab regains
+  // focus or becomes visible (e.g. switching to desktop after planting on mobile).
+  useEffect(() => {
+    const refresh = () => { if (!document.hidden && phase !== "running") load(); };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    const id = setInterval(refresh, 60000); // catch up even if both tabs stay open
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+      clearInterval(id);
+    };
+  }, [load, phase]);
+
   const toggleDeep = () => setDeepFocus((v) => {
     const n = !v;
     localStorage.setItem("anvil_grove_deepfocus", n ? "1" : "0");

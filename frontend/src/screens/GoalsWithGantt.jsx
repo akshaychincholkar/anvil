@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
-import { ChevronRight, ChevronDown, Plus, Target, X, Check, Pencil, Eye, EyeOff } from "lucide-react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { ChevronRight, ChevronDown, Plus, Target, X, Check, Pencil, Eye, EyeOff, PanelLeftClose, PanelLeftOpen, GripVertical } from "lucide-react";
 import { api } from "../api.js";
 import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
 import UndoToast from "../components/UndoToast.jsx";
@@ -21,6 +21,17 @@ const QUARTERS = [
   { label: "Q4 · Oct–Dec", startMonth: 9 },
 ];
 const YEAR = new Date().getFullYear();
+const YEAR_OPTIONS = Array.from({ length: 8 }, (_, i) => YEAR - 1 + i); // last year … +6
+
+function useIsMobile(bp = 720) {
+  const [m, setM] = useState(() => window.innerWidth < bp);
+  useEffect(() => {
+    const h = () => setM(window.innerWidth < bp);
+    window.addEventListener("resize", h);
+    return () => window.removeEventListener("resize", h);
+  }, [bp]);
+  return m;
+}
 
 // Daily Gantt geometry
 const DAY_MS = 86400000;
@@ -46,10 +57,12 @@ const allowedMonths = (parentGoal) => {
   if (!parentGoal || !parentGoal.start_date) return Array.from({ length: 12 }, (_, i) => i);
   const s = new Date(parentGoal.start_date + "T00:00:00");
   const e = new Date(parentGoal.end_date + "T00:00:00");
-  const sm = s.getFullYear() < YEAR ? 0 : s.getMonth();
-  const em = e.getFullYear() > YEAR ? 11 : e.getMonth();
+  const py = s.getFullYear();
+  const sm = s.getMonth();
+  const em = e.getFullYear() > py ? 11 : e.getMonth();
   return Array.from({ length: em - sm + 1 }, (_, i) => sm + i);
 };
+const yearOf = (dateStr) => new Date(dateStr + "T00:00:00").getFullYear();
 
 // ── Date helpers ─────────────────────────────────────────────────
 
@@ -64,8 +77,8 @@ const weekDates = (year, month, week) => {
   };
 };
 
-const horizonDates = (horizon, month, week = 1) => {
-  const y = YEAR;
+const horizonDates = (horizon, year, month, week = 1) => {
+  const y = year;
   switch (horizon) {
     case "Yearly":
       return { start_date: `${y}-01-01`, end_date: `${y}-12-31` };
@@ -90,6 +103,22 @@ const horizonDates = (horizon, month, week = 1) => {
     default:
       return { start_date: `${y}-01-01`, end_date: `${y}-12-31` };
   }
+};
+
+// Add days to an ISO date (timezone-safe).
+const addDaysISO = (iso, n) => {
+  const d = new Date(iso + "T00:00:00");
+  d.setDate(d.getDate() + n);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
+// Snap a free date to the goal's natural period (used when dragging on the timeline).
+const snapDates = (horizon, d) => {
+  const y = d.getFullYear(), m = d.getMonth();
+  if (horizon === "Quarterly") return horizonDates("Quarterly", y, m);
+  if (horizon === "Monthly") return horizonDates("Monthly", y, m);
+  if (horizon === "Weekly") return horizonDates("Weekly", y, m, Math.min(Math.max(Math.ceil(d.getDate() / 7), 1), 4));
+  return horizonDates("Yearly", y, 0);
 };
 
 // Fractional month position (0–12) for the gantt's 12 equal-width columns.
@@ -120,14 +149,21 @@ const periodLabel = (g) => {
 
 export default function GoalsWithGantt() {
   const [goals, setGoals] = useState([]);
-  const [pillar, setPillar] = useState("Financial");
+  const [pillar, setPillar] = useState("All");
   const [ganttOverride, setGanttOverride] = useState({}); // goalId → bool (overrides the horizon default)
   const [open, setOpen] = useState({});
   const [adding, setAdding] = useState(null);
   const [draft, setDraft] = useState("");
   const [draftMonth, setDraftMonth] = useState(0);
   const [draftWeek, setDraftWeek] = useState(1);
-  const [editing, setEditing] = useState(null); // { id, title, pillar, start_date, end_date }
+  const [draftYear, setDraftYear] = useState(YEAR);
+  const [editing, setEditing] = useState(null); // { id, title, pillar, year, month, week, ... }
+
+  const isMobile = useIsMobile();
+  const [showLabels, setShowLabels] = useState(!isMobile); // gantt left column; hidden on mobile by default
+  const [drag, setDrag] = useState(null); // { id, startX, dx, g }
+  const dragRef = useRef(null);
+  useEffect(() => { dragRef.current = drag; }, [drag]);
 
   const load = useCallback(() => {
     api.getGoals().then(setGoals).catch(console.error);
@@ -137,6 +173,30 @@ export default function GoalsWithGantt() {
   const { deleteItem: softDelete, toasts, handleUndo, handleDismiss } = useUndoableDelete(
     api.deleteGoal, api.restoreGoal, load
   );
+
+  // Drag-to-reschedule on the timeline: on release, snap to the goal's period and save.
+  const finalizeDrag = useCallback(async () => {
+    const d = dragRef.current;
+    setDrag(null);
+    if (!d) return;
+    const deltaDays = Math.round(d.dx / COL_W);
+    if (!deltaDays) return;
+    const moved = snapDates(d.g.horizon, parseD(addDaysISO(d.g.start_date, deltaDays)));
+    if (moved.start_date !== d.g.start_date) {
+      await api.updateGoal(d.g.id, { pillar: d.g.pillar, start_date: moved.start_date, end_date: moved.end_date });
+      load();
+    }
+  }, [load]);
+
+  const dragging = !!drag;
+  useEffect(() => {
+    if (!dragging) return;
+    const move = (e) => setDrag((d) => (d ? { ...d, dx: e.clientX - d.startX } : d));
+    const up = () => finalizeDrag();
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    return () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+  }, [dragging, finalizeDrag]);
 
   const isAll = pillar === "All";
   const p = PILLARS[pillar] || { dot: "var(--text-3)", soft: "transparent" };
@@ -154,6 +214,7 @@ export default function GoalsWithGantt() {
     setAdding(parentId);
     setDraft("");
     setDraftWeek(1);
+    setDraftYear(parentGoal ? yearOf(parentGoal.start_date) : YEAR);
     const horizon = parentId === "ROOT" ? "Yearly" : nextHorizon(parentGoal?.horizon);
     const months = parentId === "ROOT" ? [0] : allowedMonths(parentGoal);
     // Quarterly picks a quarter (start month 0/3/6/9); others pick the first allowed month.
@@ -166,7 +227,9 @@ export default function GoalsWithGantt() {
     const horizon = parentId === "ROOT" ? "Yearly" : nextHorizon(parentHorizon);
     // Sub-goals inherit their parent's pillar; top-level uses the selected pillar.
     const goalPillar = parentId === "ROOT" ? pillar : (parentGoal?.pillar || pillar);
-    const { start_date, end_date } = horizonDates(horizon, draftMonth, draftWeek);
+    // Yearly chooses its own year; sub-goals inherit the parent's year.
+    const year = horizon === "Yearly" ? Number(draftYear) : (parentGoal ? yearOf(parentGoal.start_date) : Number(draftYear));
+    const { start_date, end_date } = horizonDates(horizon, year, draftMonth, draftWeek);
     await api.createGoal({
       pillar: goalPillar,
       title: draft.trim(),
@@ -191,6 +254,7 @@ export default function GoalsWithGantt() {
       pillar: goal.pillar,
       horizon: goal.horizon,
       parentGoal: goals.find((x) => x.id === goal.parent_goal_id) || null,
+      year: yearOf(goal.start_date),
       month: goal.horizon === "Quarterly" ? Math.floor(month / 3) * 3 : month,
       week,
     });
@@ -200,7 +264,11 @@ export default function GoalsWithGantt() {
     if (!editing || !editing.title.trim()) return;
     let month = editing.month;
     if (editing.horizon === "Weekly") month = allowedMonths(editing.parentGoal)[0]; // inherit parent month
-    const { start_date, end_date } = horizonDates(editing.horizon, month, editing.week);
+    // Yearly edits its own year; sub-goals inherit the parent's year.
+    const year = editing.horizon === "Yearly"
+      ? Number(editing.year)
+      : (editing.parentGoal ? yearOf(editing.parentGoal.start_date) : Number(editing.year));
+    const { start_date, end_date } = horizonDates(editing.horizon, year, month, editing.week);
     await api.updateGoal(editing.id, {
       title: editing.title.trim(),
       pillar: editing.pillar,
@@ -228,6 +296,11 @@ export default function GoalsWithGantt() {
           }}
           style={S.input}
         />
+        {horizon === "Yearly" && (
+          <select value={draftYear} onChange={(e) => setDraftYear(Number(e.target.value))} style={S.monthSelect}>
+            {YEAR_OPTIONS.map((y) => <option key={y} value={y}>{y}</option>)}
+          </select>
+        )}
         {horizon === "Quarterly" && (
           <select value={draftMonth} onChange={(e) => setDraftMonth(Number(e.target.value))} style={S.monthSelect}>
             {quarters.map((q) => <option key={q.startMonth} value={q.startMonth}>{q.label}</option>)}
@@ -273,6 +346,11 @@ export default function GoalsWithGantt() {
           <select value={editing.pillar} onChange={(e) => setEditing({ ...editing, pillar: e.target.value })} style={S.monthSelect}>
             {PILLAR_NAMES.map((n) => <option key={n}>{n}</option>)}
           </select>
+          {editing.horizon === "Yearly" && (
+            <select value={editing.year} onChange={(e) => setEditing({ ...editing, year: Number(e.target.value) })} style={S.monthSelect}>
+              {YEAR_OPTIONS.map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
+          )}
           {editing.horizon === "Quarterly" && (
             <select value={editing.month} onChange={(e) => setEditing({ ...editing, month: Number(e.target.value) })} style={S.monthSelect}>
               {eQuarters.map((q) => <option key={q.startMonth} value={q.startMonth}>{q.label}</option>)}
@@ -430,16 +508,22 @@ export default function GoalsWithGantt() {
       <div style={S.ganttWrap}>
         <div style={S.ganttTop}>
           <div style={S.ganttTitle}>Daily Timeline{gRange ? ` · ${shortDate(gRange.start)} – ${shortDate(gRange.end)}` : ""}</div>
-          <div style={S.ganttHint}>Toggle the <Eye size={12} style={{ verticalAlign: "-2px" }} /> on any goal to show or hide it here.</div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <span style={S.ganttHint}>Drag a bar to reschedule</span>
+            <button onClick={() => setShowLabels((v) => !v)} style={S.labelToggle}>
+              {showLabels ? <PanelLeftClose size={14} /> : <PanelLeftOpen size={14} />}
+              {showLabels ? "Hide names" : "Show names"}
+            </button>
+          </div>
         </div>
         {!gRange ? (
           <div style={S.ganttEmpty}>No goals on the timeline. Click the eye icon on a goal to show it here.</div>
         ) : (
           <div style={S.ganttScroll}>
-            <div style={{ minWidth: GLABEL_W + totalDays * COL_W }}>
+            <div style={{ minWidth: (showLabels ? GLABEL_W : 0) + totalDays * COL_W }}>
               {/* Month band */}
               <div style={S.gBandRow}>
-                <div style={{ ...S.gLabelHead, zIndex: 4 }}>Goal</div>
+                {showLabels && <div style={{ ...S.gLabelHead, zIndex: 4 }}>Goal</div>}
                 <div style={{ display: "flex" }}>
                   {monthGroups.map((mg, i) => (
                     <div key={i} style={{ ...S.gMonthCell, width: mg.days * COL_W }}>{mg.label}</div>
@@ -448,7 +532,7 @@ export default function GoalsWithGantt() {
               </div>
               {/* Day band */}
               <div style={S.gBandRow}>
-                <div style={{ ...S.gLabelHead, zIndex: 4, fontSize: 10, color: "var(--text-3)", fontWeight: 600 }}>days →</div>
+                {showLabels && <div style={{ ...S.gLabelHead, zIndex: 4, fontSize: 10, color: "var(--text-3)", fontWeight: 600 }}>days →</div>}
                 <div style={{ display: "flex" }}>
                   {gDays.map((d, i) => {
                     const wknd = d.getDay() === 0 || d.getDay() === 6;
@@ -465,7 +549,9 @@ export default function GoalsWithGantt() {
               {ganttGroups.map((grp) => (
                 <div key={grp.key}>
                   <div style={S.gGroupRow}>
-                    <div style={S.gGroupLabel}>{grp.label}<span style={S.gGroupCount}>{grp.items.length}</span></div>
+                    {showLabels
+                      ? <div style={S.gGroupLabel}>{grp.label}<span style={S.gGroupCount}>{grp.items.length}</span></div>
+                      : <div style={S.gGroupChip}>{grp.label} · {grp.items.length}</div>}
                     <div style={{ width: totalDays * COL_W, flexShrink: 0 }} />
                   </div>
                   {grp.items.map((g) => {
@@ -474,22 +560,37 @@ export default function GoalsWithGantt() {
                     const dur = dayDuration(g);
                     const barW = dur * COL_W - 4;
                     const labelInside = barW >= 54;
+                    const isDragging = drag?.id === g.id;
+                    const dx = isDragging ? drag.dx : 0;
                     const tip = `${g.title} · ${g.start_date} → ${g.end_date} · ${dur} day${dur > 1 ? "s" : ""}`;
                     return (
                       <div key={g.id} style={S.gRow}>
-                        <div style={{ ...S.gLabel, paddingLeft: 12 }}>
-                          <span style={{ ...S.ganttRowDot, background: c }} />
-                          <span style={{ ...S.gHzTag, color: c, borderColor: c }}>{HZ_ABBR[g.horizon]}</span>
-                          <span style={S.gLabelText} title={g.title}>{g.title}</span>
-                          <span style={S.gDurChip}>{dur}d</span>
-                        </div>
+                        {showLabels && (
+                          <div style={{ ...S.gLabel, paddingLeft: 12 }}>
+                            <span style={{ ...S.ganttRowDot, background: c }} />
+                            <span style={{ ...S.gHzTag, color: c, borderColor: c }}>{HZ_ABBR[g.horizon]}</span>
+                            <span style={S.gLabelText} title={g.title}>{g.title}</span>
+                            <span style={S.gDurChip}>{dur}d</span>
+                          </div>
+                        )}
                         <div style={{ ...S.gTrack, width: totalDays * COL_W }}>
                           {todayInRange && <div style={{ ...S.gTodayLine, left: todayIdx * COL_W }} />}
-                          <div style={{ ...S.gBar, left: sIdx * COL_W + 2, width: barW, background: c }} title={tip}>
+                          <div
+                            onPointerDown={(e) => { e.preventDefault(); setDrag({ id: g.id, startX: e.clientX, dx: 0, g }); }}
+                            style={{
+                              ...S.gBar, left: sIdx * COL_W + 2, width: barW, background: c,
+                              cursor: isDragging ? "grabbing" : "grab",
+                              transform: dx ? `translateX(${dx}px)` : "none",
+                              zIndex: isDragging ? 6 : 1,
+                              boxShadow: isDragging ? "0 4px 12px rgba(0,0,0,0.28)" : "0 1px 2px rgba(0,0,0,0.15)",
+                              touchAction: "none",
+                            }}
+                            title={tip}>
+                            <GripVertical size={12} style={{ opacity: 0.7, flexShrink: 0, marginRight: 2, color: "#fff" }} />
                             {labelInside && <span style={S.gBarLabel}>{g.title}</span>}
                           </div>
                           {!labelInside && (
-                            <span style={{ ...S.gBarOutside, left: sIdx * COL_W + barW + 8 }} title={tip}>{g.title}</span>
+                            <span style={{ ...S.gBarOutside, left: sIdx * COL_W + barW + 8 + dx }} title={tip}>{g.title}</span>
                           )}
                         </div>
                       </div>
@@ -541,6 +642,8 @@ const S = {
   ganttTop: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10, marginBottom: 14 },
   ganttTitle: { fontSize: 13, fontWeight: 700, color: "var(--text-2)", fontFamily: "'Fraunces',Georgia,serif" },
   ganttHint: { fontSize: 11.5, color: "var(--text-3)", fontWeight: 500 },
+  labelToggle: { display: "inline-flex", alignItems: "center", gap: 5, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-2)", padding: "5px 10px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
+  gGroupChip: { position: "sticky", left: 0, zIndex: 3, background: "var(--surface-2)", padding: "5px 10px", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-2)", whiteSpace: "nowrap", borderRight: "1px solid var(--border)", display: "flex", alignItems: "center" },
   allHint: { fontSize: 12, color: "var(--text-3)", fontStyle: "italic", padding: "10px 12px" },
   ganttMultiSelect: { display: "flex", gap: 6, flexWrap: "wrap" },
   msChip: { display: "flex", alignItems: "center", gap: 5, border: "1px solid var(--border)", background: "var(--surface)", padding: "5px 10px", borderRadius: 16, fontSize: 11.5, fontWeight: 600, color: "var(--text-2)", cursor: "pointer", fontFamily: "inherit" },

@@ -11,6 +11,7 @@ import hashlib
 import base64
 import secrets
 import time
+import calendar
 from contextvars import ContextVar
 from datetime import date, timedelta, datetime
 
@@ -436,12 +437,70 @@ def create_goal(body: GoalCreate):
         )
         return _goal(conn, cur.lastrowid)
 
+# ── Goal cascade helpers ──────────────────────────────────────────────────────
+
+def _month_range(year, month):
+    last = calendar.monthrange(year, month)[1]
+    return (f"{year}-{month:02d}-01", f"{year}-{month:02d}-{last:02d}")
+
+# Ordered sub-period slots a parent's children should occupy, by parent horizon.
+def _child_slots(parent_horizon, start_date):
+    d = date.fromisoformat(start_date)
+    y = d.year
+    if parent_horizon == "Yearly":          # children = Quarterly → 4 quarters
+        return [( f"{y}-{q*3+1:02d}-01", _month_range(y, q*3+3)[1]) for q in range(4)]
+    if parent_horizon == "Quarterly":       # children = Monthly → 3 months
+        return [_month_range(y, d.month + i) for i in range(3)]
+    if parent_horizon == "Monthly":         # children = Weekly → 4 weeks
+        last = calendar.monthrange(y, d.month)[1]
+        slots = []
+        for w in range(4):
+            sd = w * 7 + 1
+            ed = min(sd + 6, last)
+            slots.append((f"{y}-{d.month:02d}-{sd:02d}", f"{y}-{d.month:02d}-{ed:02d}"))
+        return slots
+    return []  # Weekly → leaf
+
+# Re-slot a goal's children into its (new) period, in order, then recurse.
+def _reslot_children(conn, parent_id):
+    parent = conn.execute(
+        f"SELECT horizon, start_date FROM goal WHERE id=? AND user_id={cu()} AND deleted_at IS NULL", (parent_id,)
+    ).fetchone()
+    if not parent:
+        return
+    slots = _child_slots(parent["horizon"], parent["start_date"])
+    if not slots:
+        return
+    children = conn.execute(
+        f"SELECT id FROM goal WHERE parent_goal_id=? AND user_id={cu()} AND deleted_at IS NULL ORDER BY start_date, id",
+        (parent_id,)
+    ).fetchall()
+    for i, ch in enumerate(children):
+        sd, ed = slots[min(i, len(slots) - 1)]
+        conn.execute(f"UPDATE goal SET start_date=?, end_date=? WHERE id=? AND user_id={cu()}", (sd, ed, ch["id"]))
+        _reslot_children(conn, ch["id"])  # grandchildren follow the child's new period
+
+# Propagate a pillar change to every descendant.
+def _cascade_pillar(conn, goal_id, pid):
+    stack = [goal_id]
+    while stack:
+        cur_id = stack.pop()
+        kids = conn.execute(
+            f"SELECT id FROM goal WHERE parent_goal_id=? AND user_id={cu()} AND deleted_at IS NULL", (cur_id,)
+        ).fetchall()
+        for k in kids:
+            conn.execute(f"UPDATE goal SET pillar_id=? WHERE id=? AND user_id={cu()}", (pid, k["id"]))
+            stack.append(k["id"])
+
 @app.put("/api/goals/{goal_id}")
 def update_goal(goal_id: int, body: GoalUpdate):
     with db() as conn:
+        old = _goal(conn, goal_id)
         updates = {}
+        pid = None
         if body.pillar:
-            updates["pillar_id"] = pillar_id(conn, body.pillar)
+            pid = pillar_id(conn, body.pillar)
+            updates["pillar_id"] = pid
         if body.title is not None:
             updates["title"] = body.title
         if body.start_date is not None:
@@ -451,6 +510,12 @@ def update_goal(goal_id: int, body: GoalUpdate):
         if updates:
             sets = ", ".join(f"{k}=?" for k in updates)
             conn.execute(f"UPDATE goal SET {sets} WHERE id=? AND user_id={cu()}", (*updates.values(), goal_id))
+        # Cascade pillar to all descendants.
+        if pid is not None:
+            _cascade_pillar(conn, goal_id, pid)
+        # If the timeline shifted, re-slot children (and their descendants) into the new period.
+        if body.start_date is not None and body.start_date != old["start_date"]:
+            _reslot_children(conn, goal_id)
         return _goal(conn, goal_id)
 
 @app.delete("/api/goals/{goal_id}", status_code=204)
@@ -1523,6 +1588,58 @@ def restore_golden(gid: int):
         _restore(conn, "golden_goal", gid)
         r = _golden_get(conn, gid)
         return _golden_summary(conn, r) if r else {}
+
+
+# ── Spiritual decks (user-created text/image collections) ────────────────────
+
+class DeckCreate(BaseModel):
+    title: str
+    type: str = "text"          # 'text' | 'images'
+    content: str = ""
+    images: List[str] = []
+
+def _deck_row(r):
+    return {"id": r["id"], "title": r["title"], "type": r["type"],
+            "content": r["content"], "images": json.loads(r["images"])}
+
+@app.get("/api/spiritual/decks")
+def get_decks():
+    with db() as conn:
+        rows = conn.execute(
+            f"SELECT id, title, type, content, images FROM spiritual_deck "
+            f"WHERE user_id={cu()} AND deleted_at IS NULL ORDER BY id DESC"
+        ).fetchall()
+        return [_deck_row(r) for r in rows]
+
+@app.post("/api/spiritual/decks", status_code=201)
+def create_deck(body: DeckCreate):
+    if not body.title.strip():
+        raise HTTPException(400, "title required")
+    if body.type not in ("text", "images"):
+        raise HTTPException(400, "type must be text or images")
+    if body.type == "text" and not body.content.strip():
+        raise HTTPException(400, "content required for a text deck")
+    if body.type == "images" and not body.images:
+        raise HTTPException(400, "at least one image required")
+    with db() as conn:
+        cur = conn.execute(
+            f"INSERT INTO spiritual_deck (user_id, title, type, content, images) VALUES ({cu()}, ?, ?, ?, ?)",
+            (body.title.strip(), body.type, body.content, json.dumps(body.images))
+        )
+        r = conn.execute("SELECT id, title, type, content, images FROM spiritual_deck WHERE id=?", (cur.lastrowid,)).fetchone()
+        return _deck_row(r)
+
+@app.delete("/api/spiritual/decks/{deck_id}", status_code=204)
+def delete_deck(deck_id: int):
+    with db() as conn:
+        _soft_delete(conn, "spiritual_deck", deck_id)
+
+@app.post("/api/spiritual/decks/{deck_id}/restore")
+def restore_deck(deck_id: int):
+    with db() as conn:
+        _restore(conn, "spiritual_deck", deck_id)
+        r = conn.execute("SELECT id, title, type, content, images FROM spiritual_deck WHERE id=?", (deck_id,)).fetchone()
+        return _deck_row(r) if r else {}
 
 
 # ── Grove (Focus / Pomodoro) ──────────────────────────────────────────────────

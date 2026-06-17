@@ -292,6 +292,17 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(goal_id, entry_date)
         );
+
+        CREATE TABLE IF NOT EXISTS spiritual_deck (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            title TEXT NOT NULL DEFAULT '',
+            type TEXT NOT NULL DEFAULT 'text',
+            content TEXT NOT NULL DEFAULT '',
+            images TEXT NOT NULL DEFAULT '[]',
+            deleted_at TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
         """)
 
         migrate_db()

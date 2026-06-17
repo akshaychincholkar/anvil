@@ -48,6 +48,11 @@ export const api = {
   createFocus: (data) => req("POST", "/focus", data),
   deleteFocus: (id) => req("DELETE", `/focus/${id}`),
 
+  // Spiritual decks (user-created)
+  getDecks: () => req("GET", "/spiritual/decks"),
+  createDeck: (data) => req("POST", "/spiritual/decks", data),
+  deleteDeck: (id) => req("DELETE", `/spiritual/decks/${id}`),
+
   // Golden Book (manifestation)
   getGoldenGoals: () => req("GET", "/golden/goals"),
   getGoldenGoal: (id) => req("GET", `/golden/goals/${id}`),

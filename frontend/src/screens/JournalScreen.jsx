@@ -59,11 +59,13 @@ export default function JournalScreen() {
   useEffect(() => { load(); }, [load]);
 
   const setMood = async (moodId) => {
+    if (!isToday) return;
     await api.updateJournalMood(selectedDate, moodId);
     load();
   };
 
   const addBullet = async (sid) => {
+    if (!isToday) return;
     const text = drafts[sid].trim();
     if (!text) return;
     await api.addJournalBullet(selectedDate, sid, text);
@@ -132,8 +134,8 @@ export default function JournalScreen() {
           {MOODS.map((m) => {
             const on = entry.mood === m.id;
             return (
-              <button key={m.id} onClick={() => setMood(m.id)}
-                style={{ ...S.moodBtn, ...(on ? { background: m.color, borderColor: m.color, transform: "translateY(-2px)" } : {}) }}>
+              <button key={m.id} onClick={() => setMood(m.id)} disabled={!isToday}
+                style={{ ...S.moodBtn, cursor: isToday ? "pointer" : "default", ...(on ? { background: m.color, borderColor: m.color, transform: "translateY(-2px)" } : {}), ...(!isToday && !on ? { opacity: 0.55 } : {}) }}>
                 <span style={S.moodEmoji}>{m.emoji}</span>
                 <span style={{ ...S.moodLabel, color: on ? "#fff" : "#6B675E" }}>{m.label}</span>
               </button>
@@ -160,20 +162,23 @@ export default function JournalScreen() {
                 <li key={b.id} style={S.bullet}>
                   <span style={{ ...S.bulletDot, background: s.color }} />
                   <span style={S.bulletText}>{b.text}</span>
-                  <button onClick={() => removeBullet(b.id)} style={S.bulletDel}><X size={13} /></button>
+                  {isToday && <button onClick={() => removeBullet(b.id)} style={S.bulletDel}><X size={13} /></button>}
                 </li>
               ))}
+              {!isToday && bullets.length === 0 && <li style={S.sectionHint}>Nothing written.</li>}
             </ul>
-            <div style={S.addRow}>
-              <input
-                placeholder="Add a point…"
-                value={drafts[s.id]}
-                onChange={(e) => setDrafts((d) => ({ ...d, [s.id]: e.target.value }))}
-                onKeyDown={(e) => e.key === "Enter" && addBullet(s.id)}
-                style={S.input}
-              />
-              <button onClick={() => addBullet(s.id)} style={{ ...S.addBtn, background: s.color }}><Plus size={16} /></button>
-            </div>
+            {isToday && (
+              <div style={S.addRow}>
+                <input
+                  placeholder="Add a point…"
+                  value={drafts[s.id]}
+                  onChange={(e) => setDrafts((d) => ({ ...d, [s.id]: e.target.value }))}
+                  onKeyDown={(e) => e.key === "Enter" && addBullet(s.id)}
+                  style={S.input}
+                />
+                <button onClick={() => addBullet(s.id)} style={{ ...S.addBtn, background: s.color }}><Plus size={16} /></button>
+              </div>
+            )}
           </div>
         );
       })}
@@ -231,7 +236,7 @@ export default function JournalScreen() {
           ? (loggedToday
             ? `Mood set · ${totalBullets} point${totalBullets === 1 ? "" : "s"} written today`
             : "Tap a mood to log today and keep your streak")
-          : `Viewing ${formatDateLabel(selectedDate)}`}
+          : `Viewing ${formatDateLabel(selectedDate)} · past entries are read-only`}
       </div>
     </div>
   );
