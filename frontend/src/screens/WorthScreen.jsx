@@ -163,6 +163,13 @@ export default function WorthScreen() {
   const focusPct = periodEarned > 0 ? (totalFocus / periodEarned) * 100 : 0;
   const usagePct = periodEarned > 0 ? (totalUsage / periodEarned) * 100 : 0;
 
+  // Minutes spent (period) for the pie chart.
+  const focusMinutes = PILLARS.reduce((n, p) => n + focusByPillar[p].minutes, 0);
+  const usageMinutes = Object.values(usageByScreen).reduce((n, u) => n + u.seconds / 60, 0);
+  const totalMinutes = focusMinutes + usageMinutes;
+  const fMinPct = totalMinutes > 0 ? (focusMinutes / totalMinutes) * 100 : 0;
+  const uMinPct = totalMinutes > 0 ? (usageMinutes / totalMinutes) * 100 : 0;
+
   const focusRows = PILLARS.map((p) => ({ p, ...focusByPillar[p], ...TREES[p] })).filter((r) => r.minutes > 0).sort((a, b) => b.earned - a.earned);
   const usageRows = SCREEN_LIST.map((s) => ({ ...s, ...(usageByScreen[s.id] || { seconds: 0, earned: 0 }) })).filter((r) => r.seconds > 0).sort((a, b) => b.earned - a.earned);
 
@@ -336,6 +343,35 @@ export default function WorthScreen() {
         </div>
       )}
 
+      {totalMinutes > 0 && (
+        <div style={S.card}>
+          <div style={S.cardTitle}>Focus vs Usage</div>
+          <div style={S.pieWrap}>
+            <div style={S.pieChart}>
+              <div style={{ ...S.pieDisc, background: `conic-gradient(${FOCUS_COLOR} 0 ${fMinPct}%, ${USAGE_COLOR} ${fMinPct}% 100%)` }} />
+              <div style={S.pieHole}>
+                <span style={S.pieHoleVal}>{fmtH(Math.round(totalMinutes))}</span>
+                <span style={S.pieHoleLbl}>total</span>
+              </div>
+            </div>
+            <div style={S.pieLegend}>
+              <div style={S.pieLegRow}>
+                <span style={{ ...S.legendDot, background: FOCUS_COLOR }} />
+                <span style={S.pieLegName}>Focus</span>
+                <span style={S.pieLegPct}>{Math.round(fMinPct)}%</span>
+                <span style={S.pieLegMin}>{fmtH(Math.round(focusMinutes))}</span>
+              </div>
+              <div style={S.pieLegRow}>
+                <span style={{ ...S.legendDot, background: USAGE_COLOR }} />
+                <span style={S.pieLegName}>Usage</span>
+                <span style={S.pieLegPct}>{Math.round(uMinPct)}%</span>
+                <span style={S.pieLegMin}>{fmtH(Math.round(usageMinutes))}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={S.note}>Set rates only affect time from today onward — past time keeps the rate it was earned at.</div>
     </div>
   );
@@ -380,7 +416,19 @@ const S = {
   splitTrack: { display: "flex", height: 16, borderRadius: 8, overflow: "hidden", marginTop: 12, marginBottom: 12, border: "1px solid var(--border)" },
   legendRow: { display: "flex", gap: 16, flexWrap: "wrap" },
   legendItem: { display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: "var(--text-2)" },
-  legendDot: { width: 10, height: 10, borderRadius: 3 },
+  legendDot: { width: 10, height: 10, borderRadius: 3, flexShrink: 0 },
+
+  pieWrap: { display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap", marginTop: 6 },
+  pieChart: { position: "relative", width: 130, height: 130, flexShrink: 0, margin: "0 auto" },
+  pieDisc: { width: "100%", height: "100%", borderRadius: "50%" },
+  pieHole: { position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: 78, height: 78, borderRadius: "50%", background: "var(--surface)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" },
+  pieHoleVal: { fontSize: 14, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif" },
+  pieHoleLbl: { fontSize: 10, color: "var(--text-3)", fontWeight: 600 },
+  pieLegend: { flex: 1, minWidth: 180, display: "flex", flexDirection: "column", gap: 10 },
+  pieLegRow: { display: "flex", alignItems: "center", gap: 8 },
+  pieLegName: { flex: 1, fontSize: 13.5, fontWeight: 600 },
+  pieLegPct: { fontSize: 13, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif", width: 46, textAlign: "right" },
+  pieLegMin: { fontSize: 12, color: "var(--text-3)", fontWeight: 600, minWidth: 64, textAlign: "right" },
 
   rows: { display: "flex", flexDirection: "column", gap: 2 },
   row: { display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderBottom: "1px solid var(--border)" },
