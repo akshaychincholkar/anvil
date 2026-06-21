@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
-import { Plus, Clock, CalendarPlus, Check, X } from "lucide-react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { Plus, Clock, CalendarPlus, Check, X, Pencil } from "lucide-react";
 import { api } from "../api.js";
 import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
 import UndoToast from "../components/UndoToast.jsx";
@@ -55,8 +55,13 @@ const EMPTY_DRAFT = () => ({
 
 export default function QuadrantView() {
   const [tasks, setTasks]         = useState([]);
+  const [goals, setGoals]         = useState([]);
+  const [pillarFilter, setPillarFilter] = useState("All");
+  const [goalSel, setGoalSel]     = useState(null); // selected weekly goal id, or null = all
   const [adding, setAdding]       = useState(null);
   const [draft, setDraft]         = useState(EMPTY_DRAFT());
+  const [editing, setEditing]     = useState(null);
+  const [editDraft, setEditDraft] = useState(EMPTY_DRAFT());
   const [gcal, setGcal]           = useState({ connected: false, configured: false });
 
   const load = useCallback(() => api.getTasks().then(setTasks).catch(console.error), []);
@@ -64,13 +69,25 @@ export default function QuadrantView() {
   useEffect(() => {
     load();
     api.getGcalStatus().then(setGcal).catch(() => {});
+    api.getGoals().then((gs) => setGoals(gs.filter((g) => g.horizon === "Weekly"))).catch(() => {});
   }, [load]);
+
+  const PILLAR_NAMES = Object.keys(PILLARS);
+  const weeklyGoals = goals.filter((g) => pillarFilter === "All" || g.pillar === pillarFilter);
+  const selGoal = goals.find((g) => g.id === goalSel) || null;
+  const visibleTasks = tasks.filter((t) => {
+    if (goalSel != null) return t.goal_id === goalSel;
+    if (pillarFilter !== "All") return t.pillar === pillarFilter;
+    return true;
+  });
+  const pickPillar = (name) => { setPillarFilter(name); setGoalSel(null); setAdding(null); setDraft((d) => ({ ...d, pillar: name === "All" ? "Financial" : name })); };
+  const pickGoal = (id) => { setGoalSel(id); setAdding(null); const g = goals.find((x) => x.id === id); if (g) setDraft((d) => ({ ...d, pillar: g.pillar })); };
 
   const { deleteItem: softDelete, toasts, handleUndo, handleDismiss } = useUndoableDelete(
     api.deleteTask, api.restoreTask, load
   );
 
-  const byQ = (q) => tasks.filter((t) => t.quadrant === q);
+  const byQ = (q) => visibleTasks.filter((t) => t.quadrant === q);
   const totalMin = (q) => byQ(q).reduce((s, t) => s + t.time_estimate_min, 0);
   const fmt = (m) => m >= 60 ? `${Math.floor(m/60)}h${m%60 ? ` ${m%60}m` : ""}` : `${m}m`;
 
@@ -85,11 +102,12 @@ export default function QuadrantView() {
       ? `${draft.date}T${draft.startTime}:00`
       : null;
     await api.createTask({
-      pillar: draft.pillar,
+      pillar: selGoal ? selGoal.pillar : draft.pillar,
       title: draft.title,
       quadrant: q,
       time_estimate_min: Number(draft.est) || 30,
       start_datetime,
+      goal_id: goalSel ?? null,
     });
     setDraft(EMPTY_DRAFT());
     setAdding(null);
@@ -97,6 +115,87 @@ export default function QuadrantView() {
   };
 
   const deleteTask = (id, title) => softDelete(id, title);
+
+  const startEdit = (t) => {
+    const parts = t.start_datetime ? t.start_datetime.split("T") : [];
+    setEditing(t.id);
+    setAdding(null);
+    setEditDraft({
+      title: t.title, pillar: t.pillar, est: t.time_estimate_min,
+      date: parts[0] || todayISO(),
+      startTime: (parts[1] || "").slice(0, 5) || defaultTime(),
+    });
+  };
+  const saveEdit = async (t) => {
+    if (!editDraft.title.trim()) return;
+    const start_datetime = editDraft.date && editDraft.startTime ? `${editDraft.date}T${editDraft.startTime}:00` : null;
+    await api.updateTask(t.id, {
+      title: editDraft.title.trim(),
+      pillar: editDraft.pillar,
+      time_estimate_min: Number(editDraft.est) || 30,
+      start_datetime,
+    });
+    setEditing(null);
+    load();
+  };
+
+  // ── Drag a task between quadrants (kanban) ──
+  const dragRef = useRef(null);
+  const holdTimer = useRef(null);
+  const [dragView, setDragView] = useState(null);
+  const quadAt = (x, y) => {
+    const el = document.elementFromPoint(x, y);
+    return el && el.closest ? (el.closest("[data-quad]")?.getAttribute("data-quad") || null) : null;
+  };
+  useEffect(() => {
+    const onMove = (e) => {
+      const d = dragRef.current;
+      if (!d) return;
+      const dist = Math.hypot(e.clientX - d.startX, e.clientY - d.startY);
+      if (!d.active) {
+        if (d.pointerType !== "mouse") { if (dist > 12) { clearTimeout(holdTimer.current); dragRef.current = null; } return; }
+        if (dist < 6) return;
+        d.active = true;
+        document.body.style.userSelect = "none";
+      }
+      if (e.cancelable) e.preventDefault();
+      d.overQ = quadAt(e.clientX, e.clientY);
+      setDragView({ id: d.task.id, title: d.task.title, x: e.clientX, y: e.clientY, overQ: d.overQ });
+    };
+    const onUp = () => {
+      clearTimeout(holdTimer.current);
+      const d = dragRef.current;
+      dragRef.current = null;
+      document.body.style.userSelect = "";
+      document.body.style.touchAction = "";
+      setDragView(null);
+      if (d && d.active && d.overQ && d.overQ !== d.task.quadrant) {
+        api.updateTask(d.task.id, { quadrant: d.overQ }).then(load).catch(() => {});
+      }
+    };
+    window.addEventListener("pointermove", onMove, { passive: false });
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  }, [load]);
+
+  const startCardDrag = (e, task) => {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    dragRef.current = { task, startX: e.clientX, startY: e.clientY, active: false, pointerType: e.pointerType, overQ: null };
+    if (e.pointerType !== "mouse") {
+      holdTimer.current = setTimeout(() => {
+        const d = dragRef.current;
+        if (!d) return;
+        d.active = true;
+        document.body.style.touchAction = "none";
+        setDragView({ id: d.task.id, title: d.task.title, x: d.startX, y: d.startY, overQ: d.task.quadrant });
+      }, 280);
+    }
+  };
 
   return (
     <div style={S.page}>
@@ -133,9 +232,42 @@ export default function QuadrantView() {
         </div>
       </div>
 
+      {/* Pillar filter */}
+      <div style={S.filterBar}>
+        {["All", ...PILLAR_NAMES].map((name) => {
+          const on = pillarFilter === name;
+          const c = PILLARS[name];
+          return (
+            <button key={name} onClick={() => pickPillar(name)}
+              style={{ ...S.pillChip, ...(on ? (c ? { background: c.dot, color: "#fff", borderColor: c.dot } : { background: "var(--accent-strong)", color: "#fff", borderColor: "var(--accent-strong)" }) : {}) }}>
+              {c && <span style={{ ...S.dot, background: on ? "#fff" : c.dot }} />}
+              {name === "All" ? "All" : name}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Weekly goals selector */}
+      <div style={S.goalBar}>
+        <button onClick={() => setGoalSel(null)} style={{ ...S.goalChip, ...(goalSel == null ? S.goalChipOn : {}) }}>All goals</button>
+        {weeklyGoals.map((g) => {
+          const c = PILLARS[g.pillar]?.dot || "#9A968C";
+          const on = goalSel === g.id;
+          return (
+            <button key={g.id} onClick={() => pickGoal(g.id)}
+              style={{ ...S.goalChip, ...(on ? { background: c, color: "#fff", borderColor: c } : {}) }} title={g.title}>
+              <span style={{ ...S.dot, background: on ? "#fff" : c }} />
+              <span style={S.goalChipText}>{g.title}</span>
+            </button>
+          );
+        })}
+        {weeklyGoals.length === 0 && <span style={S.goalEmpty}>No weekly goals{pillarFilter !== "All" ? ` for ${pillarFilter}` : ""} — create them in Goals.</span>}
+      </div>
+
       <div style={S.grid}>
         {QUADRANTS.map((quad) => (
-          <section key={quad.id} style={{ ...S.quad, borderTop: `3px solid ${quad.accent}` }}>
+          <section key={quad.id} data-quad={quad.id}
+            style={{ ...S.quad, borderTop: `3px solid ${quad.accent}`, ...(dragView && dragView.overQ === quad.id && dragView.overQ !== tasks.find((t) => t.id === dragView.id)?.quadrant ? { outline: `2px dashed ${quad.accent}`, outlineOffset: 2, background: "var(--hover)" } : {}) }}>
             <header style={S.quadHead}>
               <div style={S.quadTitleRow}>
                 <span style={{ ...S.symbol, color: quad.accent }}>{quad.symbol}</span>
@@ -151,8 +283,42 @@ export default function QuadrantView() {
               {byQ(quad.id).map((t) => {
                 const p = PILLARS[t.pillar] || PILLARS.Financial;
                 const scheduled = !!t.gcal_event_id;
+                if (editing === t.id) {
+                  return (
+                    <div key={t.id} style={S.addBox}>
+                      <input autoFocus placeholder="Task title" value={editDraft.title}
+                        onChange={(e) => setEditDraft({ ...editDraft, title: e.target.value })}
+                        onKeyDown={(e) => e.key === "Enter" && saveEdit(t)} style={S.input} />
+                      <div style={S.dateTimeRow}>
+                        <div style={S.dateTimeGroup}>
+                          <label style={S.dtLabel}>Date</label>
+                          <input type="date" value={editDraft.date} onChange={(e) => setEditDraft({ ...editDraft, date: e.target.value })} style={S.dtInput} />
+                        </div>
+                        <div style={S.dateTimeGroup}>
+                          <label style={S.dtLabel}>Start</label>
+                          <input type="time" value={editDraft.startTime} onChange={(e) => setEditDraft({ ...editDraft, startTime: e.target.value })} style={S.dtInput} />
+                        </div>
+                        <div style={S.dateTimeGroup}>
+                          <label style={S.dtLabel}>End</label>
+                          <div style={S.dtEndValue}>{addMinutes(editDraft.startTime, Number(editDraft.est) || 30)}</div>
+                        </div>
+                      </div>
+                      <div style={S.addRow}>
+                        <select value={editDraft.pillar} onChange={(e) => setEditDraft({ ...editDraft, pillar: e.target.value })} style={S.select}>
+                          {Object.keys(PILLARS).map((pp) => <option key={pp}>{pp}</option>)}
+                        </select>
+                        <input type="number" value={editDraft.est} onChange={(e) => setEditDraft({ ...editDraft, est: e.target.value })} style={{ ...S.input, width: 60 }} />
+                        <span style={S.minLabel}>min</span>
+                        <button onClick={() => saveEdit(t)} style={S.saveBtn}><Check size={14} /></button>
+                        <button onClick={() => setEditing(null)} style={S.cancelBtn}><X size={14} /></button>
+                      </div>
+                    </div>
+                  );
+                }
                 return (
-                  <div key={t.id} style={{ ...S.card, background: p.soft }}>
+                  <div key={t.id}
+                    onPointerDown={(e) => startCardDrag(e, t)}
+                    style={{ ...S.card, background: p.soft, cursor: "grab", touchAction: "pan-y", ...(dragView?.id === t.id ? { opacity: 0.4 } : {}) }}>
                     <span style={{ ...S.cardBar, background: p.dot }} />
                     <div style={S.cardBody}>
                       <div style={S.cardTitle}>{t.title}</div>
@@ -177,7 +343,8 @@ export default function QuadrantView() {
                           <Check size={14} />
                         </span>
                       )}
-                      <button onClick={() => deleteTask(t.id, t.title)} style={S.delBtn}><X size={13} /></button>
+                      <button onClick={() => startEdit(t)} onPointerDown={(e) => e.stopPropagation()} style={S.delBtn} title="Edit"><Pencil size={12} /></button>
+                      <button onClick={() => deleteTask(t.id, t.title)} onPointerDown={(e) => e.stopPropagation()} style={S.delBtn}><X size={13} /></button>
                     </div>
                   </div>
                 );
@@ -225,13 +392,19 @@ export default function QuadrantView() {
 
                   {/* Pillar + duration row */}
                   <div style={S.addRow}>
-                    <select
-                      value={draft.pillar}
-                      onChange={(e) => setDraft({ ...draft, pillar: e.target.value })}
-                      style={S.select}
-                    >
-                      {Object.keys(PILLARS).map((p) => <option key={p}>{p}</option>)}
-                    </select>
+                    {selGoal ? (
+                      <span style={S.goalPillarTag}>
+                        <span style={{ ...S.dot, background: PILLARS[selGoal.pillar]?.dot }} /> {selGoal.pillar}
+                      </span>
+                    ) : (
+                      <select
+                        value={draft.pillar}
+                        onChange={(e) => setDraft({ ...draft, pillar: e.target.value })}
+                        style={S.select}
+                      >
+                        {Object.keys(PILLARS).map((p) => <option key={p}>{p}</option>)}
+                      </select>
+                    )}
                     <input
                       type="number"
                       value={draft.est}
@@ -257,6 +430,9 @@ export default function QuadrantView() {
           </section>
         ))}
       </div>
+      {dragView && (
+        <div style={{ ...S.dragClone, left: dragView.x + 12, top: dragView.y + 12 }}>{dragView.title}</div>
+      )}
       <UndoToast toasts={toasts} onUndo={handleUndo} onDismiss={handleDismiss} />
     </div>
   );
@@ -273,6 +449,14 @@ const S = {
   dot: { width: 9, height: 9, borderRadius: "50%", display: "inline-block", flexShrink: 0 },
   gcalBadgeOn:  { display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 500, color: "#4C9A6B", background: "rgba(76,154,107,0.10)", border: "1px solid rgba(76,154,107,0.3)", borderRadius: 20, padding: "5px 12px", cursor: "pointer" },
   gcalBadgeOff: { display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 500, color: "var(--text-2)", background: "var(--surface)", border: "1px solid #DCDAD3", borderRadius: 20, padding: "5px 12px", cursor: "pointer" },
+  filterBar: { display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 10 },
+  pillChip: { display: "inline-flex", alignItems: "center", gap: 6, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-2)", padding: "6px 12px", borderRadius: 18, fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
+  goalBar: { display: "flex", gap: 7, flexWrap: "wrap", alignItems: "center", marginBottom: 18, paddingBottom: 14, borderBottom: "1px solid var(--border)" },
+  goalChip: { display: "inline-flex", alignItems: "center", gap: 6, maxWidth: 220, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-2)", padding: "6px 12px", borderRadius: 18, fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
+  goalChipOn: { background: "var(--accent-strong)", color: "#fff", borderColor: "var(--accent-strong)" },
+  goalChipText: { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  goalEmpty: { fontSize: 12, color: "var(--text-3)", fontStyle: "italic" },
+  goalPillarTag: { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 600, color: "var(--text-2)", background: "var(--hover)", padding: "7px 10px", borderRadius: 6, flex: 1 },
   grid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16 },
   quad: { background: "var(--surface)", borderRadius: 12, padding: "16px 16px 14px", boxShadow: "0 1px 3px rgba(0,0,0,0.04),0 1px 2px rgba(0,0,0,0.06)" },
   quadHead: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 },
@@ -309,4 +493,5 @@ const S = {
   gcalHint: { color: "#3A7CA5", display: "grid", placeItems: "center" },
   saveBtn: { border: "none", background: "#4C9A6B", color: "#fff", width: 30, height: 30, borderRadius: 6, cursor: "pointer", display: "grid", placeItems: "center" },
   cancelBtn: { border: "none", background: "var(--hover)", color: "var(--text-2)", width: 30, height: 30, borderRadius: 6, cursor: "pointer", display: "grid", placeItems: "center" },
+  dragClone: { position: "fixed", zIndex: 1000, pointerEvents: "none", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 12px", fontSize: 13, fontWeight: 600, color: "var(--text)", boxShadow: "0 8px 24px rgba(0,0,0,0.25)", maxWidth: 220, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
 };

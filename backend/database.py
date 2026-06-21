@@ -32,6 +32,7 @@ def migrate_db():
 
         # task extras
         add_col("task", "start_datetime", "TEXT")
+        add_col("task", "goal_id", "INTEGER")  # optional link to a weekly goal
 
         # habit type system (item 3)
         add_col("habit", "type", "TEXT NOT NULL DEFAULT 'regular'")

@@ -285,6 +285,7 @@ class TaskCreate(BaseModel):
     quadrant: str
     time_estimate_min: int = 30
     start_datetime: Optional[str] = None
+    goal_id: Optional[int] = None
 
 class TaskUpdate(BaseModel):
     pillar: Optional[str] = None
@@ -293,11 +294,13 @@ class TaskUpdate(BaseModel):
     time_estimate_min: Optional[int] = None
     status: Optional[str] = None
     gcal_event_id: Optional[str] = None
+    goal_id: Optional[int] = None
+    start_datetime: Optional[str] = None
 
 def _task_sql():
     return f"""
     SELECT t.id, p.name AS pillar, t.title, t.quadrant,
-           t.time_estimate_min, t.gcal_event_id, t.status, t.start_datetime
+           t.time_estimate_min, t.gcal_event_id, t.status, t.start_datetime, t.goal_id
     FROM task t JOIN pillar p ON t.pillar_id=p.id
     WHERE t.id=? AND t.user_id={cu()} AND t.deleted_at IS NULL
 """
@@ -313,7 +316,7 @@ def get_tasks():
     with db() as conn:
         rows = conn.execute(f"""
             SELECT t.id, p.name AS pillar, t.title, t.quadrant,
-                   t.time_estimate_min, t.gcal_event_id, t.status, t.start_datetime
+                   t.time_estimate_min, t.gcal_event_id, t.status, t.start_datetime, t.goal_id
             FROM task t JOIN pillar p ON t.pillar_id=p.id
             WHERE t.user_id={cu()} AND t.status='active' AND t.deleted_at IS NULL
             ORDER BY t.created_at
@@ -342,8 +345,8 @@ def create_task(body: TaskCreate):
     with db() as conn:
         pid = pillar_id(conn, body.pillar)
         cur = conn.execute(
-            f"INSERT INTO task (user_id,pillar_id,title,quadrant,time_estimate_min,start_datetime,gcal_event_id) VALUES ({cu()},?,?,?,?,?,?)",
-            (pid, body.title, body.quadrant, body.time_estimate_min, body.start_datetime, gcal_event_id)
+            f"INSERT INTO task (user_id,pillar_id,title,quadrant,time_estimate_min,start_datetime,gcal_event_id,goal_id) VALUES ({cu()},?,?,?,?,?,?,?)",
+            (pid, body.title, body.quadrant, body.time_estimate_min, body.start_datetime, gcal_event_id, body.goal_id)
         )
         return _task(conn, cur.lastrowid)
 

@@ -44,6 +44,7 @@ const prettyWhen = (s) => {
 const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const startOfWeek = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; };
 const PERIODS = [
+  { id: "today", label: "Today" },
   { id: "all", label: "All time" },
   { id: "tweek", label: "This week" },
   { id: "tmonth", label: "This month" },
@@ -53,6 +54,7 @@ const PERIODS = [
 ];
 function periodRange(id) {
   const now = new Date();
+  if (id === "today") return [iso(now), iso(now)];
   if (id === "tweek") { const s = startOfWeek(now); const e = new Date(s); e.setDate(s.getDate() + 6); return [iso(s), iso(e)]; }
   if (id === "pweek") { const s = startOfWeek(now); s.setDate(s.getDate() - 7); const e = new Date(s); e.setDate(s.getDate() + 6); return [iso(s), iso(e)]; }
   if (id === "tmonth") return [iso(new Date(now.getFullYear(), now.getMonth(), 1)), iso(new Date(now.getFullYear(), now.getMonth() + 1, 0))];
@@ -79,7 +81,7 @@ export default function WorthScreen() {
   const [showUsageRates, setShowUsageRates] = useState(false);
   const [partialOpen, setPartialOpen] = useState(false);
   const [partialAmt, setPartialAmt] = useState("");
-  const [period, setPeriod] = useState("all");
+  const [period, setPeriod] = useState("today");
 
   const loadPayouts = () => api.getPayouts().then(setPayouts).catch(() => {});
   const reloadRates = () => api.getRewardRates().then(setHistory).catch(() => {});
