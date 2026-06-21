@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { ScrollText, X } from "lucide-react";
 import { api } from "../api.js";
 import { TREES, DEFAULT_TREE } from "./grove/trees.jsx";
 import { useCurrency, fmtMoney2 } from "../currency.js";
@@ -79,8 +80,10 @@ export default function WorthScreen() {
   const [usageInputs, setUsageInputs] = useState({});
   const [showFocusRates, setShowFocusRates] = useState(false);
   const [showUsageRates, setShowUsageRates] = useState(false);
-  const [partialOpen, setPartialOpen] = useState(false);
-  const [partialAmt, setPartialAmt] = useState("");
+  const [takeMode, setTakeMode] = useState(null); // 'partial' | 'all' | null
+  const [takeAmt, setTakeAmt] = useState("");
+  const [takeNote, setTakeNote] = useState("");
+  const [showLog, setShowLog] = useState(false);
   const [period, setPeriod] = useState("today");
 
   const loadPayouts = () => api.getPayouts().then(setPayouts).catch(() => {});
@@ -176,11 +179,17 @@ export default function WorthScreen() {
   const saveFocusRate = (p, val) => { api.setRewardRate({ kind: "focus", rkey: p, rate: Math.max(0, parseFloat(val) || 0) }).then(reloadRates).catch(() => {}); };
   const saveUsageRate = (id, val) => { api.setRewardRate({ kind: "usage", rkey: id, rate: Math.max(0, parseFloat(val) || 0) }).then(reloadRates).catch(() => {}); };
 
-  const take = async (amount) => {
-    const amt = Math.min(parseFloat(amount) || 0, pending);
-    if (amt <= 0) return;
-    await api.createPayout({ amount: amt, note: "", date: nowLocal() });
-    setPartialOpen(false); setPartialAmt("");
+  const openTake = (mode) => {
+    if (pending <= 0) return;
+    setTakeMode(mode);
+    setTakeAmt(mode === "all" ? pending.toFixed(2) : "");
+    setTakeNote("");
+  };
+  const confirmTake = async () => {
+    const amt = Math.min(parseFloat(takeAmt) || 0, pending);
+    if (amt <= 0 || !takeNote.trim()) return; // reason is mandatory
+    await api.createPayout({ amount: amt, note: takeNote.trim(), date: nowLocal() });
+    setTakeMode(null); setTakeAmt(""); setTakeNote("");
     loadPayouts();
   };
   const removePayout = async (id) => { await api.deletePayout(id); loadPayouts(); };
@@ -195,26 +204,17 @@ export default function WorthScreen() {
 
       {/* Consolidated final reward */}
       <div style={S.hero}>
+        <button onClick={() => setShowLog((v) => !v)} style={S.logIcon} title="View reward log">
+          <ScrollText size={16} />
+        </button>
         <div style={S.heroLabel}>Final reward · pending</div>
         <div style={S.heroVal}>{reward(pending)}</div>
         <div style={S.heroSub}>Earned {reward(totalEarned)} · Taken {reward(totalTaken)}</div>
 
-        {partialOpen ? (
-          <div style={S.partialRow}>
-            <div style={S.partialInputWrap}>
-              <span style={S.partialSign}>{cur.symbol}</span>
-              <input type="number" min="0" step="0.01" autoFocus placeholder={pending.toFixed(2)}
-                value={partialAmt} onChange={(e) => setPartialAmt(e.target.value)} style={S.partialInput} />
-            </div>
-            <button onClick={() => take(partialAmt)} style={S.heroBtnSolid}>Confirm</button>
-            <button onClick={() => { setPartialOpen(false); setPartialAmt(""); }} style={S.heroBtnGhost}>Cancel</button>
-          </div>
-        ) : (
-          <div style={S.heroBtns}>
-            <button onClick={() => setPartialOpen(true)} disabled={pending <= 0} style={{ ...S.heroBtnGhost, ...(pending <= 0 ? S.btnDisabled : {}) }}>Take partial</button>
-            <button onClick={() => take(pending)} disabled={pending <= 0} style={{ ...S.heroBtnSolid, ...(pending <= 0 ? S.btnDisabled : {}) }}>Take all pending</button>
-          </div>
-        )}
+        <div style={S.heroBtns}>
+          <button onClick={() => openTake("partial")} disabled={pending <= 0} style={{ ...S.heroBtnGhost, ...(pending <= 0 ? S.btnDisabled : {}) }}>Take partial</button>
+          <button onClick={() => openTake("all")} disabled={pending <= 0} style={{ ...S.heroBtnSolid, ...(pending <= 0 ? S.btnDisabled : {}) }}>Take all pending</button>
+        </div>
       </div>
 
       {/* Taken / pending stats */}
@@ -325,21 +325,28 @@ export default function WorthScreen() {
         ) : <div style={S.muted}>{loaded ? "No usage tracked yet." : "Loading…"}</div>}
       </div>
 
-      {/* Payout history */}
-      {payouts.length > 0 && (
+      {/* Reward log (toggled via the icon on the hero) */}
+      {showLog && (
         <div style={S.card}>
-          <div style={S.cardTitle}>Rewards taken</div>
-          <div style={S.rows}>
-            {payouts.map((p) => (
-              <div key={p.id} style={S.row}>
-                <span style={S.rowMeta}>{prettyWhen(p.date)}</span>
-                <span style={{ ...S.rowName, textAlign: "right" }} />
-                <span style={S.rowAmt}>{reward(p.amount)}</span>
-                <button onClick={() => removePayout(p.id)} style={S.del}>×</button>
-              </div>
-            ))}
-            <div style={S.totalRow}><span>Total taken</span><span style={S.totalVal}>{reward(totalTaken)}</span></div>
+          <div style={S.cardTitleRow}>
+            <span style={S.cardTitle}>Reward log</span>
+            <button onClick={() => setShowLog(false)} style={S.logClose} title="Close"><X size={15} /></button>
           </div>
+          {payouts.length === 0 ? <div style={S.muted}>No rewards taken yet.</div> : (
+            <div style={S.rows}>
+              {payouts.map((p) => (
+                <div key={p.id} style={S.row}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={S.logNote}>{p.note || "Reward taken"}</div>
+                    <div style={S.rowMeta}>{prettyWhen(p.date)}</div>
+                  </div>
+                  <span style={S.rowAmt}>{reward(p.amount)}</span>
+                  <button onClick={() => removePayout(p.id)} style={S.del}>×</button>
+                </div>
+              ))}
+              <div style={S.totalRow}><span>Total taken</span><span style={S.totalVal}>{reward(totalTaken)}</span></div>
+            </div>
+          )}
         </div>
       )}
 
@@ -372,6 +379,34 @@ export default function WorthScreen() {
         </div>
       )}
 
+      {/* Take-reward confirmation popup */}
+      {takeMode && (
+        <div style={S.modalOverlay} onClick={() => setTakeMode(null)}>
+          <div style={S.modalCard} onClick={(e) => e.stopPropagation()}>
+            <div style={S.modalTitle}>{takeMode === "all" ? "Take all pending reward?" : "Take partial reward"}</div>
+            <div style={S.modalSub}>Pending: {reward(pending)}</div>
+            <div style={S.modalInputWrap}>
+              <span style={S.modalSign}>{cur.symbol}</span>
+              <input type="number" min="0" step="0.01" autoFocus placeholder={pending.toFixed(2)}
+                value={takeAmt} onChange={(e) => setTakeAmt(e.target.value)} style={S.modalAmt} />
+            </div>
+            <input placeholder="What is this reward for? (required)" value={takeNote}
+              onChange={(e) => setTakeNote(e.target.value)} onKeyDown={(e) => e.key === "Enter" && confirmTake()} style={S.modalReason} />
+            {(() => {
+              const canTake = parseFloat(takeAmt) > 0 && !!takeNote.trim();
+              return (
+                <div style={S.modalActions}>
+                  <button onClick={() => setTakeMode(null)} style={S.modalCancel}>Cancel</button>
+                  <button onClick={confirmTake} disabled={!canTake} style={{ ...S.modalConfirm, ...(!canTake ? { opacity: 0.5, cursor: "not-allowed" } : {}) }}>
+                    Confirm · {reward(Math.min(parseFloat(takeAmt) || 0, pending))}
+                  </button>
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
       <div style={S.note}>Set rates only affect time from today onward — past time keeps the rate it was earned at.</div>
     </div>
   );
@@ -384,7 +419,23 @@ const S = {
   h1: { fontSize: 28, fontWeight: 700, margin: 0, letterSpacing: "-0.02em", fontFamily: "'Fraunces',Georgia,serif" },
   subhead: { fontSize: 13, color: "var(--text-3)", marginTop: 4 },
 
-  hero: { background: "linear-gradient(135deg,var(--accent-strong),var(--accent-2))", borderRadius: 16, padding: "22px 24px", color: "#fff", marginBottom: 14, textAlign: "center" },
+  hero: { position: "relative", background: "linear-gradient(135deg,var(--accent-strong),var(--accent-2))", borderRadius: 16, padding: "22px 24px", color: "#fff", marginBottom: 14, textAlign: "center" },
+  logIcon: { position: "absolute", top: 12, right: 12, border: "1px solid rgba(255,255,255,0.5)", background: "rgba(255,255,255,0.12)", color: "#fff", width: 32, height: 32, borderRadius: 9, cursor: "pointer", display: "grid", placeItems: "center" },
+  takeForm: { display: "flex", flexDirection: "column", gap: 10, marginTop: 16, alignItems: "center" },
+  takeNoteInput: { width: "100%", maxWidth: 320, boxSizing: "border-box", border: "none", borderRadius: 10, padding: "9px 12px", fontSize: 13.5, fontFamily: "inherit", color: "#26241F", background: "#fff", outline: "none" },
+  logClose: { border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-2)", width: 28, height: 28, borderRadius: 7, cursor: "pointer", display: "grid", placeItems: "center" },
+  logNote: { fontSize: 13.5, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  modalOverlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 200, display: "grid", placeItems: "center", padding: 16 },
+  modalCard: { background: "var(--surface)", color: "var(--text)", borderRadius: 16, padding: "22px 22px 18px", width: 360, maxWidth: "100%", boxShadow: "0 12px 48px rgba(0,0,0,0.3)", border: "1px solid var(--border)" },
+  modalTitle: { fontSize: 18, fontWeight: 700, fontFamily: "'Fraunces',Georgia,serif", marginBottom: 4 },
+  modalSub: { fontSize: 12.5, color: "var(--text-3)", fontWeight: 600, marginBottom: 14 },
+  modalInputWrap: { display: "flex", alignItems: "center", gap: 4, border: "1px solid var(--border)", borderRadius: 10, padding: "8px 12px", background: "var(--surface-2)", marginBottom: 8 },
+  modalSign: { fontSize: 16, color: "var(--text-2)", fontWeight: 700 },
+  modalAmt: { border: "none", background: "none", outline: "none", flex: 1, fontSize: 18, fontWeight: 700, fontFamily: "inherit", color: "var(--text)" },
+  modalReason: { width: "100%", boxSizing: "border-box", border: "1px solid var(--border)", borderRadius: 10, padding: "9px 12px", fontSize: 13.5, fontFamily: "inherit", color: "var(--text)", background: "var(--surface)", outline: "none", marginBottom: 14 },
+  modalActions: { display: "flex", gap: 8 },
+  modalCancel: { border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-2)", padding: "10px 14px", borderRadius: 10, fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" },
+  modalConfirm: { flex: 1, border: "none", background: "#C9A227", color: "#fff", padding: "10px 14px", borderRadius: 10, fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" },
   heroLabel: { fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", opacity: 0.85 },
   heroVal: { fontSize: 44, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif", letterSpacing: "-0.02em", marginTop: 2, lineHeight: 1.05 },
   heroSub: { fontSize: 12.5, opacity: 0.9, marginTop: 6 },
