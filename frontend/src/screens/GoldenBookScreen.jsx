@@ -5,8 +5,9 @@ import {
 } from "lucide-react";
 import { api } from "../api.js";
 
-const todayISO = () => new Date().toISOString().slice(0, 10);
-const addDays = (iso, n) => { const d = new Date(iso + "T00:00:00"); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
+const isoL = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const todayISO = () => isoL(new Date());
+const addDays = (iso, n) => { const d = new Date(iso + "T00:00:00"); d.setDate(d.getDate() + n); return isoL(d); };
 const fmtNice = (iso) => new Date(iso + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
 
 const ytId = (url) => {

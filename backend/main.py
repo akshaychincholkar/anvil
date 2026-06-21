@@ -565,16 +565,27 @@ class HabitLogCount(BaseModel):
     count: int
     note: Optional[str] = None
 
-def _streak(logs: list) -> int:
-    if not logs:
-        return 0
-    today = date.today()
-    log_set = set(logs)
-    s, d = 0, today
-    while str(d) in log_set:
-        s += 1
-        d -= timedelta(days=1)
-    return s
+def _streaks(logs: list):
+    """Returns (current, max): current = latest consecutive run, max = longest ever."""
+    days = sorted({x for x in logs if x and len(x) >= 10})
+    parsed = []
+    for x in days:
+        try: parsed.append(date.fromisoformat(x[:10]))
+        except ValueError: pass
+    if not parsed:
+        return 0, 0
+    best = run = 1
+    for i in range(1, len(parsed)):
+        run = run + 1 if (parsed[i] - parsed[i - 1]).days == 1 else 1
+        if run > best:
+            best = run
+    cur = 1  # run ending at the most recent log
+    for i in range(len(parsed) - 1, 0, -1):
+        if (parsed[i] - parsed[i - 1]).days == 1:
+            cur += 1
+        else:
+            break
+    return cur, best
 
 def _habit_full(conn, habit_id: int) -> dict:
     h = conn.execute(f"""
@@ -598,7 +609,9 @@ def _habit_full(conn, habit_id: int) -> dict:
     d["logs"] = logs
     d["log_notes"] = log_notes
     d["log_counts"] = log_counts
-    d["streak"] = _streak(logs)
+    cur, mx = _streaks(logs)
+    d["streak"] = cur
+    d["max_streak"] = mx
     return d
 
 @app.get("/api/habits")
@@ -1588,6 +1601,85 @@ def restore_golden(gid: int):
         _restore(conn, "golden_goal", gid)
         r = _golden_get(conn, gid)
         return _golden_summary(conn, r) if r else {}
+
+
+# ── Mindscape (audio-only media: Meditation Hub + Visualization) ─────────────
+
+class MediaCreate(BaseModel):
+    kind: str = "meditation"        # 'meditation' | 'visualization'
+    title: str
+    image: str = ""
+    youtube_id: str = ""
+
+class MediaUpdate(BaseModel):
+    kind: Optional[str] = None
+    title: Optional[str] = None
+    image: Optional[str] = None
+    youtube_id: Optional[str] = None
+
+def _media_row(r):
+    return {"id": r["id"], "kind": r["kind"], "title": r["title"], "image": r["image"], "youtube_id": r["youtube_id"]}
+
+_MEDIA_COLS = "id, kind, title, image, youtube_id"
+
+def _validate_media(kind, title, image, youtube_id, *, partial=False):
+    if kind is not None and kind not in ("meditation", "visualization"):
+        raise HTTPException(400, "kind must be meditation or visualization")
+    if not partial:
+        if not (title or "").strip():
+            raise HTTPException(400, "title required")
+        if not (image or "").strip():
+            raise HTTPException(400, "image required")
+        if not (youtube_id or "").strip():
+            raise HTTPException(400, "youtube link required")
+
+@app.get("/api/media")
+def get_media():
+    with db() as conn:
+        rows = conn.execute(
+            f"SELECT {_MEDIA_COLS} FROM media_item WHERE user_id={cu()} AND deleted_at IS NULL ORDER BY id DESC"
+        ).fetchall()
+        return [_media_row(r) for r in rows]
+
+@app.post("/api/media", status_code=201)
+def create_media(body: MediaCreate):
+    _validate_media(body.kind, body.title, body.image, body.youtube_id)
+    with db() as conn:
+        cur = conn.execute(
+            f"INSERT INTO media_item (user_id, kind, title, image, youtube_id) VALUES ({cu()}, ?, ?, ?, ?)",
+            (body.kind, body.title.strip(), body.image, body.youtube_id.strip())
+        )
+        r = conn.execute(f"SELECT {_MEDIA_COLS} FROM media_item WHERE id=?", (cur.lastrowid,)).fetchone()
+        return _media_row(r)
+
+@app.put("/api/media/{mid}")
+def update_media(mid: int, body: MediaUpdate):
+    data = body.dict(exclude_unset=True)
+    _validate_media(data.get("kind"), data.get("title"), data.get("image"), data.get("youtube_id"), partial=True)
+    updates = {}
+    for k in ("kind", "title", "image", "youtube_id"):
+        if k in data and data[k] is not None:
+            updates[k] = data[k].strip() if k in ("title", "youtube_id") else data[k]
+    with db() as conn:
+        if updates:
+            sets = ", ".join(f"{k}=?" for k in updates)
+            conn.execute(f"UPDATE media_item SET {sets} WHERE id=? AND user_id={cu()}", (*updates.values(), mid))
+        r = conn.execute(f"SELECT {_MEDIA_COLS} FROM media_item WHERE id=?", (mid,)).fetchone()
+        if not r:
+            raise HTTPException(404)
+        return _media_row(r)
+
+@app.delete("/api/media/{mid}", status_code=204)
+def delete_media(mid: int):
+    with db() as conn:
+        _soft_delete(conn, "media_item", mid)
+
+@app.post("/api/media/{mid}/restore")
+def restore_media(mid: int):
+    with db() as conn:
+        _restore(conn, "media_item", mid)
+        r = conn.execute(f"SELECT {_MEDIA_COLS} FROM media_item WHERE id=?", (mid,)).fetchone()
+        return _media_row(r) if r else {}
 
 
 # ── Spiritual decks (user-created text/image collections) ────────────────────

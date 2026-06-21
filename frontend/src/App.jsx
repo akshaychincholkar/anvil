@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import {
   LayoutGrid, Target, CheckSquare, BookOpen,
   GraduationCap, Star, RotateCcw, Menu, X,
-  Sparkles, LogOut, Trees, IndianRupee, Settings, Landmark, Rocket, Crown
+  Sparkles, LogOut, Trees, IndianRupee, Settings, Landmark, Rocket, Crown, Headphones
 } from "lucide-react";
 import QuadrantView from "./screens/QuadrantView.jsx";
 import GoalsWithGantt from "./screens/GoalsWithGantt.jsx";
@@ -18,6 +18,7 @@ import AuthScreen from "./screens/AuthScreen.jsx";
 import FinanceScreen from "./screens/FinanceScreen.jsx";
 import KickstartScreen from "./screens/KickstartScreen.jsx";
 import GoldenBookScreen from "./screens/GoldenBookScreen.jsx";
+import MindscapeScreen from "./screens/MindscapeScreen.jsx";
 import SettingsModal from "./screens/SettingsModal.jsx";
 import Ticker from "./components/Ticker.jsx";
 import { api, getToken, clearToken } from "./api.js";
@@ -45,12 +46,13 @@ const SCREENS = {
   affirmations: { label: "Affirmations", icon: Sparkles,      component: AffirmationsScreen },
   skills:       { label: "Skills",       icon: GraduationCap, component: SkillsScreen },
   spiritual:    { label: "Spiritual",    icon: Star,          component: SpiritualScreen },
+  mindscape:    { label: "Mindscape",    icon: Headphones,    component: MindscapeScreen },
 };
 
 // Default sidebar order (flat items). Users can reorder/hide via Settings.
 const DEFAULT_ORDER = [
   "kickstart", "golden", "habits", "quadrant", "goals", "grove", "journal",
-  "revision", "affirmations", "skills", "spiritual", "worth", "vault",
+  "revision", "affirmations", "skills", "spiritual", "mindscape", "worth", "vault",
 ];
 
 // Merge a saved order with the registry so newly-added screens always appear,
@@ -299,6 +301,8 @@ const S = {
     flexDirection: "column",
     padding: "20px 10px",
     gap: 2,
+    overflowY: "auto", // scrollbar appears only when the window is too short to fit everything
+    overflowX: "hidden",
   },
   brand: {
     display: "flex",

@@ -19,7 +19,8 @@ const SECTIONS = [
   { id: "tomorrow", label: "Tomorrow's one thing", hint: "A single priority",     icon: Sunrise, color: "#4C9A6B" },
 ];
 
-const todayISO = () => new Date().toISOString().slice(0, 10);
+const isoL = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const todayISO = () => isoL(new Date());
 const formatDateLabel = (iso) => {
   const d = new Date(iso + "T00:00:00");
   return d.toLocaleDateString("en-US", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
@@ -94,7 +95,7 @@ export default function JournalScreen() {
     const todayMooded = history[TODAY] || (isToday && loggedToday);
     if (todayMooded) { s = 1; d.setDate(d.getDate() - 1); } else return 0;
     while (true) {
-      const iso = d.toISOString().slice(0, 10);
+      const iso = isoL(d);
       if (history[iso]) { s++; d.setDate(d.getDate() - 1); }
       else break;
     }

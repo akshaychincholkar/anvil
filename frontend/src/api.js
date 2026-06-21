@@ -48,6 +48,13 @@ export const api = {
   createFocus: (data) => req("POST", "/focus", data),
   deleteFocus: (id) => req("DELETE", `/focus/${id}`),
 
+  // Mindscape (audio-only media)
+  getMedia: () => req("GET", "/media"),
+  createMedia: (data) => req("POST", "/media", data),
+  updateMedia: (id, data) => req("PUT", `/media/${id}`, data),
+  deleteMedia: (id) => req("DELETE", `/media/${id}`),
+  restoreMedia: (id) => req("POST", `/media/${id}/restore`),
+
   // Spiritual decks (user-created)
   getDecks: () => req("GET", "/spiritual/decks"),
   createDeck: (data) => req("POST", "/spiritual/decks", data),

@@ -14,7 +14,9 @@ const PILLARS = {
 const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
 const MONTHS_SHORT = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
-const toISO = (d) => d.toISOString().slice(0, 10);
+// Local calendar date (NOT toISOString, which is UTC and shifts the day for
+// timezones ahead of/behind UTC, especially around midnight).
+const toISO = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const todayISO = () => toISO(new Date());
 
 // weekOffset: 0 = current week, -1 = last week, +1 = next week …
@@ -343,16 +345,111 @@ function CountPopup({ habit, date, initialCount, initialNote, onSave, onClear, o
   );
 }
 
+function RingStat({ pct, label, sub, color }) {
+  const R = 26, C = 2 * Math.PI * R;
+  const off = C * (1 - Math.max(0, Math.min(100, pct)) / 100);
+  return (
+    <div style={S.ringStat}>
+      <div style={S.ringBox}>
+        <svg width="70" height="70" viewBox="0 0 70 70">
+          <circle cx="35" cy="35" r={R} fill="none" stroke="var(--border)" strokeWidth="7" />
+          <circle cx="35" cy="35" r={R} fill="none" stroke={color} strokeWidth="7" strokeLinecap="round"
+            strokeDasharray={C} strokeDashoffset={off} transform="rotate(-90 35 35)" style={{ transition: "stroke-dashoffset 0.5s ease" }} />
+        </svg>
+        <div style={{ ...S.ringPct, color }}>{pct}%</div>
+      </div>
+      <div>
+        <div style={S.ringLabel}>{label}</div>
+        <div style={S.ringSub}>{sub}</div>
+      </div>
+    </div>
+  );
+}
+
 function AllHabitsWeekly({ habits, dayAction, logSet, onDelete, onEdit }) {
   const [weekOffset, setWeekOffset] = useState(0);
   const weekDates = getWeekDates(weekOffset);
   const weekLabel = `${fmtShort(weekDates[0])} – ${fmtShort(weekDates[6])}${weekOffset === 0 ? " · This week" : ""}`;
+
+  // ── Completion metrics (chain-aware) ──
+  const weekDatesOf = (ds) => {
+    const dt = new Date(ds + "T00:00:00");
+    const dow = dt.getDay();
+    const mon = new Date(dt); mon.setDate(dt.getDate() + (dow === 0 ? -6 : 1 - dow));
+    return Array.from({ length: 7 }, (_, i) => { const x = new Date(mon); x.setDate(mon.getDate() + i); return toISO(x); });
+  };
+  const allLogs = (h) => h.logs || [];
+  const weekMet = (h, wk) => h.type === "minimum" && h.period === "week" && wk.filter((d) => logSet(h).has(d)).length >= (h.target_count || 0);
+  const monthMet = (h, ym) => h.type === "minimum" && h.period === "month" && allLogs(h).filter((d) => d.slice(0, 7) === ym).length >= (h.target_count || 0);
+  const yearMet = (h, y) => h.type === "minimum" && h.period === "year" && allLogs(h).filter((d) => d.slice(0, 4) === y).length >= (h.target_count || 0);
+
+  // Actual completion on a specific day.
+  const actualDone = (h, d) => {
+    if ((h.type === "minimum" || h.type === "maximum") && h.period === "day") {
+      const c = h.log_counts?.[d];
+      if (c === undefined || c === null) return false;
+      return h.type === "minimum" ? c >= (h.target_count || 0) : (c > 0 && c <= (h.target_count || 0));
+    }
+    return logSet(h).has(d);
+  };
+  // A formed chain for the surrounding period counts the day as complete.
+  const chainCoversDay = (h, d) => {
+    if (h.type !== "minimum") return false;
+    if (h.period === "week") return weekMet(h, weekDatesOf(d));
+    if (h.period === "month") return monthMet(h, d.slice(0, 7));
+    if (h.period === "year") return yearMet(h, d.slice(0, 4));
+    return false;
+  };
+  const isDoneOn = (h, d) => actualDone(h, d) || chainCoversDay(h, d);
+
+  const doneToday = habits.filter((h) => isDoneOn(h, TODAY)).length;
+  const dailyPct = habits.length ? Math.round((doneToday / habits.length) * 100) : 0;
+
+  const weeklyProgress = (h) => {
+    // A formed monthly/yearly chain counts the whole week as complete.
+    if (h.type === "minimum" && h.period === "month" && (monthMet(h, weekDates[0].slice(0, 7)) || monthMet(h, weekDates[6].slice(0, 7)))) return 1;
+    if (h.type === "minimum" && h.period === "year" && (yearMet(h, weekDates[0].slice(0, 4)) || yearMet(h, weekDates[6].slice(0, 4)))) return 1;
+    if (h.type === "minimum" && h.period === "week" && weekMet(h, weekDates)) return 1;
+    if ((h.type === "minimum" || h.type === "maximum") && h.period === "day") {
+      return Math.min(1, weekDates.filter((d) => actualDone(h, d)).length / 7);
+    }
+    const logs = logSet(h);
+    const doneDays = weekDates.filter((d) => logs.has(d)).length;
+    const target = (h.type === "minimum" && h.period === "week") ? (h.target_count || 1) : (h.target_per_week || 7);
+    return target > 0 ? Math.min(1, doneDays / target) : 0;
+  };
+  const weeklyPct = habits.length ? Math.round((habits.reduce((s, h) => s + weeklyProgress(h), 0) / habits.length) * 100) : 0;
+
+  // This month (current calendar month)
+  const mNow = new Date();
+  const mYM = `${mNow.getFullYear()}-${String(mNow.getMonth() + 1).padStart(2, "0")}`;
+  const mDays = new Date(mNow.getFullYear(), mNow.getMonth() + 1, 0).getDate();
+  const mWeeks = mDays / 7;
+  const monthlyProgress = (h) => {
+    if (h.type === "minimum" && h.period === "month" && monthMet(h, mYM)) return 1;
+    if (h.type === "minimum" && h.period === "year" && yearMet(h, mYM.slice(0, 4))) return 1;
+    if ((h.type === "minimum" || h.type === "maximum") && h.period === "day") {
+      let met = 0;
+      for (let day = 1; day <= mDays; day++) { if (actualDone(h, `${mYM}-${String(day).padStart(2, "0")}`)) met++; }
+      return Math.min(1, met / mDays);
+    }
+    const doneMonth = allLogs(h).filter((d) => d.slice(0, 7) === mYM).length;
+    let target;
+    if (h.type === "minimum" && h.period === "week") target = (h.target_count || 1) * mWeeks;
+    else if (h.type === "minimum" && h.period === "month") target = (h.target_count || 1);
+    else if (h.type === "minimum" && h.period === "year") target = (h.target_count || 1) / 12;
+    else target = (h.target_per_week || 7) * mWeeks;
+    return target > 0 ? Math.min(1, doneMonth / target) : 0;
+  };
+  const monthlyPct = habits.length ? Math.round((habits.reduce((s, h) => s + monthlyProgress(h), 0) / habits.length) * 100) : 0;
+
   return (
     <div>
       <div style={S.mainHead}>
         <div style={S.eyebrow}>Weekly view</div>
         <h1 style={S.h1}>All Habits</h1>
       </div>
+
       <div style={S.navBar}>
         <button onClick={() => setWeekOffset((o) => o - 1)} style={S.navBtn}><ChevronLeft size={16} /></button>
         <span style={S.navLabel}>{weekLabel}</span>
@@ -453,6 +550,16 @@ function AllHabitsWeekly({ habits, dayAction, logSet, onDelete, onEdit }) {
           </div>
         )}
       </div>
+
+      {habits.length > 0 && (
+        <div style={{ ...S.progressCard, marginTop: 18, marginBottom: 0 }}>
+          <RingStat pct={dailyPct} label="Today" sub={`${doneToday}/${habits.length} done`} color="#4C9A6B" />
+          <div style={S.progressDivider} />
+          <RingStat pct={weeklyPct} label="This week" sub="of weekly targets" color="#3A7CA5" />
+          <div style={S.progressDivider} />
+          <RingStat pct={monthlyPct} label="This month" sub="of monthly targets" color="#8268B0" />
+        </div>
+      )}
     </div>
   );
 }
@@ -527,6 +634,7 @@ function SingleHabitMonthly({ habit, dayAction, logSet, onDelete, onEdit, setNot
 
       <div style={S.statStrip}>
         <Stat label="Current streak" value={`${habit.streak} days`} c={c} soft={soft} flame />
+        <Stat label="Best streak" value={`${habit.max_streak ?? habit.streak} days`} c={c} soft={soft} flame />
         <Stat label="Done this month" value={`${completed}/${daysPassed}`} c={c} soft={soft} />
         <Stat label="Completion" value={`${rate}%`} c={c} soft={soft} />
         {habit.type === "regular"
@@ -577,7 +685,7 @@ function SingleHabitMonthly({ habit, dayAction, logSet, onDelete, onEdit, setNot
             const count = habit.log_counts?.[dateStr];
             const hasCount = count !== undefined && count !== null;
             const ach = cellAchieved(dateStr);
-            const filled = done || ach;
+            const softFill = ach && !done; // part of an achieved period, but not actually done this day
             const col = (monthGridOffset + i) % 7;
             return (
               <div key={dateStr} style={{ position: "relative" }}>
@@ -594,10 +702,11 @@ function SingleHabitMonthly({ habit, dayAction, logSet, onDelete, onEdit, setNot
                   style={{
                     ...S.monthDay,
                     position: "relative", zIndex: 1,
-                    ...(filled ? { background: c, borderColor: c, color: "#fff" } : {}),
+                    ...(done ? { background: c, borderColor: c, color: "#fff" } : {}),
+                    ...(softFill ? { background: soft, borderColor: c, color: c } : {}),
                     ...(isPerDayCount && hasCount && !done ? { borderColor: c, color: c } : {}),
-                    ...(future && !filled ? S.monthDayFuture : {}),
-                    ...(isToday && !filled ? { borderColor: c, borderWidth: 2 } : {}),
+                    ...(future && !done ? S.monthDayFuture : {}),
+                    ...(isToday && !done ? { borderColor: c, borderWidth: 2 } : {}),
                     width: "100%",
                   }}>
                   {day}
@@ -762,6 +871,13 @@ const S = {
   eyebrow: { fontSize: 11, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--text-3)", fontWeight: 600, marginBottom: 5, display: "flex", alignItems: "center" },
   h1: { fontSize: 27, fontWeight: 700, margin: 0, letterSpacing: "-0.02em", fontFamily: "'Fraunces',Georgia,serif" },
   actionBtn: { display: "flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 500, color: "var(--text-2)", border: "1px solid var(--border)", background: "var(--surface)", padding: "5px 10px", borderRadius: 7, cursor: "pointer", fontFamily: "inherit" },
+  progressCard: { background: "var(--surface)", borderRadius: 12, padding: "16px 18px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", marginBottom: 14, display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" },
+  progressDivider: { width: 1, alignSelf: "stretch", background: "var(--border)", minHeight: 48 },
+  ringStat: { display: "flex", alignItems: "center", gap: 12, flex: "1 1 160px" },
+  ringBox: { position: "relative", width: 70, height: 70, display: "grid", placeItems: "center", flexShrink: 0 },
+  ringPct: { position: "absolute", inset: 0, display: "grid", placeItems: "center", fontSize: 16, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif" },
+  ringLabel: { fontSize: 14, fontWeight: 700, color: "var(--text)" },
+  ringSub: { fontSize: 11.5, color: "var(--text-3)", fontWeight: 500, marginTop: 2 },
   weekCard: { background: "var(--surface)", borderRadius: 12, padding: "8px 14px 14px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", overflowX: "auto" },
   weekHeadRow: { display: "flex", alignItems: "flex-end", padding: "10px 0", borderBottom: "1px solid var(--border)", minWidth: 480 },
   weekNameCol: { width: 160, flexShrink: 0, display: "flex", alignItems: "center", gap: 8 },

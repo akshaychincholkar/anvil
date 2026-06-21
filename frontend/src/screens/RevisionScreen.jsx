@@ -15,7 +15,7 @@ const PILLAR_NAMES = Object.keys(PILLARS);
 const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
 const MONTHS_SHORT = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
-const todayISO = () => new Date().toISOString().slice(0, 10);
+const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 const monthLabel = (y, m) => `${MONTHS_SHORT[m-1]} ${y}`;
 
 const monthDates = (year, month) => {

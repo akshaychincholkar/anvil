@@ -303,6 +303,17 @@ def init_db():
             deleted_at TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE TABLE IF NOT EXISTS media_item (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            kind TEXT NOT NULL DEFAULT 'meditation',
+            title TEXT NOT NULL DEFAULT '',
+            image TEXT NOT NULL DEFAULT '',
+            youtube_id TEXT NOT NULL DEFAULT '',
+            deleted_at TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
         """)
 
         migrate_db()
