@@ -314,6 +314,35 @@ def init_db():
             deleted_at TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE TABLE IF NOT EXISTS screen_time (
+            user_id INTEGER NOT NULL DEFAULT 1,
+            screen TEXT NOT NULL,
+            date TEXT NOT NULL,
+            seconds INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (user_id, screen, date)
+        );
+
+        CREATE TABLE IF NOT EXISTS reward_payout (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            amount REAL NOT NULL DEFAULT 0,
+            note TEXT NOT NULL DEFAULT '',
+            pay_date TEXT NOT NULL,
+            deleted_at TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS reward_rate (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            kind TEXT NOT NULL,
+            rkey TEXT NOT NULL,
+            rate REAL NOT NULL DEFAULT 0,
+            eff_date TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, kind, rkey, eff_date)
+        );
         """)
 
         migrate_db()

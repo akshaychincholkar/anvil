@@ -1603,6 +1603,92 @@ def restore_golden(gid: int):
         return _golden_summary(conn, r) if r else {}
 
 
+# ── Rewards (screen-time tracking + payout ledger) ───────────────────────────
+
+class ScreenTimeAdd(BaseModel):
+    screen: str
+    seconds: int = 0
+
+@app.post("/api/screentime", status_code=204)
+def add_screentime(body: ScreenTimeAdd):
+    if not body.screen or body.seconds <= 0:
+        return
+    d = str(date.today())
+    with db() as conn:
+        conn.execute(
+            "INSERT INTO screen_time (user_id, screen, date, seconds) VALUES (?,?,?,?) "
+            "ON CONFLICT(user_id, screen, date) DO UPDATE SET seconds = seconds + excluded.seconds",
+            (cu(), body.screen, d, int(body.seconds))
+        )
+
+@app.get("/api/screentime")
+def get_screentime():
+    with db() as conn:
+        rows = conn.execute(
+            f"SELECT screen, date, seconds FROM screen_time WHERE user_id={cu()}"
+        ).fetchall()
+        return [{"screen": r["screen"], "date": r["date"], "seconds": r["seconds"]} for r in rows]
+
+# ── Reward rate history (date-effective; old time keeps old rate) ──
+class RateSet(BaseModel):
+    kind: str        # 'focus' | 'usage'
+    rkey: str        # pillar name or screen id
+    rate: float = 0
+
+@app.get("/api/rewards/rates")
+def get_reward_rates():
+    with db() as conn:
+        rows = conn.execute(
+            f"SELECT kind, rkey, rate, eff_date FROM reward_rate WHERE user_id={cu()} ORDER BY eff_date"
+        ).fetchall()
+        return [{"kind": r["kind"], "rkey": r["rkey"], "rate": r["rate"], "eff_date": r["eff_date"]} for r in rows]
+
+@app.post("/api/rewards/rates")
+def set_reward_rate(body: RateSet):
+    if body.kind not in ("focus", "usage"):
+        raise HTTPException(400, "kind must be focus or usage")
+    eff = str(date.today())
+    with db() as conn:
+        conn.execute(
+            "INSERT INTO reward_rate (user_id, kind, rkey, rate, eff_date) VALUES (?,?,?,?,?) "
+            "ON CONFLICT(user_id, kind, rkey, eff_date) DO UPDATE SET rate=excluded.rate",
+            (cu(), body.kind, body.rkey, max(0, body.rate), eff)
+        )
+        return {"ok": True}
+
+class PayoutCreate(BaseModel):
+    amount: float
+    note: str = ""
+    date: Optional[str] = None
+
+def _payout_row(r):
+    return {"id": r["id"], "amount": r["amount"], "note": r["note"], "date": r["pay_date"]}
+
+@app.get("/api/rewards/payouts")
+def get_payouts():
+    with db() as conn:
+        rows = conn.execute(
+            f"SELECT id, amount, note, pay_date FROM reward_payout WHERE user_id={cu()} AND deleted_at IS NULL ORDER BY pay_date DESC, id DESC"
+        ).fetchall()
+        return [_payout_row(r) for r in rows]
+
+@app.post("/api/rewards/payouts", status_code=201)
+def create_payout(body: PayoutCreate):
+    d = body.date or str(date.today())
+    with db() as conn:
+        cur = conn.execute(
+            f"INSERT INTO reward_payout (user_id, amount, note, pay_date) VALUES ({cu()}, ?, ?, ?)",
+            (abs(body.amount or 0), body.note or "", d)
+        )
+        r = conn.execute("SELECT id, amount, note, pay_date FROM reward_payout WHERE id=?", (cur.lastrowid,)).fetchone()
+        return _payout_row(r)
+
+@app.delete("/api/rewards/payouts/{pid}", status_code=204)
+def delete_payout(pid: int):
+    with db() as conn:
+        _soft_delete(conn, "reward_payout", pid)
+
+
 # ── Mindscape (audio-only media: Meditation Hub + Visualization) ─────────────
 
 class MediaCreate(BaseModel):

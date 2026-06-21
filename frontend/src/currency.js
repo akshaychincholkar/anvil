@@ -38,6 +38,13 @@ export function fmtMoney(amount, code) {
   return c.symbol + n.toLocaleString(c.locale);
 }
 
+// Like fmtMoney but keeps 2 decimals — for fine-grained values (rewards).
+export function fmtMoney2(amount, code) {
+  const c = getCurrency(code || getCurrencyCode());
+  const n = Number(amount) || 0;
+  return c.symbol + n.toLocaleString(c.locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 // Compact format for axis labels: ₹1.2L, ₹3.4Cr, $1.2K, $3.4M.
 export function fmtCompact(amount, code) {
   const c = getCurrency(code || getCurrencyCode());

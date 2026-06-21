@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   LayoutGrid, Target, CheckSquare, BookOpen,
   GraduationCap, Star, RotateCcw, Menu, X,
@@ -39,7 +39,7 @@ const SCREENS = {
   quadrant:     { label: "Quadrant",     icon: LayoutGrid,    component: QuadrantView },
   goals:        { label: "Goals",        icon: Target,        component: GoalsWithGantt },
   grove:        { label: "Grove",        icon: Trees,         component: GroveScreen },
-  worth:        { label: "Worth",        icon: IndianRupee,   component: WorthScreen },
+  worth:        { label: "Rewards",      icon: IndianRupee,   component: WorthScreen },
   vault:        { label: "Vault",        icon: Landmark,      component: FinanceScreen },
   journal:      { label: "Journal",      icon: BookOpen,      component: JournalScreen },
   revision:     { label: "Revision",     icon: RotateCcw,     component: RevisionScreen },
@@ -91,6 +91,23 @@ export default function App() {
   const [order, setOrder] = useState(() => normalizeOrder(DEFAULT_ORDER));
   const [hidden, setHidden] = useState([]);
   const isMobile = useIsMobile();
+
+  // Track time spent per screen (for the Worth rewards system): a steady
+  // heartbeat credits the active screen while the tab is visible.
+  const activeRef = useRef(active);
+  useEffect(() => { activeRef.current = active; }, [active]);
+  useEffect(() => {
+    if (!user) return;
+    const TICK = 10; // finer-grained time accrual
+    // Kickstart & Mindscape are credited by actual playback time (inside those
+    // screens), not by screen-open time.
+    const PLAYBACK_TRACKED = new Set(["kickstart", "mindscape"]);
+    const id = setInterval(() => {
+      const s = activeRef.current;
+      if (!document.hidden && s && !PLAYBACK_TRACKED.has(s)) api.addScreenTime(s, TICK).catch(() => {});
+    }, TICK * 1000);
+    return () => clearInterval(id);
+  }, [user]);
 
   // Validate any stored token on load; listen for 401s from the API layer.
   useEffect(() => {

@@ -48,6 +48,15 @@ export const api = {
   createFocus: (data) => req("POST", "/focus", data),
   deleteFocus: (id) => req("DELETE", `/focus/${id}`),
 
+  // Rewards (screen time + payouts)
+  addScreenTime: (screen, seconds) => req("POST", "/screentime", { screen, seconds }),
+  getScreenTime: () => req("GET", "/screentime"),
+  getPayouts: () => req("GET", "/rewards/payouts"),
+  createPayout: (data) => req("POST", "/rewards/payouts", data),
+  deletePayout: (id) => req("DELETE", `/rewards/payouts/${id}`),
+  getRewardRates: () => req("GET", "/rewards/rates"),
+  setRewardRate: (data) => req("POST", "/rewards/rates", data),
+
   // Mindscape (audio-only media)
   getMedia: () => req("GET", "/media"),
   createMedia: (data) => req("POST", "/media", data),

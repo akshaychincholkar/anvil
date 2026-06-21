@@ -55,6 +55,16 @@ export default function MindscapeScreen() {
 
   const { deleteItem, toasts, handleUndo, handleDismiss } = useUndoableDelete(api.deleteMedia, api.restoreMedia, load);
 
+  // Reward credit = actual audio playback time, not screen-open time.
+  useEffect(() => {
+    if (!playing) return;
+    const TICK = 10;
+    const id = setInterval(() => {
+      if (!document.hidden) api.addScreenTime("mindscape", TICK).catch(() => {});
+    }, TICK * 1000);
+    return () => clearInterval(id);
+  }, [playing]);
+
   const tabMeta = TABS.find((t) => t.id === tab);
   const list = items.filter((m) => m.kind === tab);
   const openEdit = (m) => setForm({ id: m.id, kind: m.kind, title: m.title, url: `https://youtu.be/${m.youtube_id}`, image: m.image });

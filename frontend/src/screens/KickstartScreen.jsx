@@ -60,6 +60,25 @@ export default function KickstartScreen() {
 
   const { deleteItem, toasts, handleUndo, handleDismiss } = useUndoableDelete(api.deleteKickstart, api.restoreKickstart, load);
 
+  // Reward credit = actual playback time (capped at the clip's trimmed length).
+  useEffect(() => {
+    if (!playing) return;
+    const v = videos.find((x) => x.id === playing);
+    if (!v) return;
+    const clipLen = v.end_sec ? Math.max(1, v.end_sec - (v.start_sec || 0)) : Infinity;
+    let acc = 0;
+    const TICK = 10;
+    const id = setInterval(() => {
+      if (document.hidden) return;
+      const remaining = clipLen - acc;
+      if (remaining <= 0) { clearInterval(id); return; }
+      const add = Math.min(TICK, remaining);
+      acc += add;
+      api.addScreenTime("kickstart", Math.round(add)).catch(() => {});
+    }, TICK * 1000);
+    return () => clearInterval(id);
+  }, [playing, videos]);
+
   const saveCustomTags = (arr) => { setCustomTags(arr); api.setSetting(CUSTOM_KEY, arr).catch(() => {}); };
   const addCustomTag = () => {
     const name = newTag.trim();
