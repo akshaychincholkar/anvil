@@ -829,20 +829,24 @@ class SkillCreate(BaseModel):
 class SkillNoteCreate(BaseModel):
     text: str
     stage: str
+    grp: Optional[str] = None  # Data-stage group id (chapter / learning); None otherwise
+
+class SkillGroupsSet(BaseModel):
+    groups: list  # ordered list of {id, label} for the Data stage
 
 class StageComplete(BaseModel):
     stage: str
 
 def _skill_full(conn, skill_id: int) -> dict:
     row = conn.execute(f"""
-        SELECT s.id, p.name AS pillar, s.title, s.source_type, s.stage, s.completed_stages
+        SELECT s.id, p.name AS pillar, s.title, s.source_type, s.stage, s.completed_stages, s.data_groups
         FROM skill s JOIN pillar p ON s.pillar_id=p.id
         WHERE s.id=? AND s.user_id={cu()} AND s.deleted_at IS NULL
     """, (skill_id,)).fetchone()
     if not row:
         raise HTTPException(404, "Skill not found")
     notes_raw = conn.execute(
-        "SELECT id, stage, text, done, created_at FROM skill_note WHERE skill_id=? ORDER BY stage, id",
+        "SELECT id, stage, text, done, grp, created_at FROM skill_note WHERE skill_id=? ORDER BY stage, id",
         (skill_id,)
     ).fetchall()
     d = row_dict(row)
@@ -850,9 +854,13 @@ def _skill_full(conn, skill_id: int) -> dict:
         d["completed_stages"] = json.loads(d["completed_stages"] or "{}")
     except Exception:
         d["completed_stages"] = {}
+    try:
+        d["data_groups"] = json.loads(d["data_groups"] or "[]")
+    except Exception:
+        d["data_groups"] = []
     notes_by_stage = {s: [] for s in STAGE_ORDER}
     for n in notes_raw:
-        notes_by_stage[n["stage"]].append({"id": n["id"], "text": n["text"], "done": bool(n["done"])})
+        notes_by_stage[n["stage"]].append({"id": n["id"], "text": n["text"], "done": bool(n["done"]), "grp": n["grp"]})
     d["notes"] = notes_by_stage
     return d
 
@@ -900,9 +908,29 @@ def restore_skill(skill_id: int):
 def add_skill_note(skill_id: int, body: SkillNoteCreate):
     with db() as conn:
         conn.execute(
-            "INSERT INTO skill_note (skill_id, stage, text) VALUES (?,?,?)",
-            (skill_id, body.stage, body.text)
+            "INSERT INTO skill_note (skill_id, stage, text, grp) VALUES (?,?,?,?)",
+            (skill_id, body.stage, body.text, body.grp)
         )
+        return _skill_full(conn, skill_id)
+
+@app.put("/api/skills/{skill_id}/groups")
+def set_skill_groups(skill_id: int, body: SkillGroupsSet):
+    """Replace the Data-stage groups (chapters/learnings). Notes whose group was
+    removed are deleted so no orphaned points linger."""
+    with db() as conn:
+        owned = conn.execute(
+            f"SELECT id FROM skill WHERE id=? AND user_id={cu()} AND deleted_at IS NULL", (skill_id,)
+        ).fetchone()
+        if not owned:
+            raise HTTPException(404, "Skill not found")
+        groups = [{"id": str(g.get("id")), "label": (g.get("label") or "").strip()} for g in body.groups if g.get("id")]
+        keep_ids = {g["id"] for g in groups}
+        conn.execute(f"UPDATE skill SET data_groups=? WHERE id=? AND user_id={cu()}", (json.dumps(groups), skill_id))
+        # Drop Data-stage points belonging to removed groups.
+        rows = conn.execute("SELECT id, grp FROM skill_note WHERE skill_id=? AND stage='D' AND grp IS NOT NULL", (skill_id,)).fetchall()
+        for r in rows:
+            if r["grp"] not in keep_ids:
+                conn.execute("DELETE FROM skill_note WHERE id=?", (r["id"],))
         return _skill_full(conn, skill_id)
 
 @app.delete("/api/skill-notes/{note_id}", status_code=204)
@@ -1690,6 +1718,96 @@ def create_payout(body: PayoutCreate):
 def delete_payout(pid: int):
     with db() as conn:
         _soft_delete(conn, "reward_payout", pid)
+
+
+# ── Achievements (timeline of wins) ─────────────────────────────────────────
+
+class AchievementCreate(BaseModel):
+    title: str
+    note: str = ""
+    date: str                       # mandatory YYYY-MM-DD — anchors the timeline
+    image: Optional[str] = None     # optional base64 data URL
+    reward: float = 0               # optional manual appreciation reward
+    pillar: Optional[str] = None    # optional pillar (for colour)
+
+class AchievementUpdate(BaseModel):
+    title: Optional[str] = None
+    note: Optional[str] = None
+    date: Optional[str] = None
+    image: Optional[str] = None
+    reward: Optional[float] = None
+    pillar: Optional[str] = None
+
+_ACH_COLS = "id, title, note, ach_date, image, reward, pillar_id"
+
+def _achievement_row(conn, r):
+    pillar = None
+    if r["pillar_id"]:
+        p = conn.execute("SELECT name FROM pillar WHERE id=?", (r["pillar_id"],)).fetchone()
+        pillar = p["name"] if p else None
+    return {"id": r["id"], "title": r["title"], "note": r["note"], "date": r["ach_date"],
+            "image": r["image"], "reward": r["reward"], "pillar": pillar}
+
+@app.get("/api/achievements")
+def get_achievements():
+    with db() as conn:
+        rows = conn.execute(
+            f"SELECT {_ACH_COLS} FROM achievement WHERE user_id={cu()} AND deleted_at IS NULL "
+            "ORDER BY ach_date DESC, id DESC"
+        ).fetchall()
+        return [_achievement_row(conn, r) for r in rows]
+
+@app.post("/api/achievements", status_code=201)
+def create_achievement(body: AchievementCreate):
+    if not (body.title or "").strip():
+        raise HTTPException(400, "title required")
+    if not (body.date or "").strip():
+        raise HTTPException(400, "date required")
+    with db() as conn:
+        pid = pillar_id(conn, body.pillar) if body.pillar else None
+        cur = conn.execute(
+            f"INSERT INTO achievement (user_id, title, note, ach_date, image, reward, pillar_id) "
+            f"VALUES ({cu()}, ?, ?, ?, ?, ?, ?)",
+            (body.title.strip(), body.note or "", body.date.strip(), body.image, max(0, body.reward or 0), pid)
+        )
+        r = conn.execute(f"SELECT {_ACH_COLS} FROM achievement WHERE id=?", (cur.lastrowid,)).fetchone()
+        return _achievement_row(conn, r)
+
+@app.put("/api/achievements/{aid}")
+def update_achievement(aid: int, body: AchievementUpdate):
+    with db() as conn:
+        owned = conn.execute(
+            f"SELECT id FROM achievement WHERE id=? AND user_id={cu()} AND deleted_at IS NULL", (aid,)
+        ).fetchone()
+        if not owned:
+            raise HTTPException(404, "Achievement not found")
+        if body.title is not None and body.title.strip():
+            conn.execute("UPDATE achievement SET title=? WHERE id=?", (body.title.strip(), aid))
+        if body.note is not None:
+            conn.execute("UPDATE achievement SET note=? WHERE id=?", (body.note, aid))
+        if body.date is not None and body.date.strip():
+            conn.execute("UPDATE achievement SET ach_date=? WHERE id=?", (body.date.strip(), aid))
+        if body.image is not None:
+            conn.execute("UPDATE achievement SET image=? WHERE id=?", (body.image, aid))
+        if body.reward is not None:
+            conn.execute("UPDATE achievement SET reward=? WHERE id=?", (max(0, body.reward), aid))
+        if body.pillar is not None:
+            pid = pillar_id(conn, body.pillar) if body.pillar else None
+            conn.execute("UPDATE achievement SET pillar_id=? WHERE id=?", (pid, aid))
+        r = conn.execute(f"SELECT {_ACH_COLS} FROM achievement WHERE id=?", (aid,)).fetchone()
+        return _achievement_row(conn, r)
+
+@app.delete("/api/achievements/{aid}", status_code=204)
+def delete_achievement(aid: int):
+    with db() as conn:
+        _soft_delete(conn, "achievement", aid)
+
+@app.post("/api/achievements/{aid}/restore")
+def restore_achievement(aid: int):
+    with db() as conn:
+        _restore(conn, "achievement", aid)
+        r = conn.execute(f"SELECT {_ACH_COLS} FROM achievement WHERE id=?", (aid,)).fetchone()
+        return _achievement_row(conn, r)
 
 
 # ── Mindscape (audio-only media: Meditation Hub + Visualization) ─────────────

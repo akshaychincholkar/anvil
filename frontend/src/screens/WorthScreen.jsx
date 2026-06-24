@@ -18,9 +18,13 @@ const SCREEN_LIST = [
   { id: "spiritual", label: "Spiritual" }, { id: "mindscape", label: "Mindscape" },
   { id: "vault", label: "Vault" },
 ];
+// Screens that never earn a usage reward (Rewards itself + Achievements, which
+// has its own dedicated reward type set from the Achievements section).
+const USAGE_EXCLUDE = new Set(["worth", "achievements"]);
 
 const FOCUS_COLOR = "#C9A227";
 const USAGE_COLOR = "#3A7CA5";
+const ACH_COLOR = "#C2536B";
 
 const fmtH = (min) => { const h = Math.floor(min / 60), m = Math.round(min % 60); return h && m ? `${h}h ${m}m` : h ? `${h}h` : `${m}m`; };
 const fmtDur = (mins) => {
@@ -72,6 +76,7 @@ export default function WorthScreen() {
   const [screenRows, setScreenRows] = useState([]);
   const [history, setHistory] = useState([]);
   const [payouts, setPayouts] = useState([]);
+  const [achievements, setAchievements] = useState([]);
   const [legacyFocus, setLegacyFocus] = useState({});
   const [legacyUsage, setLegacyUsage] = useState({});
   const [loaded, setLoaded] = useState(false);
@@ -92,14 +97,16 @@ export default function WorthScreen() {
   useEffect(() => {
     (async () => {
       try {
-        const [s, st, hist, py, lf, lu] = await Promise.all([
+        const [s, st, hist, py, ach, lf, lu] = await Promise.all([
           api.getFocus(), api.getScreenTime(), api.getRewardRates(), api.getPayouts(),
+          api.getAchievements(),
           api.getSetting(FOCUS_KEY), api.getSetting(USAGE_KEY),
         ]);
         setSessions(s.sessions || []);
         setScreenRows(Array.isArray(st) ? st : []);
         setHistory(hist || []);
         setPayouts(py || []);
+        setAchievements(Array.isArray(ach) ? ach : []);
         setLegacyFocus(lf?.value || {});
         setLegacyUsage(lu?.value || {});
       } catch { /* offline */ }
@@ -133,8 +140,10 @@ export default function WorthScreen() {
     const p = TREES[s.tree] ? s.tree : DEFAULT_TREE;
     allFocus += ((s.actual_min || 0) / 60) * rateOn("focus", p, day);
   });
-  screenRows.forEach((r) => { if (r.screen !== "worth") allUsage += (r.seconds / 60) * rateOn("usage", r.screen, r.date); });
-  const totalEarned = allFocus + allUsage;
+  screenRows.forEach((r) => { if (!USAGE_EXCLUDE.has(r.screen)) allUsage += (r.seconds / 60) * rateOn("usage", r.screen, r.date); });
+  // Achievement rewards: manual appreciation amounts set in the Achievements section.
+  const allAch = achievements.reduce((n, a) => n + (a.reward || 0), 0);
+  const totalEarned = allFocus + allUsage + allAch;
   const totalTaken = payouts.reduce((n, p) => n + p.amount, 0);
   const pending = Math.max(0, totalEarned - totalTaken);
 
@@ -154,7 +163,7 @@ export default function WorthScreen() {
   // ── Usage rewards for the selected period ──
   const usageByScreen = {};
   screenRows.forEach((r) => {
-    if (r.screen === "worth") return; // exclude Rewards screen itself
+    if (USAGE_EXCLUDE.has(r.screen)) return; // Rewards + Achievements never earn usage
     if (r.date < lo || r.date > hi) return;
     const u = (usageByScreen[r.screen] ||= { seconds: 0, earned: 0 });
     u.seconds += r.seconds;
@@ -162,16 +171,15 @@ export default function WorthScreen() {
   });
   const totalUsage = Object.values(usageByScreen).reduce((n, u) => n + u.earned, 0);
 
-  const periodEarned = totalFocus + totalUsage;
+  // ── Achievement rewards for the selected period (by achievement date) ──
+  const achInPeriod = achievements.filter((a) => a.date >= lo && a.date <= hi && (a.reward || 0) > 0);
+  const achRows = [...achInPeriod].sort((a, b) => (b.date.localeCompare(a.date)) || (b.reward - a.reward));
+  const totalAch = achInPeriod.reduce((n, a) => n + (a.reward || 0), 0);
+
+  const periodEarned = totalFocus + totalUsage + totalAch;
   const focusPct = periodEarned > 0 ? (totalFocus / periodEarned) * 100 : 0;
   const usagePct = periodEarned > 0 ? (totalUsage / periodEarned) * 100 : 0;
-
-  // Minutes spent (period) for the pie chart.
-  const focusMinutes = PILLARS.reduce((n, p) => n + focusByPillar[p].minutes, 0);
-  const usageMinutes = Object.values(usageByScreen).reduce((n, u) => n + u.seconds / 60, 0);
-  const totalMinutes = focusMinutes + usageMinutes;
-  const fMinPct = totalMinutes > 0 ? (focusMinutes / totalMinutes) * 100 : 0;
-  const uMinPct = totalMinutes > 0 ? (usageMinutes / totalMinutes) * 100 : 0;
+  const achPct = periodEarned > 0 ? (totalAch / periodEarned) * 100 : 0;
 
   const focusRows = PILLARS.map((p) => ({ p, ...focusByPillar[p], ...TREES[p] })).filter((r) => r.minutes > 0).sort((a, b) => b.earned - a.earned);
   const usageRows = SCREEN_LIST.map((s) => ({ ...s, ...(usageByScreen[s.id] || { seconds: 0, earned: 0 }) })).filter((r) => r.seconds > 0).sort((a, b) => b.earned - a.earned);
@@ -190,7 +198,8 @@ export default function WorthScreen() {
     if (amt <= 0 || !takeNote.trim()) return; // reason is mandatory
     await api.createPayout({ amount: amt, note: takeNote.trim(), date: nowLocal() });
     setTakeMode(null); setTakeAmt(""); setTakeNote("");
-    loadPayouts();
+    await loadPayouts();
+    setShowLog(true); // reveal the log so the new entry is visible
   };
   const removePayout = async (id) => { await api.deletePayout(id); loadPayouts(); };
 
@@ -209,7 +218,7 @@ export default function WorthScreen() {
         </button>
         <div style={S.heroLabel}>Final reward · pending</div>
         <div style={S.heroVal}>{reward(pending)}</div>
-        <div style={S.heroSub}>Earned {reward(totalEarned)} · Taken {reward(totalTaken)}</div>
+        <div style={S.heroSub}>Earned {reward(totalEarned)} · Taken {reward(totalTaken)}{allAch > 0 ? ` · incl. ${reward(allAch)} achievement` : ""}</div>
 
         <div style={S.heroBtns}>
           <button onClick={() => openTake("partial")} disabled={pending <= 0} style={{ ...S.heroBtnGhost, ...(pending <= 0 ? S.btnDisabled : {}) }}>Take partial</button>
@@ -241,10 +250,12 @@ export default function WorthScreen() {
           <div style={S.splitTrack}>
             <div style={{ width: `${focusPct}%`, background: FOCUS_COLOR, height: "100%" }} />
             <div style={{ width: `${usagePct}%`, background: USAGE_COLOR, height: "100%" }} />
+            <div style={{ width: `${achPct}%`, background: ACH_COLOR, height: "100%" }} />
           </div>
           <div style={S.legendRow}>
             <span style={S.legendItem}><span style={{ ...S.legendDot, background: FOCUS_COLOR }} /> Focus {Math.round(focusPct)}% · {reward(totalFocus)}</span>
             <span style={S.legendItem}><span style={{ ...S.legendDot, background: USAGE_COLOR }} /> Usage {Math.round(usagePct)}% · {reward(totalUsage)}</span>
+            <span style={S.legendItem}><span style={{ ...S.legendDot, background: ACH_COLOR }} /> Achievement {Math.round(achPct)}% · {reward(totalAch)}</span>
           </div>
         </div>
       ) : (
@@ -325,39 +336,63 @@ export default function WorthScreen() {
         ) : <div style={S.muted}>{loaded ? "No usage tracked yet." : "Loading…"}</div>}
       </div>
 
-      {/* Reward log (toggled via the icon on the hero) */}
-      {showLog && (
-        <div style={S.card}>
-          <div style={S.cardTitleRow}>
-            <span style={S.cardTitle}>Reward log</span>
-            <button onClick={() => setShowLog(false)} style={S.logClose} title="Close"><X size={15} /></button>
+      {/* Achievement Rewards */}
+      <div style={S.card}>
+        <div style={S.cardTitleRow}>
+          <span style={{ ...S.cardTitle, color: ACH_COLOR }}>Achievement Rewards · {reward(totalAch)}</span>
+          <span style={S.collapseHint}>Set in Achievements</span>
+        </div>
+        {achRows.length > 0 ? (
+          <div style={{ ...S.rows, marginTop: 14 }}>
+            {achRows.map((a) => (
+              <div key={a.id} style={S.row}>
+                <span style={{ ...S.dot, background: ACH_COLOR }} />
+                <span style={S.rowName}>{a.title}</span>
+                <span style={S.rowMeta}>{prettyWhen(a.date)}</span>
+                <span style={S.rowAmt}>{reward(a.reward)}</span>
+              </div>
+            ))}
           </div>
-          {payouts.length === 0 ? <div style={S.muted}>No rewards taken yet.</div> : (
-            <div style={S.rows}>
-              {payouts.map((p) => (
-                <div key={p.id} style={S.row}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={S.logNote}>{p.note || "Reward taken"}</div>
-                    <div style={S.rowMeta}>{prettyWhen(p.date)}</div>
-                  </div>
-                  <span style={S.rowAmt}>{reward(p.amount)}</span>
-                  <button onClick={() => removePayout(p.id)} style={S.del}>×</button>
-                </div>
-              ))}
-              <div style={S.totalRow}><span>Total taken</span><span style={S.totalVal}>{reward(totalTaken)}</span></div>
+        ) : <div style={{ ...S.muted, marginTop: 10 }}>No achievement rewards in {PERIODS.find((p) => p.id === period).label.toLowerCase()}. Add a reward to a win in the Achievements section.</div>}
+      </div>
+
+      {/* Reward log popup (opened via the icon on the hero) */}
+      {showLog && (
+        <div style={S.modalOverlay} onClick={() => setShowLog(false)}>
+          <div style={S.logModal} onClick={(e) => e.stopPropagation()}>
+            <div style={S.logModalHead}>
+              <span style={S.modalTitle}>Reward log</span>
+              <button onClick={() => setShowLog(false)} style={S.logClose} title="Close"><X size={16} /></button>
             </div>
-          )}
+            {payouts.length === 0 ? <div style={{ ...S.muted, padding: "24px 0", textAlign: "center" }}>No rewards taken yet.</div> : (
+              <>
+                <div style={S.logScroll}>
+                  {payouts.map((p) => (
+                    <div key={p.id} style={S.row}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={S.logNote}>{p.note || "Reward taken"}</div>
+                        <div style={S.rowMeta}>{prettyWhen(p.date)}</div>
+                      </div>
+                      <span style={S.rowAmt}>{reward(p.amount)}</span>
+                      <button onClick={() => removePayout(p.id)} style={S.del}>×</button>
+                    </div>
+                  ))}
+                </div>
+                <div style={S.totalRow}><span>Total taken</span><span style={S.totalVal}>{reward(totalTaken)}</span></div>
+              </>
+            )}
+          </div>
         </div>
       )}
 
-      {totalMinutes > 0 && (
+      {periodEarned > 0 && (
         <div style={S.card}>
-          <div style={S.cardTitle}>Focus vs Usage</div>
+          <div style={S.cardTitle}>Reward breakdown</div>
           <div style={S.pieWrap}>
             <div style={S.pieChart}>
-              <div style={{ ...S.pieDisc, background: `conic-gradient(${FOCUS_COLOR} 0 ${fMinPct}%, ${USAGE_COLOR} ${fMinPct}% 100%)` }} />
+              <div style={{ ...S.pieDisc, background: `conic-gradient(${FOCUS_COLOR} 0 ${focusPct}%, ${USAGE_COLOR} ${focusPct}% ${focusPct + usagePct}%, ${ACH_COLOR} ${focusPct + usagePct}% 100%)` }} />
               <div style={S.pieHole}>
-                <span style={S.pieHoleVal}>{fmtH(Math.round(totalMinutes))}</span>
+                <span style={S.pieHoleVal}>{reward(periodEarned)}</span>
                 <span style={S.pieHoleLbl}>total</span>
               </div>
             </div>
@@ -365,14 +400,20 @@ export default function WorthScreen() {
               <div style={S.pieLegRow}>
                 <span style={{ ...S.legendDot, background: FOCUS_COLOR }} />
                 <span style={S.pieLegName}>Focus</span>
-                <span style={S.pieLegPct}>{Math.round(fMinPct)}%</span>
-                <span style={S.pieLegMin}>{fmtH(Math.round(focusMinutes))}</span>
+                <span style={S.pieLegPct}>{Math.round(focusPct)}%</span>
+                <span style={S.pieLegMin}>{reward(totalFocus)}</span>
               </div>
               <div style={S.pieLegRow}>
                 <span style={{ ...S.legendDot, background: USAGE_COLOR }} />
                 <span style={S.pieLegName}>Usage</span>
-                <span style={S.pieLegPct}>{Math.round(uMinPct)}%</span>
-                <span style={S.pieLegMin}>{fmtH(Math.round(usageMinutes))}</span>
+                <span style={S.pieLegPct}>{Math.round(usagePct)}%</span>
+                <span style={S.pieLegMin}>{reward(totalUsage)}</span>
+              </div>
+              <div style={S.pieLegRow}>
+                <span style={{ ...S.legendDot, background: ACH_COLOR }} />
+                <span style={S.pieLegName}>Achievement</span>
+                <span style={S.pieLegPct}>{Math.round(achPct)}%</span>
+                <span style={S.pieLegMin}>{reward(totalAch)}</span>
               </div>
             </div>
           </div>
@@ -427,6 +468,9 @@ const S = {
   logNote: { fontSize: 13.5, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
   modalOverlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 200, display: "grid", placeItems: "center", padding: 16 },
   modalCard: { background: "var(--surface)", color: "var(--text)", borderRadius: 16, padding: "22px 22px 18px", width: 360, maxWidth: "100%", boxShadow: "0 12px 48px rgba(0,0,0,0.3)", border: "1px solid var(--border)" },
+  logModal: { background: "var(--surface)", color: "var(--text)", borderRadius: 16, padding: "18px 18px 14px", width: 440, maxWidth: "100%", maxHeight: "82vh", display: "flex", flexDirection: "column", boxShadow: "0 12px 48px rgba(0,0,0,0.3)", border: "1px solid var(--border)", boxSizing: "border-box" },
+  logModalHead: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexShrink: 0 },
+  logScroll: { overflowY: "auto", display: "flex", flexDirection: "column", gap: 2, paddingRight: 2, minHeight: 0 },
   modalTitle: { fontSize: 18, fontWeight: 700, fontFamily: "'Fraunces',Georgia,serif", marginBottom: 4 },
   modalSub: { fontSize: 12.5, color: "var(--text-3)", fontWeight: 600, marginBottom: 14 },
   modalInputWrap: { display: "flex", alignItems: "center", gap: 4, border: "1px solid var(--border)", borderRadius: 10, padding: "8px 12px", background: "var(--surface-2)", marginBottom: 8 },

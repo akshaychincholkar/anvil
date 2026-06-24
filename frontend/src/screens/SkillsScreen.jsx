@@ -1,6 +1,18 @@
 import { useState, useEffect, useCallback } from "react";
-import { BookOpen, Youtube, FileText, Plus, X, Check, Trophy, ArrowRight, Sparkles, Lock, Pencil } from "lucide-react";
+import { BookOpen, Youtube, FileText, Plus, X, Check, Trophy, ArrowRight, Sparkles, Lock, Pencil, ChevronLeft, ChevronDown, ChevronRight, Lightbulb } from "lucide-react";
 import { api } from "../api.js";
+import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
+import UndoToast from "../components/UndoToast.jsx";
+
+function useIsMobile(bp = 760) {
+  const [m, setM] = useState(() => window.innerWidth < bp);
+  useEffect(() => {
+    const h = () => setM(window.innerWidth < bp);
+    window.addEventListener("resize", h);
+    return () => window.removeEventListener("resize", h);
+  }, [bp]);
+  return m;
+}
 
 const STAGES = [
   { id: "D", label: "Data",        color: "#3A7CA5", soft: "rgba(58,124,165,0.10)",  prompt: "What did you read/watch? Log the raw source and a quick note.",         hint: "e.g. 'Atomic Habits ch.1 — habits are systems not goals'" },
@@ -29,6 +41,10 @@ export default function SkillsScreen() {
   const [noteDrafts, setNoteDrafts] = useState({});
   const [editingNote, setEditingNote] = useState(null); // { id, text }
   const [editingTitle, setEditingTitle] = useState(null); // draft string or null
+  const [groupPointDraft, setGroupPointDraft] = useState({}); // { [groupId]: text } — Data-stage points
+  const [openGroups, setOpenGroups] = useState({}); // { [groupId]: bool } — collapse state
+  const [editingGroup, setEditingGroup] = useState(null); // { id, label } — chapter/learning rename
+  const isMobile = useIsMobile();
 
   const load = useCallback(async () => {
     try {
@@ -61,6 +77,38 @@ export default function SkillsScreen() {
 
   const deleteNote = async (noteId) => {
     await api.deleteSkillNote(noteId);
+    load();
+  };
+
+  // ── Data-stage groups: chapters (books) / learnings (video, article) ──
+  const groupNoun = (sk) => (sk?.source_type === "book" ? "Chapter" : "Learning");
+  const newGroupId = () => `g${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+
+  const addGroup = async (sk) => {
+    const groups = [...(sk.data_groups || [])];
+    groups.push({ id: newGroupId(), label: `${groupNoun(sk)} ${groups.length + 1}` });
+    await api.setSkillGroups(sk.id, groups);
+    setOpenGroups((o) => ({ ...o, [groups[groups.length - 1].id]: true }));
+    load();
+  };
+
+  const renameGroup = async (sk, gid, label) => {
+    const groups = (sk.data_groups || []).map((g) => (g.id === gid ? { ...g, label } : g));
+    await api.setSkillGroups(sk.id, groups);
+    load();
+  };
+
+  const deleteGroup = async (sk, gid) => {
+    const groups = (sk.data_groups || []).filter((g) => g.id !== gid);
+    await api.setSkillGroups(sk.id, groups); // backend also drops that group's points
+    load();
+  };
+
+  const addGroupPoint = async (sk, gid) => {
+    const text = (groupPointDraft[gid] ?? "").trim();
+    if (!text) return;
+    await api.addSkillNote(sk.id, "D", text, gid);
+    setGroupPointDraft((d) => ({ ...d, [gid]: "" }));
     load();
   };
 
@@ -106,10 +154,12 @@ export default function SkillsScreen() {
     load();
   };
 
-  const deleteSkill = async (id) => {
-    await api.deleteSkill(id);
+  const { deleteItem: softDeleteSkill, toasts, handleUndo, handleDismiss } = useUndoableDelete(
+    api.deleteSkill, api.restoreSkill, load
+  );
+  const deleteSkill = (id, title = "Skill") => {
     if (selected === id) setSelected(null);
-    load();
+    softDeleteSkill(id, title);
   };
 
   const filtered = filter === "ALL" ? skills : skills.filter((s) => s.stage === filter);
@@ -154,10 +204,11 @@ export default function SkillsScreen() {
         })}
       </div>
 
-      <div style={{ ...S.layout, gridTemplateColumns: hasDetail ? "1fr 1fr" : "1fr" }}>
-        <div style={S.cardList}>
+      <div style={{ ...S.layout, gridTemplateColumns: (!isMobile && hasDetail) ? "minmax(0,1fr) minmax(0,1fr)" : "1fr" }}>
+        {(!isMobile || !skill) && (
+        <div style={{ ...S.cardList, gridTemplateColumns: isMobile ? "1fr" : (hasDetail ? "1fr" : "repeat(3, minmax(0, 1fr))") }}>
           {adding && (
-            <div style={{ ...S.skillCard, border: "2px dashed #3A7CA5" }}>
+            <div style={{ ...S.skillCard, border: "2px dashed #3A7CA5", gridColumn: "1 / -1" }}>
               <div style={S.cardTitle}>New skill</div>
               <input placeholder="Title (book / video / article name)" value={newSkill.title}
                 onChange={(e) => setNewSkill((n) => ({ ...n, title: e.target.value }))}
@@ -171,9 +222,6 @@ export default function SkillsScreen() {
                   {Object.keys(PILLARS).map((p) => <option key={p}>{p}</option>)}
                 </select>
               </div>
-              <input placeholder="First note (what did you read/watch?)" value={newSkill.note}
-                onChange={(e) => setNewSkill((n) => ({ ...n, note: e.target.value }))}
-                style={S.input} />
               <div style={S.addRow}>
                 <button onClick={createSkill} style={S.saveBtn}><Check size={14} /> Save</button>
                 <button onClick={() => setAdding(false)} style={S.cancelBtn}><X size={14} /> Cancel</button>
@@ -184,7 +232,7 @@ export default function SkillsScreen() {
           {filtered.map((sk) => {
             const si = stageIndex(sk.stage);
             const stage = STAGES[si];
-            const Src = srcInfo(sk.type);
+            const Src = srcInfo(sk.source_type);
             const isWisdom = sk.stage === "W";
             const isSel = selected === sk.id;
             return (
@@ -198,7 +246,7 @@ export default function SkillsScreen() {
                   </div>
                   <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
                     {isWisdom && <Sparkles size={14} color="#4C9A6B" />}
-                    <button onClick={(e) => { e.stopPropagation(); deleteSkill(sk.id); }} style={S.ghostBtn}><X size={13} /></button>
+                    <button onClick={(e) => { e.stopPropagation(); deleteSkill(sk.id, sk.title); }} style={S.ghostBtn}><X size={13} /></button>
                   </div>
                 </div>
                 <div style={S.skillTitle}>{sk.title}</div>
@@ -208,7 +256,7 @@ export default function SkillsScreen() {
                     const current = i === si;
                     const stageDone = sk.completed_stages?.[st.id];
                     return (
-                      <div key={st.id} style={S.trackItem}>
+                      <div key={st.id} style={{ ...S.trackItem, ...(i < STAGES.length - 1 ? { flex: 1 } : {}) }}>
                         <div style={{ ...S.trackDot, background: (done || stageDone) ? st.color : (current ? st.color : "var(--border)"), boxShadow: current ? `0 0 0 3px ${st.color}33` : "none" }}>
                           {(done || (current && stageDone)) && <Check size={9} color="#fff" strokeWidth={3} />}
                           {current && !stageDone && <span style={S.trackCurrent}>{st.id}</span>}
@@ -225,15 +273,19 @@ export default function SkillsScreen() {
           })}
 
           {filtered.length === 0 && !adding && (
-            <div style={S.empty}>No skills at this stage yet.</div>
+            <div style={{ ...S.empty, gridColumn: "1 / -1" }}>No skills at this stage yet.</div>
           )}
         </div>
+        )}
 
         {skill && (
           <div style={S.detail}>
             <div style={S.detailHead}>
+              {isMobile && (
+                <button onClick={() => { setSelected(null); setEditingTitle(null); }} style={S.backBtn} title="Back to skills"><ChevronLeft size={18} /></button>
+              )}
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={S.eyebrow}>{srcInfo(skill.type).label} · {skill.pillar}</div>
+                <div style={S.eyebrow}>{srcInfo(skill.source_type).label} · {skill.pillar}</div>
                 {editingTitle !== null ? (
                   <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 4 }}>
                     <input
@@ -278,63 +330,143 @@ export default function SkillsScreen() {
 
                   {unlocked && (() => {
                     const isWisdom = st.id === "W";
+                    const isData = st.id === "D";
                     const allChecked = notes.length > 0 && notes.every((n) => n.done);
                     const canComplete = isWisdom ? allChecked : notes.length > 0;
+                    const groups = skill.data_groups || [];
+                    const ungrouped = notes.filter((n) => !n.grp);
+                    const noun = groupNoun(skill);
+                    // One point (note) row — shared by groups and the flat (I/K/W) lists.
+                    const renderPoint = (n) => (
+                      <li key={n.id} style={S.noteItem}>
+                        <span style={{ ...S.noteDot, background: st.color }} />
+                        {editingNote?.id === n.id ? (
+                          <div style={{ flex: 1, display: "flex", gap: 5 }}>
+                            <input autoFocus value={editingNote.text}
+                              onChange={(e) => setEditingNote((en) => ({ ...en, text: e.target.value }))}
+                              onKeyDown={(e) => { if (e.key === "Enter") saveNoteEdit(); if (e.key === "Escape") setEditingNote(null); }}
+                              style={{ ...S.noteInput, flex: 1, padding: "4px 8px", fontSize: 12.5 }} />
+                            <button onClick={saveNoteEdit} style={{ ...S.noteAddBtn, background: st.color, width: 28, height: 28 }}><Check size={12} /></button>
+                            <button onClick={() => setEditingNote(null)} style={{ ...S.noteAddBtn, background: "var(--border)", color: "var(--text-2)", width: 28, height: 28 }}><X size={12} /></button>
+                          </div>
+                        ) : (
+                          <span style={S.noteText}>{n.text}</span>
+                        )}
+                        {editingNote?.id !== n.id && (
+                          <>
+                            <button onClick={() => setEditingNote({ id: n.id, text: n.text })} style={S.ghostBtn}><Pencil size={12} /></button>
+                            <button onClick={() => deleteNote(n.id)} style={S.ghostBtn}><X size={12} /></button>
+                          </>
+                        )}
+                      </li>
+                    );
                     return (
                     <>
-                      {/* Notes / checklist */}
-                      {notes.length > 0 && (
-                        <ul style={S.noteList}>
-                          {notes.map((n) => (
-                            <li key={n.id} style={S.noteItem}>
-                              {isWisdom ? (
-                                <button onClick={() => toggleNote(n.id)}
-                                  style={{ ...S.checkBox, ...(n.done ? { background: st.color, borderColor: st.color } : {}) }}>
-                                  {n.done && <Check size={11} color="#fff" strokeWidth={3} />}
-                                </button>
-                              ) : (
-                                <span style={{ ...S.noteDot, background: st.color }} />
-                              )}
-                              {editingNote?.id === n.id ? (
-                                <div style={{ flex: 1, display: "flex", gap: 5 }}>
-                                  <input
-                                    autoFocus
-                                    value={editingNote.text}
-                                    onChange={(e) => setEditingNote((en) => ({ ...en, text: e.target.value }))}
-                                    onKeyDown={(e) => { if (e.key === "Enter") saveNoteEdit(); if (e.key === "Escape") setEditingNote(null); }}
-                                    style={{ ...S.noteInput, flex: 1, padding: "4px 8px", fontSize: 12.5 }}
-                                  />
-                                  <button onClick={saveNoteEdit} style={{ ...S.noteAddBtn, background: st.color, width: 28, height: 28 }}><Check size={12} /></button>
-                                  <button onClick={() => setEditingNote(null)} style={{ ...S.noteAddBtn, background: "var(--border)", color: "var(--text-2)", width: 28, height: 28 }}><X size={12} /></button>
+                      {isData ? (
+                        /* Data stage: chapters (books) / learnings (video, article), each holding points */
+                        <>
+                          {ungrouped.length > 0 && <ul style={S.noteList}>{ungrouped.map(renderPoint)}</ul>}
+                          {groups.map((g) => {
+                            const pts = notes.filter((n) => n.grp === g.id);
+                            const open = openGroups[g.id] !== false; // default open
+                            return (
+                              <div key={g.id} style={{ ...S.groupBox, borderColor: `${st.color}55` }}>
+                                <div style={S.groupHead}>
+                                  <button onClick={() => setOpenGroups((o) => ({ ...o, [g.id]: !open }))} style={S.groupCaret}>
+                                    {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+                                  </button>
+                                  {skill.source_type === "book" ? <BookOpen size={13} color={st.color} /> : <Lightbulb size={13} color={st.color} />}
+                                  {editingGroup?.id === g.id ? (
+                                    <input autoFocus value={editingGroup.label}
+                                      onChange={(e) => setEditingGroup((eg) => ({ ...eg, label: e.target.value }))}
+                                      onKeyDown={(e) => { if (e.key === "Enter") { renameGroup(skill, g.id, editingGroup.label.trim() || g.label); setEditingGroup(null); } if (e.key === "Escape") setEditingGroup(null); }}
+                                      onBlur={() => { renameGroup(skill, g.id, editingGroup.label.trim() || g.label); setEditingGroup(null); }}
+                                      style={{ ...S.noteInput, flex: 1, padding: "4px 8px", fontSize: 12.5 }} />
+                                  ) : (
+                                    <span style={S.groupTitle} onClick={() => setEditingGroup({ id: g.id, label: g.label })} title="Click to rename">{g.label}</span>
+                                  )}
+                                  <span style={S.groupCount}>{pts.length}</span>
+                                  <button onClick={() => deleteGroup(skill, g.id)} style={S.ghostBtn} title={`Delete ${noun.toLowerCase()}`}><X size={13} /></button>
                                 </div>
-                              ) : (
-                                <span style={{ ...S.noteText, ...(isWisdom && n.done ? { textDecoration: "line-through", color: "var(--text-3)" } : {}) }}>{n.text}</span>
-                              )}
-                              {editingNote?.id !== n.id && (
-                                <>
-                                  <button onClick={() => setEditingNote({ id: n.id, text: n.text })} style={S.ghostBtn}><Pencil size={12} /></button>
-                                  <button onClick={() => deleteNote(n.id)} style={S.ghostBtn}><X size={12} /></button>
-                                </>
-                              )}
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                      {notes.length === 0 && (
-                        <div style={S.noNotes}>{isWisdom ? "Add the steps to implement this — check each off as you do it." : `No notes yet — ${st.hint}`}</div>
-                      )}
+                                {open && (
+                                  <div style={S.groupBody}>
+                                    {pts.length > 0 && <ul style={S.noteList}>{pts.map(renderPoint)}</ul>}
+                                    <div style={S.noteAddRow}>
+                                      <input placeholder="Add a point…" value={groupPointDraft[g.id] ?? ""}
+                                        onChange={(e) => setGroupPointDraft((d) => ({ ...d, [g.id]: e.target.value }))}
+                                        onKeyDown={(e) => e.key === "Enter" && addGroupPoint(skill, g.id)}
+                                        style={S.noteInput} />
+                                      <button onClick={() => addGroupPoint(skill, g.id)} style={{ ...S.noteAddBtn, background: st.color }}><Plus size={14} /></button>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                          {groups.length === 0 && ungrouped.length === 0 && (
+                            <div style={S.noNotes}>No {noun.toLowerCase()}s yet — add one to start logging points.</div>
+                          )}
+                          <button onClick={() => addGroup(skill)} style={{ ...S.addGroupBtn, color: st.color, borderColor: `${st.color}80` }}>
+                            <Plus size={14} /> Add {noun.toLowerCase()}
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          {/* Notes / checklist */}
+                          {notes.length > 0 && (
+                            <ul style={S.noteList}>
+                              {notes.map((n) => (
+                                <li key={n.id} style={S.noteItem}>
+                                  {isWisdom ? (
+                                    <button onClick={() => toggleNote(n.id)}
+                                      style={{ ...S.checkBox, ...(n.done ? { background: st.color, borderColor: st.color } : {}) }}>
+                                      {n.done && <Check size={11} color="#fff" strokeWidth={3} />}
+                                    </button>
+                                  ) : (
+                                    <span style={{ ...S.noteDot, background: st.color }} />
+                                  )}
+                                  {editingNote?.id === n.id ? (
+                                    <div style={{ flex: 1, display: "flex", gap: 5 }}>
+                                      <input
+                                        autoFocus
+                                        value={editingNote.text}
+                                        onChange={(e) => setEditingNote((en) => ({ ...en, text: e.target.value }))}
+                                        onKeyDown={(e) => { if (e.key === "Enter") saveNoteEdit(); if (e.key === "Escape") setEditingNote(null); }}
+                                        style={{ ...S.noteInput, flex: 1, padding: "4px 8px", fontSize: 12.5 }}
+                                      />
+                                      <button onClick={saveNoteEdit} style={{ ...S.noteAddBtn, background: st.color, width: 28, height: 28 }}><Check size={12} /></button>
+                                      <button onClick={() => setEditingNote(null)} style={{ ...S.noteAddBtn, background: "var(--border)", color: "var(--text-2)", width: 28, height: 28 }}><X size={12} /></button>
+                                    </div>
+                                  ) : (
+                                    <span style={{ ...S.noteText, ...(isWisdom && n.done ? { textDecoration: "line-through", color: "var(--text-3)" } : {}) }}>{n.text}</span>
+                                  )}
+                                  {editingNote?.id !== n.id && (
+                                    <>
+                                      <button onClick={() => setEditingNote({ id: n.id, text: n.text })} style={S.ghostBtn}><Pencil size={12} /></button>
+                                      <button onClick={() => deleteNote(n.id)} style={S.ghostBtn}><X size={12} /></button>
+                                    </>
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                          {notes.length === 0 && (
+                            <div style={S.noNotes}>{isWisdom ? "Add the steps to implement this — check each off as you do it." : `No notes yet — ${st.hint}`}</div>
+                          )}
 
-                      {/* Add note / checklist item input */}
-                      <div style={S.noteAddRow}>
-                        <input
-                          placeholder={isWisdom ? "Add a step to implement…" : `Add a ${st.label} note…`}
-                          value={draft}
-                          onChange={(e) => setNoteDrafts((d) => ({ ...d, [skill.id]: { ...d[skill.id], [st.id]: e.target.value } }))}
-                          onKeyDown={(e) => e.key === "Enter" && addNote(skill.id, st.id)}
-                          style={S.noteInput}
-                        />
-                        <button onClick={() => addNote(skill.id, st.id)} style={{ ...S.noteAddBtn, background: st.color }}><Plus size={14} /></button>
-                      </div>
+                          {/* Add note / checklist item input */}
+                          <div style={S.noteAddRow}>
+                            <input
+                              placeholder={isWisdom ? "Add a step to implement…" : `Add a ${st.label} note…`}
+                              value={draft}
+                              onChange={(e) => setNoteDrafts((d) => ({ ...d, [skill.id]: { ...d[skill.id], [st.id]: e.target.value } }))}
+                              onKeyDown={(e) => e.key === "Enter" && addNote(skill.id, st.id)}
+                              style={S.noteInput}
+                            />
+                            <button onClick={() => addNote(skill.id, st.id)} style={{ ...S.noteAddBtn, background: st.color }}><Plus size={14} /></button>
+                          </div>
+                        </>
+                      )}
 
                       {/* Completion button — only for the current active stage */}
                       {isCurrent && !skill.completed_stages?.[st.id] && (
@@ -364,6 +496,8 @@ export default function SkillsScreen() {
           </div>
         )}
       </div>
+
+      <UndoToast toasts={toasts} onUndo={handleUndo} onDismiss={handleDismiss} />
     </div>
   );
 }
@@ -379,25 +513,33 @@ const S = {
   addSkillBtn: { display: "flex", alignItems: "center", gap: 6, border: "none", background: "var(--accent-strong)", color: "#fff", padding: "8px 14px", borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
   filterBar: { display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16 },
   filterBtn: { border: "1px solid var(--border)", background: "var(--surface)", padding: "6px 12px", borderRadius: 20, fontSize: 12, fontWeight: 600, color: "var(--text-2)", cursor: "pointer", fontFamily: "inherit" },
-  layout: { display: "grid", gap: 12 },
-  cardList: { display: "flex", flexDirection: "column", gap: 10 },
-  skillCard: { background: "var(--surface)", borderRadius: 12, padding: "14px", border: "1.5px solid var(--border)", cursor: "pointer", boxShadow: "0 1px 2px rgba(0,0,0,0.04)" },
-  skillCardTop: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 },
-  skillMeta: { display: "flex", alignItems: "center", gap: 6 },
+  layout: { display: "grid", gap: 12, alignItems: "start" },
+  cardList: { display: "grid", gap: 10, alignContent: "start" },
+  skillCard: { background: "var(--surface)", borderRadius: 12, padding: "16px", border: "1.5px solid var(--border)", cursor: "pointer", boxShadow: "0 1px 2px rgba(0,0,0,0.04)", minWidth: 0, overflow: "hidden", boxSizing: "border-box" },
+  skillCardTop: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 6 },
+  skillMeta: { display: "flex", alignItems: "center", gap: 6, minWidth: 0 },
   pillarDot: { width: 8, height: 8, borderRadius: "50%", flexShrink: 0 },
-  srcLabel: { fontSize: 11, fontWeight: 600, color: "var(--text-3)" },
-  skillTitle: { fontSize: 15, fontWeight: 700, letterSpacing: "-0.01em", marginBottom: 12 },
+  srcLabel: { fontSize: 11, fontWeight: 600, color: "var(--text-3)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  skillTitle: { fontSize: 15, fontWeight: 700, letterSpacing: "-0.01em", marginBottom: 12, lineHeight: 1.3, wordBreak: "break-word" },
   cardTitle: { fontSize: 13, fontWeight: 700, marginBottom: 10 },
-  track: { display: "flex", alignItems: "center" },
-  trackItem: { display: "flex", alignItems: "center" },
+  track: { display: "flex", alignItems: "center", minWidth: 0 },
+  trackItem: { display: "flex", alignItems: "center", minWidth: 0 },
   trackDot: { width: 22, height: 22, borderRadius: "50%", display: "grid", placeItems: "center", flexShrink: 0 },
   trackCurrent: { fontSize: 9, fontWeight: 800, color: "#fff" },
-  trackLine: { width: 24, height: 3, borderRadius: 2 },
-  stageTag: { fontSize: 11, fontWeight: 700, padding: "3px 9px", borderRadius: 12, marginLeft: 10 },
+  trackLine: { flex: 1, minWidth: 8, height: 3, borderRadius: 2, margin: "0 2px" },
+  stageTag: { fontSize: 11, fontWeight: 700, padding: "3px 9px", borderRadius: 12, marginLeft: 8, flexShrink: 0, whiteSpace: "nowrap" },
   detail: { background: "var(--surface)", borderRadius: 14, padding: "18px 16px", boxShadow: "0 1px 4px rgba(0,0,0,0.07)", border: "1.5px solid var(--border)", alignSelf: "start" },
   detailHead: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 },
   detailTitle: { fontSize: 18, fontWeight: 700, letterSpacing: "-0.02em", fontFamily: "'Fraunces',Georgia,serif" },
   closeBtn: { border: "none", background: "var(--hover)", color: "var(--text-2)", width: 30, height: 30, borderRadius: 8, cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0 },
+  backBtn: { border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-2)", width: 32, height: 32, borderRadius: 8, cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0, marginRight: 4 },
+  groupBox: { border: "1.5px solid var(--border)", borderRadius: 9, marginBottom: 8, overflow: "hidden", background: "var(--bg)" },
+  groupHead: { display: "flex", alignItems: "center", gap: 7, padding: "8px 10px" },
+  groupCaret: { border: "none", background: "none", cursor: "pointer", color: "var(--text-2)", display: "grid", placeItems: "center", padding: 0, width: 18, height: 18, flexShrink: 0 },
+  groupTitle: { flex: 1, minWidth: 0, fontSize: 13, fontWeight: 700, color: "var(--text)", cursor: "text", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  groupCount: { fontSize: 10.5, fontWeight: 700, color: "var(--text-3)", background: "var(--hover)", borderRadius: 9, padding: "1px 7px", flexShrink: 0 },
+  groupBody: { padding: "0 10px 10px 10px" },
+  addGroupBtn: { display: "flex", alignItems: "center", justifyContent: "center", gap: 6, width: "100%", border: "1.5px dashed", background: "none", padding: "9px 12px", borderRadius: 9, fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", marginTop: 2 },
   stageBlock: { border: "1.5px solid var(--border)", borderRadius: 10, padding: "12px 13px", marginBottom: 10 },
   stageBlockHead: { display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 8 },
   stageLetter: { width: 28, height: 28, borderRadius: 8, display: "grid", placeItems: "center", fontSize: 13, fontWeight: 800, flexShrink: 0 },

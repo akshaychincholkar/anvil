@@ -138,7 +138,8 @@ export const api = {
   updateSkill: (id, data) => req("PUT", `/skills/${id}`, data),
   deleteSkill: (id) => req("DELETE", `/skills/${id}`),
   restoreSkill: (id) => req("POST", `/skills/${id}/restore`),
-  addSkillNote: (id, stage, text) => req("POST", `/skills/${id}/notes`, { stage, text }),
+  addSkillNote: (id, stage, text, grp = null) => req("POST", `/skills/${id}/notes`, { stage, text, grp }),
+  setSkillGroups: (id, groups) => req("PUT", `/skills/${id}/groups`, { groups }),
   deleteSkillNote: (id) => req("DELETE", `/skill-notes/${id}`),
   updateSkillNote: (id, text) => req("PUT", `/skill-notes/${id}`, { text }),
   toggleSkillNote: (id) => req("PUT", `/skill-notes/${id}/toggle`),
@@ -172,4 +173,11 @@ export const api = {
   updateAffirmation: (id, data) => req("PUT", `/affirmations/${id}`, data),
   deleteAffirmation: (id) => req("DELETE", `/affirmations/${id}`),
   restoreAffirmation: (id) => req("POST", `/affirmations/${id}/restore`),
+
+  // Achievements
+  getAchievements: () => req("GET", "/achievements"),
+  createAchievement: (data) => req("POST", "/achievements", data),
+  updateAchievement: (id, data) => req("PUT", `/achievements/${id}`, data),
+  deleteAchievement: (id) => req("DELETE", `/achievements/${id}`),
+  restoreAchievement: (id) => req("POST", `/achievements/${id}/restore`),
 };

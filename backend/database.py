@@ -48,6 +48,10 @@ def migrate_db():
         add_col("skill", "completed_stages", "TEXT NOT NULL DEFAULT '{}'")
         # wisdom checklist done flag on skill notes
         add_col("skill_note", "done", "INTEGER NOT NULL DEFAULT 0")
+        # Data-stage groups: chapters (books) / learnings (video, article).
+        # JSON list of {id, label} on the skill; each grouped note carries the group id.
+        add_col("skill", "data_groups", "TEXT NOT NULL DEFAULT '[]'")
+        add_col("skill_note", "grp", "TEXT")
 
         # multi-user auth columns
         add_col("user", "email", "TEXT")
@@ -343,6 +347,19 @@ def init_db():
             eff_date TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(user_id, kind, rkey, eff_date)
+        );
+
+        CREATE TABLE IF NOT EXISTS achievement (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            title TEXT NOT NULL,
+            note TEXT NOT NULL DEFAULT '',
+            ach_date TEXT NOT NULL,
+            image TEXT,
+            reward REAL NOT NULL DEFAULT 0,
+            pillar_id INTEGER,
+            deleted_at TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         """)
 

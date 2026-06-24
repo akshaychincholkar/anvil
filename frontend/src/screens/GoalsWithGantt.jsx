@@ -142,7 +142,11 @@ const snapDates = (horizon, d) => {
 // Shift a goal by N period-units of its own type (negative = earlier).
 const shiftByPeriods = (g, steps) => {
   const d = new Date(g.start_date + "T00:00:00");
-  if (g.horizon === "Yearly") return horizonDates("Yearly", d.getFullYear() + steps, 0);
+  if (g.horizon === "Yearly") {
+    // Shift both ends by the same number of years so a multi-year span is preserved.
+    const ey = new Date(g.end_date + "T00:00:00").getFullYear();
+    return { start_date: `${d.getFullYear() + steps}-01-01`, end_date: `${ey + steps}-12-31` };
+  }
   if (g.horizon === "Quarterly") {
     const tot = d.getFullYear() * 12 + Math.floor(d.getMonth() / 3) * 3 + steps * 3;
     return horizonDates("Quarterly", Math.floor(tot / 12), ((tot % 12) + 12) % 12);
@@ -172,7 +176,10 @@ const periodLabel = (g) => {
   const d = new Date(g.start_date + "T00:00:00");
   const m = d.getMonth();
   switch (g.horizon) {
-    case "Yearly":    return `${d.getFullYear()}`;
+    case "Yearly": {
+      const ey = g.end_date ? new Date(g.end_date + "T00:00:00").getFullYear() : d.getFullYear();
+      return ey > d.getFullYear() ? `${d.getFullYear()}–${ey}` : `${d.getFullYear()}`;
+    }
     case "Quarterly": return `Q${Math.floor(m/3)+1} ${d.getFullYear()}`;
     case "Monthly":   return `${MONTHS[m]} ${d.getFullYear()}`;
     case "Weekly":    return `${MONTHS[m]} W${Math.ceil(d.getDate()/7)}`;
@@ -190,7 +197,10 @@ export default function GoalsWithGantt() {
   const [draftMonth, setDraftMonth] = useState(0);
   const [draftWeek, setDraftWeek] = useState(1);
   const [draftYear, setDraftYear] = useState(YEAR);
-  const [editing, setEditing] = useState(null); // { id, title, pillar, year, month, week, ... }
+  const [draftEndYear, setDraftEndYear] = useState(YEAR); // Yearly goals may span multiple years
+  const [draftHorizon, setDraftHorizon] = useState("Yearly"); // chosen horizon for a new top-level goal
+  const [draftPillar, setDraftPillar] = useState(PILLAR_NAMES[0]); // pillar for a new top-level goal (used in All view)
+  const [editing, setEditing] = useState(null); // { id, title, pillar, year, endYear, month, week, ... }
 
   const isMobile = useIsMobile();
   const [showLabels, setShowLabels] = useState(!isMobile); // gantt left column; hidden on mobile by default
@@ -298,9 +308,15 @@ export default function GoalsWithGantt() {
     setAdding(parentId);
     setDraft("");
     setDraftWeek(1);
-    setDraftYear(parentGoal ? yearOf(parentGoal.start_date) : YEAR);
+    const startYear = parentGoal ? yearOf(parentGoal.start_date) : YEAR;
+    setDraftYear(startYear);
+    setDraftEndYear(startYear);
+    // In the All view there's no active pillar — default the picker to the current pillar or the first one.
+    if (parentId === "ROOT") setDraftPillar(isAll ? PILLAR_NAMES[0] : pillar);
+    // Top-level goals can be any horizon (default Yearly); sub-goals step down a level.
     const horizon = parentId === "ROOT" ? "Yearly" : nextHorizon(parentGoal?.horizon);
-    const months = parentId === "ROOT" ? [0] : allowedMonths(parentGoal);
+    setDraftHorizon(horizon);
+    const months = parentId === "ROOT" ? Array.from({ length: 12 }, (_, i) => i) : allowedMonths(parentGoal);
     // Quarterly picks a quarter (start month 0/3/6/9); others pick the first allowed month.
     setDraftMonth(horizon === "Quarterly" ? Math.floor(months[0] / 3) * 3 : months[0] ?? 0);
   };
@@ -308,12 +324,22 @@ export default function GoalsWithGantt() {
   const commitAdd = async (parentId, parentGoal) => {
     if (!draft.trim()) return;
     const parentHorizon = parentGoal?.horizon ?? null;
-    const horizon = parentId === "ROOT" ? "Yearly" : nextHorizon(parentHorizon);
-    // Sub-goals inherit their parent's pillar; top-level uses the selected pillar.
-    const goalPillar = parentId === "ROOT" ? pillar : (parentGoal?.pillar || pillar);
-    // Yearly chooses its own year; sub-goals inherit the parent's year.
-    const year = horizon === "Yearly" ? Number(draftYear) : (parentGoal ? yearOf(parentGoal.start_date) : Number(draftYear));
-    const { start_date, end_date } = horizonDates(horizon, year, draftMonth, draftWeek);
+    // Top-level: any chosen horizon. Sub-goals: one level below the parent.
+    const horizon = parentId === "ROOT" ? draftHorizon : nextHorizon(parentHorizon);
+    // Sub-goals inherit their parent's pillar; top-level uses the chosen pillar.
+    const goalPillar = parentId === "ROOT" ? draftPillar : (parentGoal?.pillar || pillar);
+    let start_date, end_date;
+    if (horizon === "Yearly") {
+      // Yearly goals may span multiple calendar years (start year → end year).
+      const sy = Number(draftYear);
+      const ey = Math.max(sy, Number(draftEndYear) || sy);
+      start_date = `${sy}-01-01`;
+      end_date = `${ey}-12-31`;
+    } else {
+      // Quarterly/Monthly/Weekly chooses its own year at top level; sub-goals inherit the parent's year.
+      const year = parentGoal ? yearOf(parentGoal.start_date) : Number(draftYear);
+      ({ start_date, end_date } = horizonDates(horizon, year, draftMonth, draftWeek));
+    }
     await api.createGoal({
       pillar: goalPillar,
       title: draft.trim(),
@@ -339,6 +365,7 @@ export default function GoalsWithGantt() {
       horizon: goal.horizon,
       parentGoal: goals.find((x) => x.id === goal.parent_goal_id) || null,
       year: yearOf(goal.start_date),
+      endYear: yearOf(goal.end_date),
       month: goal.horizon === "Quarterly" ? Math.floor(month / 3) * 3 : month,
       week,
     });
@@ -346,13 +373,19 @@ export default function GoalsWithGantt() {
 
   const commitEdit = async () => {
     if (!editing || !editing.title.trim()) return;
-    let month = editing.month;
-    if (editing.horizon === "Weekly") month = allowedMonths(editing.parentGoal)[0]; // inherit parent month
-    // Yearly edits its own year; sub-goals inherit the parent's year.
-    const year = editing.horizon === "Yearly"
-      ? Number(editing.year)
-      : (editing.parentGoal ? yearOf(editing.parentGoal.start_date) : Number(editing.year));
-    const { start_date, end_date } = horizonDates(editing.horizon, year, month, editing.week);
+    let start_date, end_date;
+    if (editing.horizon === "Yearly") {
+      const sy = Number(editing.year);
+      const ey = Math.max(sy, Number(editing.endYear) || sy);
+      start_date = `${sy}-01-01`;
+      end_date = `${ey}-12-31`;
+    } else {
+      let month = editing.month;
+      if (editing.horizon === "Weekly") month = allowedMonths(editing.parentGoal)[0]; // inherit parent month
+      // Sub-goals inherit the parent's year; top-level keeps its own.
+      const year = editing.parentGoal ? yearOf(editing.parentGoal.start_date) : Number(editing.year);
+      ({ start_date, end_date } = horizonDates(editing.horizon, year, month, editing.week));
+    }
     await api.updateGoal(editing.id, {
       title: editing.title.trim(),
       pillar: editing.pillar,
@@ -364,9 +397,17 @@ export default function GoalsWithGantt() {
   };
 
   const AddInline = ({ parentId, parentGoal, depth }) => {
-    const horizon = parentId === "ROOT" ? "Yearly" : nextHorizon(parentGoal?.horizon ?? null);
-    const months = parentId === "ROOT" ? Array.from({ length: 12 }, (_, i) => i) : allowedMonths(parentGoal);
+    const isRoot = parentId === "ROOT";
+    const horizon = isRoot ? draftHorizon : nextHorizon(parentGoal?.horizon ?? null);
+    const months = isRoot ? Array.from({ length: 12 }, (_, i) => i) : allowedMonths(parentGoal);
     const quarters = QUARTERS.filter((q) => months.includes(q.startMonth));
+    // When the top-level horizon changes, reset the period selector sensibly.
+    const onHorizonChange = (h) => {
+      setDraftHorizon(h);
+      setDraftMonth(h === "Quarterly" ? 0 : 0);
+      setDraftWeek(1);
+      setDraftEndYear(draftYear);
+    };
     return (
       <div style={{ ...S.addBox, marginLeft: depth * 24 }}>
         <input
@@ -380,8 +421,29 @@ export default function GoalsWithGantt() {
           }}
           style={S.input}
         />
+        {isRoot && isAll && (
+          <select value={draftPillar} onChange={(e) => setDraftPillar(e.target.value)} style={S.monthSelect} title="Pillar">
+            {PILLAR_NAMES.map((n) => <option key={n} value={n}>{n}</option>)}
+          </select>
+        )}
+        {isRoot && (
+          <select value={draftHorizon} onChange={(e) => onHorizonChange(e.target.value)} style={S.monthSelect} title="Goal level">
+            {HORIZONS.map((h) => <option key={h} value={h}>{h}</option>)}
+          </select>
+        )}
         {horizon === "Yearly" && (
-          <select value={draftYear} onChange={(e) => setDraftYear(Number(e.target.value))} style={S.monthSelect}>
+          <>
+            <select value={draftYear} onChange={(e) => { const y = Number(e.target.value); setDraftYear(y); if (draftEndYear < y) setDraftEndYear(y); }} style={S.monthSelect} title="Start year">
+              {YEAR_OPTIONS.map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
+            <span style={S.toTag}>to</span>
+            <select value={draftEndYear} onChange={(e) => setDraftEndYear(Number(e.target.value))} style={S.monthSelect} title="End year (spans multiple years)">
+              {YEAR_OPTIONS.filter((y) => y >= draftYear).map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </>
+        )}
+        {horizon !== "Yearly" && isRoot && (
+          <select value={draftYear} onChange={(e) => setDraftYear(Number(e.target.value))} style={S.monthSelect} title="Year">
             {YEAR_OPTIONS.map((y) => <option key={y} value={y}>{y}</option>)}
           </select>
         )}
@@ -397,7 +459,13 @@ export default function GoalsWithGantt() {
         )}
         {horizon === "Weekly" && (
           <>
-            <span style={S.inheritTag}>{MONTHS[months[0]]}</span>
+            {isRoot ? (
+              <select value={draftMonth} onChange={(e) => setDraftMonth(Number(e.target.value))} style={S.monthSelect}>
+                {months.map((i) => <option key={i} value={i}>{MONTHS[i]}</option>)}
+              </select>
+            ) : (
+              <span style={S.inheritTag}>{MONTHS[months[0]]}</span>
+            )}
             <select value={draftWeek} onChange={(e) => setDraftWeek(Number(e.target.value))} style={S.monthSelect}>
               {[1,2,3,4].map((w) => <option key={w} value={w}>Week {w}</option>)}
             </select>
@@ -431,9 +499,15 @@ export default function GoalsWithGantt() {
             {PILLAR_NAMES.map((n) => <option key={n}>{n}</option>)}
           </select>
           {editing.horizon === "Yearly" && (
-            <select value={editing.year} onChange={(e) => setEditing({ ...editing, year: Number(e.target.value) })} style={S.monthSelect}>
-              {YEAR_OPTIONS.map((y) => <option key={y} value={y}>{y}</option>)}
-            </select>
+            <>
+              <select value={editing.year} onChange={(e) => { const y = Number(e.target.value); setEditing({ ...editing, year: y, endYear: Math.max(y, editing.endYear) }); }} style={S.monthSelect} title="Start year">
+                {YEAR_OPTIONS.map((y) => <option key={y} value={y}>{y}</option>)}
+              </select>
+              <span style={S.toTag}>to</span>
+              <select value={editing.endYear} onChange={(e) => setEditing({ ...editing, endYear: Number(e.target.value) })} style={S.monthSelect} title="End year (spans multiple years)">
+                {YEAR_OPTIONS.filter((y) => y >= editing.year).map((y) => <option key={y} value={y}>{y}</option>)}
+              </select>
+            </>
           )}
           {editing.horizon === "Quarterly" && (
             <select value={editing.month} onChange={(e) => setEditing({ ...editing, month: Number(e.target.value) })} style={S.monthSelect}>
@@ -659,13 +733,12 @@ export default function GoalsWithGantt() {
       <div style={S.list}>
         {roots.map((g) => <Node key={g.id} goal={g} depth={0} />)}
         {roots.length === 0 && <div style={S.ganttEmpty}>No goals yet{isAll ? "" : ` for ${pillar}`}.</div>}
-        {!isAll && adding === "ROOT" && <AddInline parentId="ROOT" parentGoal={null} depth={0} />}
-        {!isAll && adding !== "ROOT" && (
+        {adding === "ROOT" && <AddInline parentId="ROOT" parentGoal={null} depth={0} />}
+        {adding !== "ROOT" && (
           <button onClick={() => startAdd("ROOT", null)} style={S.rootAdd}>
-            <Plus size={14} /> Add top-level goal
+            <Plus size={14} /> Add new goal
           </button>
         )}
-        {isAll && <div style={S.allHint}>Pick a pillar above to add new goals.</div>}
       </div>
 
       {/* Gantt */}
@@ -894,6 +967,7 @@ const S = {
   input: { border: "1px solid var(--border)", borderRadius: 7, padding: "8px 11px", fontSize: 13.5, fontFamily: "inherit", outline: "none", flex: 1, minWidth: 120 },
   monthSelect: { border: "1px solid var(--border)", borderRadius: 7, padding: "8px", fontSize: 12.5, fontFamily: "inherit", flexShrink: 0 },
   inheritTag: { fontSize: 11.5, fontWeight: 600, color: "var(--text-2)", background: "var(--hover)", padding: "6px 9px", borderRadius: 7, flexShrink: 0 },
+  toTag: { fontSize: 11.5, fontWeight: 600, color: "var(--text-3)", flexShrink: 0 },
   dateInput: { border: "1px solid var(--border)", borderRadius: 7, padding: "8px", fontSize: 12, fontFamily: "inherit", flexShrink: 0 },
   saveBtn: { border: "none", background: "#4C9A6B", color: "#fff", width: 32, height: 32, borderRadius: 7, cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0 },
   cancelBtn: { border: "none", background: "var(--hover)", color: "var(--text-2)", width: 32, height: 32, borderRadius: 7, cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0 },
