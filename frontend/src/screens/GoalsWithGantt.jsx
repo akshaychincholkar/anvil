@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { ChevronRight, ChevronDown, Plus, Target, X, Check, Pencil, Eye, EyeOff, PanelLeftClose, PanelLeftOpen, GripVertical, Settings } from "lucide-react";
+import { ChevronRight, ChevronDown, Plus, Target, X, Check, Pencil, Eye, EyeOff, PanelLeftClose, PanelLeftOpen, GripVertical, Settings, AlertTriangle } from "lucide-react";
 import { api } from "../api.js";
 import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
 import UndoToast from "../components/UndoToast.jsx";
@@ -114,6 +114,16 @@ const addDaysISO = (iso, n) => {
 };
 
 const spanDays = (a, b) => Math.round((new Date(b + "T00:00:00") - new Date(a + "T00:00:00")) / DAY_MS) + 1;
+
+// Keep a child's [start,end] inside its parent's dates, preserving its duration.
+const clampWithin = (start, end, parent) => {
+  if (!parent || !parent.start_date || !parent.end_date) return { start_date: start, end_date: end, clamped: false };
+  const dur = spanDays(start, end);
+  let s = start, e = end, clamped = false;
+  if (s < parent.start_date) { s = parent.start_date; e = addDaysISO(s, dur - 1); clamped = true; }
+  if (e > parent.end_date) { e = parent.end_date; s = addDaysISO(e, -(dur - 1)); clamped = true; if (s < parent.start_date) s = parent.start_date; }
+  return { start_date: s, end_date: e, clamped };
+};
 const daysInMonthOf = (y, m) => new Date(y, m + 1, 0).getDate();
 
 // Natural (un-extended) length of a goal's period, in days.
@@ -181,10 +191,20 @@ export default function GoalsWithGantt() {
   const [drag, setDrag] = useState(null); // { id, startX, dx, g }
   const dragRef = useRef(null);
   useEffect(() => { dragRef.current = drag; }, [drag]);
+  const goalsRef = useRef(goals);
+  useEffect(() => { goalsRef.current = goals; }, [goals]);
   const [resize, setResize] = useState(null); // { id, startX, dx, g }
   const resizeRef = useRef(null);
   useEffect(() => { resizeRef.current = resize; }, [resize]);
   const scrollRef = useRef(null);
+  const pointerXRef = useRef(0); // latest pointer X during a drag (for edge auto-scroll)
+  const [warning, setWarning] = useState(null); // transient floating warning message
+  const warnTimer = useRef(null);
+  const flashWarn = useCallback((msg) => {
+    setWarning(msg);
+    clearTimeout(warnTimer.current);
+    warnTimer.current = setTimeout(() => setWarning(null), 2800);
+  }, []);
 
   // Press-and-hold a goal name to reveal its full text (for truncated names on mobile).
   const [held, setHeld] = useState(null);
@@ -223,22 +243,50 @@ export default function GoalsWithGantt() {
     // of snapping one period at a time.
     const dayShift = Math.round(d.dx / (d.pxPerDay || COL_W));
     if (!dayShift) return;
-    const start_date = addDaysISO(d.g.start_date, dayShift);
-    const end_date = addDaysISO(d.g.end_date, dayShift);
-    if (start_date !== d.g.start_date) {
+    let start_date = addDaysISO(d.g.start_date, dayShift);
+    let end_date = addDaysISO(d.g.end_date, dayShift);
+    // A sub-goal can't move outside its parent's dates — clamp and warn.
+    if (d.g.parent_goal_id) {
+      const parent = goalsRef.current.find((x) => x.id === d.g.parent_goal_id);
+      const c = clampWithin(start_date, end_date, parent);
+      if (c.clamped) flashWarn(`Can't move past "${parent?.title || "parent goal"}" — kept within its dates.`);
+      start_date = c.start_date; end_date = c.end_date;
+    }
+    if (start_date !== d.g.start_date || end_date !== d.g.end_date) {
       await api.updateGoal(d.g.id, { pillar: d.g.pillar, start_date, end_date });
       load();
     }
-  }, [load]);
+  }, [load, flashWarn]);
 
   const dragging = !!drag;
   useEffect(() => {
     if (!dragging) return;
-    const move = (e) => setDrag((d) => (d ? { ...d, dx: e.clientX - d.startX } : d));
+    const move = (e) => { pointerXRef.current = e.clientX; setDrag((d) => (d ? { ...d, dx: e.clientX - d.startX } : d)); };
     const up = () => finalizeDrag();
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
-    return () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+
+    // Edge auto-scroll: when the pointer hovers near the timeline's left/right edge
+    // (e.g. on a narrow mobile screen), keep scrolling so the goal can be dragged
+    // all the way across. The scrolled distance is folded into the drag so the bar
+    // tracks the finger and the final day-shift stays correct.
+    const EDGE = 44, SPEED = 16;
+    const tick = setInterval(() => {
+      const el = scrollRef.current;        // only the day-view timeline scrolls
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const x = pointerXRef.current;
+      let dir = 0;
+      if (x < r.left + EDGE) dir = -1;
+      else if (x > r.right - EDGE) dir = 1;
+      if (!dir) return;
+      const before = el.scrollLeft;
+      el.scrollLeft = Math.max(0, Math.min(before + dir * SPEED, el.scrollWidth - el.clientWidth));
+      const applied = el.scrollLeft - before;
+      if (applied) setDrag((d) => (d ? { ...d, startX: d.startX - applied, dx: x - (d.startX - applied) } : d));
+    }, 16);
+
+    return () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); clearInterval(tick); };
   }, [dragging, finalizeDrag]);
 
   // Tail resize: extend a Monthly/Weekly goal up to 1.5× its natural length.
@@ -250,12 +298,20 @@ export default function GoalsWithGantt() {
     const natural = naturalDays(g);
     const maxDays = maxDaysFor(g);
     const newDur = Math.max(natural, Math.min(maxDays, spanDays(g.start_date, g.end_date) + Math.round(r.dx / COL_W)));
-    const newEnd = addDaysISO(g.start_date, newDur - 1);
-    if (newEnd !== g.end_date) {
+    let newEnd = addDaysISO(g.start_date, newDur - 1);
+    // Don't let a sub-goal's tail extend past its parent's end date.
+    if (g.parent_goal_id) {
+      const parent = goalsRef.current.find((x) => x.id === g.parent_goal_id);
+      if (parent?.end_date && newEnd > parent.end_date) {
+        newEnd = parent.end_date;
+        flashWarn(`Can't extend past "${parent?.title || "parent goal"}" — kept within its dates.`);
+      }
+    }
+    if (newEnd !== g.end_date && newEnd >= g.start_date) {
       await api.updateGoal(g.id, { end_date: newEnd });
       load();
     }
-  }, [load]);
+  }, [load, flashWarn]);
 
   const resizing = !!resize;
   useEffect(() => {
@@ -787,7 +843,7 @@ export default function GoalsWithGantt() {
                       <div style={{ position: "relative", flex: 1, minHeight: 36, minWidth: 0, backgroundImage: `repeating-linear-gradient(to right, var(--border) 0, var(--border) 1px, transparent 1px, transparent calc(100% / ${N}))` }}>
                         {todayInRange && <div style={{ ...S.gTodayLine, left: `${todayPct}%` }} />}
                         <div
-                          onPointerDown={(e) => { e.preventDefault(); const tw = e.currentTarget.parentNode.offsetWidth; setDrag({ id: g.id, startX: e.clientX, dx: 0, g, pxPerDay: (tw / N) / 30.44 }); }}
+                          onPointerDown={(e) => { e.preventDefault(); pointerXRef.current = e.clientX; const tw = e.currentTarget.parentNode.offsetWidth; setDrag({ id: g.id, startX: e.clientX, dx: 0, g, pxPerDay: (tw / N) / 30.44 }); }}
                           style={{
                             ...S.gBar, left: `${leftPct}%`, width: `${widthPct}%`, background: c,
                             cursor: isDragging ? "grabbing" : "grab",
@@ -879,7 +935,7 @@ export default function GoalsWithGantt() {
                         <div style={{ ...S.gTrack, width: totalDays * COL_W }}>
                           {todayInRange && <div style={{ ...S.gTodayLine, left: todayIdx * COL_W }} />}
                           <div
-                            onPointerDown={(e) => { e.preventDefault(); setDrag({ id: g.id, startX: e.clientX, dx: 0, g, pxPerDay: COL_W }); }}
+                            onPointerDown={(e) => { e.preventDefault(); pointerXRef.current = e.clientX; setDrag({ id: g.id, startX: e.clientX, dx: 0, g, pxPerDay: COL_W }); }}
                             style={{
                               ...S.gBar, left: sIdx * COL_W + 2, width: barW, background: c,
                               cursor: isDragging ? "grabbing" : "grab",
@@ -923,6 +979,13 @@ export default function GoalsWithGantt() {
         )}
       </div>
 
+      {warning && (
+        <div style={S.warnToast}>
+          <AlertTriangle size={15} style={{ flexShrink: 0 }} />
+          <span>{warning}</span>
+        </div>
+      )}
+
       <UndoToast toasts={toasts} onUndo={handleUndo} onDismiss={handleDismiss} />
     </div>
   );
@@ -956,6 +1019,7 @@ const S = {
   monthSelect: { border: "1px solid var(--border)", borderRadius: 7, padding: "8px", fontSize: 12.5, fontFamily: "inherit", flexShrink: 0 },
   inheritTag: { fontSize: 11.5, fontWeight: 600, color: "var(--text-2)", background: "var(--hover)", padding: "6px 9px", borderRadius: 7, flexShrink: 0 },
   toTag: { fontSize: 11.5, fontWeight: 600, color: "var(--text-3)", flexShrink: 0 },
+  warnToast: { position: "fixed", top: 18, left: "50%", transform: "translateX(-50%)", zIndex: 300, display: "flex", alignItems: "center", gap: 8, maxWidth: "90vw", background: "#C2536B", color: "#fff", padding: "10px 16px", borderRadius: 10, fontSize: 13, fontWeight: 600, boxShadow: "0 6px 24px rgba(0,0,0,0.25)" },
   dateInput: { border: "1px solid var(--border)", borderRadius: 7, padding: "8px", fontSize: 12, fontFamily: "inherit", flexShrink: 0 },
   saveBtn: { border: "none", background: "#4C9A6B", color: "#fff", width: 32, height: 32, borderRadius: 7, cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0 },
   cancelBtn: { border: "none", background: "var(--hover)", color: "var(--text-2)", width: 32, height: 32, borderRadius: 7, cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0 },
