@@ -130,34 +130,7 @@ const naturalDays = (g) => {
 const maxDaysFor = (g) => Math.round(naturalDays(g) * 1.5);      // tail can stretch to 1.5×
 const canExtend = (g) => g.horizon === "Monthly" || g.horizon === "Weekly";
 
-// Snap a free date to the goal's natural period (used when dragging on the timeline).
-const snapDates = (horizon, d) => {
-  const y = d.getFullYear(), m = d.getMonth();
-  if (horizon === "Quarterly") return horizonDates("Quarterly", y, m);
-  if (horizon === "Monthly") return horizonDates("Monthly", y, m);
-  if (horizon === "Weekly") return horizonDates("Weekly", y, m, Math.min(Math.max(Math.ceil(d.getDate() / 7), 1), 4));
-  return horizonDates("Yearly", y, 0);
-};
-
 // Shift a goal by N period-units of its own type (negative = earlier).
-const shiftByPeriods = (g, steps) => {
-  const d = new Date(g.start_date + "T00:00:00");
-  if (g.horizon === "Yearly") {
-    // Shift both ends by the same number of years so a multi-year span is preserved.
-    const ey = new Date(g.end_date + "T00:00:00").getFullYear();
-    return { start_date: `${d.getFullYear() + steps}-01-01`, end_date: `${ey + steps}-12-31` };
-  }
-  if (g.horizon === "Quarterly") {
-    const tot = d.getFullYear() * 12 + Math.floor(d.getMonth() / 3) * 3 + steps * 3;
-    return horizonDates("Quarterly", Math.floor(tot / 12), ((tot % 12) + 12) % 12);
-  }
-  if (g.horizon === "Monthly") {
-    const tot = d.getFullYear() * 12 + d.getMonth() + steps;
-    return horizonDates("Monthly", Math.floor(tot / 12), ((tot % 12) + 12) % 12);
-  }
-  return snapDates("Weekly", new Date(addDaysISO(g.start_date, steps * 7) + "T00:00:00"));
-};
-
 // Fractional month position (0–12) for the gantt's 12 equal-width columns.
 // Uses the real number of days in the month so bars line up with their dates;
 // inclusiveEnd extends the bar to cover the whole end day.
@@ -245,13 +218,15 @@ export default function GoalsWithGantt() {
     const d = dragRef.current;
     setDrag(null);
     if (!d) return;
-    // Each ~3-day drag (day view) / part-month drag (month view) shifts the goal
-    // by one unit of its own type (week / month / quarter / year).
-    const steps = Math.round(d.dx / (d.stepPx || COL_W * 3));
-    if (!steps) return;
-    const moved = shiftByPeriods(d.g, steps);
-    if (moved.start_date !== d.g.start_date) {
-      await api.updateGoal(d.g.id, { pillar: d.g.pillar, start_date: moved.start_date, end_date: moved.end_date });
+    // Free drag: shift the whole goal by however many days were dragged, keeping its
+    // duration. This lets a goal slide smoothly anywhere (e.g. to year-end), instead
+    // of snapping one period at a time.
+    const dayShift = Math.round(d.dx / (d.pxPerDay || COL_W));
+    if (!dayShift) return;
+    const start_date = addDaysISO(d.g.start_date, dayShift);
+    const end_date = addDaysISO(d.g.end_date, dayShift);
+    if (start_date !== d.g.start_date) {
+      await api.updateGoal(d.g.id, { pillar: d.g.pillar, start_date, end_date });
       load();
     }
   }, [load]);
@@ -381,7 +356,8 @@ export default function GoalsWithGantt() {
       end_date = `${ey}-12-31`;
     } else {
       let month = editing.month;
-      if (editing.horizon === "Weekly") month = allowedMonths(editing.parentGoal)[0]; // inherit parent month
+      // Weekly sub-goals inherit the parent's month; top-level weeklies pick their own.
+      if (editing.horizon === "Weekly" && editing.parentGoal) month = allowedMonths(editing.parentGoal)[0];
       // Sub-goals inherit the parent's year; top-level keeps its own.
       const year = editing.parentGoal ? yearOf(editing.parentGoal.start_date) : Number(editing.year);
       ({ start_date, end_date } = horizonDates(editing.horizon, year, month, editing.week));
@@ -486,6 +462,7 @@ export default function GoalsWithGantt() {
     if (isEditing) {
       const eMonths = allowedMonths(editing.parentGoal);
       const eQuarters = QUARTERS.filter((q) => eMonths.includes(q.startMonth));
+      const eIsRoot = !editing.parentGoal; // top-level: month + year are editable
       return (
         <div style={{ ...S.editBox, marginLeft: depth * 24 }}>
           <input
@@ -509,6 +486,11 @@ export default function GoalsWithGantt() {
               </select>
             </>
           )}
+          {editing.horizon !== "Yearly" && eIsRoot && (
+            <select value={editing.year} onChange={(e) => setEditing({ ...editing, year: Number(e.target.value) })} style={S.monthSelect} title="Year">
+              {YEAR_OPTIONS.map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
+          )}
           {editing.horizon === "Quarterly" && (
             <select value={editing.month} onChange={(e) => setEditing({ ...editing, month: Number(e.target.value) })} style={S.monthSelect}>
               {eQuarters.map((q) => <option key={q.startMonth} value={q.startMonth}>{q.label}</option>)}
@@ -521,7 +503,13 @@ export default function GoalsWithGantt() {
           )}
           {editing.horizon === "Weekly" && (
             <>
-              <span style={S.inheritTag}>{MONTHS[eMonths[0]]}</span>
+              {eIsRoot ? (
+                <select value={editing.month} onChange={(e) => setEditing({ ...editing, month: Number(e.target.value) })} style={S.monthSelect}>
+                  {eMonths.map((i) => <option key={i} value={i}>{MONTHS[i]}</option>)}
+                </select>
+              ) : (
+                <span style={S.inheritTag}>{MONTHS[eMonths[0]]}</span>
+              )}
               <select value={editing.week} onChange={(e) => setEditing({ ...editing, week: Number(e.target.value) })} style={S.monthSelect}>
                 {[1,2,3,4].map((w) => <option key={w} value={w}>Week {w}</option>)}
               </select>
@@ -799,7 +787,7 @@ export default function GoalsWithGantt() {
                       <div style={{ position: "relative", flex: 1, minHeight: 36, minWidth: 0, backgroundImage: `repeating-linear-gradient(to right, var(--border) 0, var(--border) 1px, transparent 1px, transparent calc(100% / ${N}))` }}>
                         {todayInRange && <div style={{ ...S.gTodayLine, left: `${todayPct}%` }} />}
                         <div
-                          onPointerDown={(e) => { e.preventDefault(); const tw = e.currentTarget.parentNode.offsetWidth; setDrag({ id: g.id, startX: e.clientX, dx: 0, g, stepPx: Math.max(8, (tw / N) / 2) }); }}
+                          onPointerDown={(e) => { e.preventDefault(); const tw = e.currentTarget.parentNode.offsetWidth; setDrag({ id: g.id, startX: e.clientX, dx: 0, g, pxPerDay: (tw / N) / 30.44 }); }}
                           style={{
                             ...S.gBar, left: `${leftPct}%`, width: `${widthPct}%`, background: c,
                             cursor: isDragging ? "grabbing" : "grab",
@@ -891,7 +879,7 @@ export default function GoalsWithGantt() {
                         <div style={{ ...S.gTrack, width: totalDays * COL_W }}>
                           {todayInRange && <div style={{ ...S.gTodayLine, left: todayIdx * COL_W }} />}
                           <div
-                            onPointerDown={(e) => { e.preventDefault(); setDrag({ id: g.id, startX: e.clientX, dx: 0, g, stepPx: COL_W * 3 }); }}
+                            onPointerDown={(e) => { e.preventDefault(); setDrag({ id: g.id, startX: e.clientX, dx: 0, g, pxPerDay: COL_W }); }}
                             style={{
                               ...S.gBar, left: sIdx * COL_W + 2, width: barW, background: c,
                               cursor: isDragging ? "grabbing" : "grab",
