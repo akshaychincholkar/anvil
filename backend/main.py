@@ -1038,7 +1038,7 @@ def _skill_full(conn, skill_id: int) -> dict:
         d["data_groups"] = []
     notes_by_stage = {s: [] for s in STAGE_ORDER}
     for n in notes_raw:
-        notes_by_stage[n["stage"]].append({"id": n["id"], "text": n["text"], "done": bool(n["done"]), "grp": n["grp"]})
+        notes_by_stage[n["stage"]].append({"id": n["id"], "text": n["text"], "done": bool(n["done"]), "grp": n["grp"], "created_at": n["created_at"]})
     d["notes"] = notes_by_stage
     return d
 

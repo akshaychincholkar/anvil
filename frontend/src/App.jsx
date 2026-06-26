@@ -2,8 +2,9 @@ import { useState, useEffect, useRef } from "react";
 import {
   LayoutGrid, Target, CheckSquare, BookOpen,
   GraduationCap, Star, RotateCcw, Menu, X,
-  Sparkles, LogOut, Trees, IndianRupee, Settings, Landmark, Rocket, Crown, Headphones, Trophy, PartyPopper, Wallet, ReceiptText
+  Sparkles, LogOut, Trees, IndianRupee, Settings, Landmark, Rocket, Crown, Headphones, Trophy, PartyPopper, Wallet, ReceiptText, LayoutDashboard
 } from "lucide-react";
+import DashboardScreen from "./screens/DashboardScreen.jsx";
 import QuadrantView from "./screens/QuadrantView.jsx";
 import GoalsWithGantt from "./screens/GoalsWithGantt.jsx";
 import HabitTracker from "./screens/HabitTracker.jsx";
@@ -38,6 +39,7 @@ const getStoredDefault = () => { try { return localStorage.getItem(DEFAULT_SCREE
 
 // Registry: screen id → metadata + component.
 const SCREENS = {
+  dashboard:    { label: "Dashboard",    icon: LayoutDashboard, component: DashboardScreen },
   kickstart:    { label: "Kickstart",    icon: Rocket,        component: KickstartScreen },
   golden:       { label: "Golden Book",  icon: Crown,         component: GoldenBookScreen },
   habits:       { label: "Habits",       icon: CheckSquare,   component: HabitTracker },
@@ -59,7 +61,7 @@ const SCREENS = {
 
 // Default sidebar order (flat items). Users can reorder/hide via Settings.
 const DEFAULT_ORDER = [
-  "kickstart", "golden", "habits", "quadrant", "goals", "grove", "journal",
+  "dashboard", "kickstart", "golden", "habits", "quadrant", "goals", "grove", "journal",
   "revision", "affirmations", "skills", "spiritual", "mindscape", "achievements", "delight", "worth", "vault", "expenses",
 ];
 
@@ -298,7 +300,7 @@ export default function App() {
         {ticker.enabled && <Ticker statements={ticker.statements} speed={ticker.speed} delay={ticker.delay} />}
 
         <main style={S.main}>
-          <Screen />
+          <Screen onNavigate={navigate} />
         </main>
       </div>
 
