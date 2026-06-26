@@ -4,6 +4,8 @@ import { THEMES } from "../theme.js";
 import { CURRENCIES } from "../currency.js";
 import { api } from "../api.js";
 
+const ordinal = (n) => (n % 10 === 1 && n !== 11 ? "st" : n % 10 === 2 && n !== 12 ? "nd" : n % 10 === 3 && n !== 13 ? "rd" : "th");
+
 function useIsMobile(bp = 560) {
   const [m, setM] = useState(() => window.innerWidth <= bp);
   useEffect(() => {
@@ -14,7 +16,7 @@ function useIsMobile(bp = 560) {
   return m;
 }
 
-export default function SettingsModal({ screens, order, hidden, themeId, currency, ticker, defaultScreen, onSetDefault, onSaveSidebar, onPreviewTheme, onCommitTheme, onSelectCurrency, onSaveTicker, onClose }) {
+export default function SettingsModal({ screens, order, hidden, themeId, currency, monthStartDay, ticker, defaultScreen, onSetDefault, onSaveSidebar, onPreviewTheme, onCommitTheme, onSelectCurrency, onSelectMonthStartDay, onSaveTicker, onClose }) {
   const [tab, setTab] = useState("sidebar");
   const [items, setItems] = useState(() => order.map((id) => ({ id, hidden: hidden.includes(id) })));
   const [pendingTheme, setPendingTheme] = useState(themeId);
@@ -134,7 +136,7 @@ export default function SettingsModal({ screens, order, hidden, themeId, currenc
             </>
           ) : tab === "currency" ? (
             <>
-              <p style={S.hint}>Choose the currency used across Vault and Worth. Applies instantly.</p>
+              <p style={S.hint}>Choose the currency used across Wallet and Worth. Applies instantly.</p>
               <div style={S.list}>
                 {CURRENCIES.map((c) => {
                   const on = c.code === currency;
@@ -148,6 +150,15 @@ export default function SettingsModal({ screens, order, hidden, themeId, currenc
                   );
                 })}
               </div>
+
+              <div style={S.subDivider} />
+              <div style={S.fieldLbl}>Month starts on</div>
+              <p style={S.hint}>If your salary lands on the 25th, set this to 25 — Wallet and Expenses will treat each "month" as running 25th to 24th instead of calendar month.</p>
+              <select value={monthStartDay} onChange={(e) => onSelectMonthStartDay(Number(e.target.value))} style={S.musicInput}>
+                {Array.from({ length: 28 }, (_, i) => i + 1).map((d) => (
+                  <option key={d} value={d}>{d === 1 ? "1st (calendar month)" : `${d}${ordinal(d)}`}</option>
+                ))}
+              </select>
             </>
           ) : tab === "music" ? (
             <>
@@ -247,6 +258,7 @@ const S = {
   switch: { fontSize: 12, fontWeight: 700, color: "var(--text-3)", background: "var(--hover)", borderRadius: 20, padding: "3px 12px", minWidth: 44, textAlign: "center" },
   switchOn: { background: "var(--accent)", color: "#fff" },
   fieldLbl: { fontSize: 12, fontWeight: 700, color: "var(--text-2)", marginBottom: 7 },
+  subDivider: { height: 1, background: "var(--border)", margin: "18px 0 14px" },
   addRowBtn: { display: "flex", alignItems: "center", justifyContent: "center", gap: 6, width: "100%", border: "1px dashed var(--border)", background: "none", color: "var(--text-2)", padding: "9px", borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
   sliderHead: { display: "flex", justifyContent: "space-between", alignItems: "baseline" },
   sliderVal: { fontSize: 12, fontWeight: 700, color: "var(--accent)" },

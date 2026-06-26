@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   Plus, X, Check, ChevronLeft, ChevronRight, Pencil, ImagePlus, Flame,
-  Sparkles, Music, Music2, ArrowLeft, Trophy, Quote
+  Sparkles, Music, Music2, ArrowLeft, Trophy, Quote, Trash2
 } from "lucide-react";
 import { api } from "../api.js";
+import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
+import UndoToast from "../components/UndoToast.jsx";
 
 const isoL = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const todayISO = () => isoL(new Date());
@@ -55,6 +57,10 @@ export default function GoldenBookScreen() {
     setLoaded(true);
   }, []);
   useEffect(() => { load(); }, [load]);
+
+  const { deleteItem: deleteGoal, toasts, handleUndo, handleDismiss } = useUndoableDelete(
+    api.deleteGolden, api.restoreGolden, load
+  );
 
   useEffect(() => {
     api.getSetting("golden_music").then((r) => setMusicId(ytId(r?.value || ""))).catch(() => {});
@@ -140,7 +146,7 @@ export default function GoldenBookScreen() {
             <>
               <div style={S.sectionTitle}><Sparkles size={15} color="#C9A227" /> Manifesting <span style={S.badge}>{active.length}</span></div>
               <div style={S.grid}>
-                {active.map((g) => <GoalCard key={g.id} g={g} onOpen={() => setSelectedId(g.id)} />)}
+                {active.map((g) => <GoalCard key={g.id} g={g} onOpen={() => setSelectedId(g.id)} onDelete={() => deleteGoal(g.id, g.title)} />)}
               </div>
             </>
           )}
@@ -149,37 +155,45 @@ export default function GoldenBookScreen() {
             <>
               <div style={{ ...S.sectionTitle, marginTop: 22 }}><Trophy size={15} color="#4C9A6B" /> Manifested <span style={S.badge}>{manifested.length}</span></div>
               <div style={S.grid}>
-                {manifested.map((g) => <GoalCard key={g.id} g={g} onOpen={() => setSelectedId(g.id)} achieved />)}
+                {manifested.map((g) => <GoalCard key={g.id} g={g} onOpen={() => setSelectedId(g.id)} onDelete={() => deleteGoal(g.id, g.title)} achieved />)}
               </div>
             </>
           )}
         </>
       )}
+
+      <UndoToast toasts={toasts} onUndo={handleUndo} onDismiss={handleDismiss} />
     </div>
   );
 }
 
-function GoalCard({ g, onOpen, achieved }) {
+function GoalCard({ g, onOpen, onDelete, achieved }) {
   return (
-    <button onClick={onOpen} style={{ ...S.goalCard, ...(achieved ? { opacity: 0.96 } : {}) }}>
-      <div style={S.thumbWrap}>
-        {g.image
-          ? <img src={g.image} alt="" style={S.thumb} />
-          : <div style={S.thumbEmpty}><Sparkles size={26} color="var(--text-3)" /></div>}
-        {achieved && <span style={S.stamp}>✦ Manifested</span>}
-      </div>
-      <div style={S.goalBody}>
-        <div style={S.goalTitle}>{g.title}</div>
-        <div style={S.goalMeta}>
-          {achieved
-            ? <span style={{ ...S.metaPill, color: "#4C9A6B", background: "rgba(76,154,107,0.12)" }}>
-                <Trophy size={12} /> {g.days_to_manifest != null ? `in ${g.days_to_manifest} day${g.days_to_manifest === 1 ? "" : "s"}` : "done"}
-              </span>
-            : <span style={{ ...S.metaPill, color: "#C2773B", background: "rgba(194,119,59,0.12)" }}><Flame size={12} /> {g.streak} day streak</span>}
-          <span style={S.metaDim}>{g.total_days} entr{g.total_days === 1 ? "y" : "ies"}</span>
+    <div style={{ ...S.goalCard, ...(achieved ? { opacity: 0.96 } : {}), position: "relative" }}>
+      <button onClick={onOpen} style={S.goalCardBtn}>
+        <div style={S.thumbWrap}>
+          {g.image
+            ? <img src={g.image} alt="" style={S.thumb} />
+            : <div style={S.thumbEmpty}><Sparkles size={26} color="var(--text-3)" /></div>}
+          {achieved && <span style={S.stamp}>✦ Manifested</span>}
         </div>
-      </div>
-    </button>
+        <div style={S.goalBody}>
+          <div style={S.goalTitle}>{g.title}</div>
+          <div style={S.goalMeta}>
+            {achieved
+              ? <span style={{ ...S.metaPill, color: "#4C9A6B", background: "rgba(76,154,107,0.12)" }}>
+                  <Trophy size={12} /> {g.days_to_manifest != null ? `in ${g.days_to_manifest} day${g.days_to_manifest === 1 ? "" : "s"}` : "done"}
+                </span>
+              : <span style={{ ...S.metaPill, color: "#C2773B", background: "rgba(194,119,59,0.12)" }}><Flame size={12} /> {g.streak} day streak</span>}
+            <span style={S.metaDim}>{g.total_days} entr{g.total_days === 1 ? "y" : "ies"}</span>
+          </div>
+        </div>
+      </button>
+      <button onClick={(e) => { e.stopPropagation(); if (window.confirm(`Delete "${g.title}"?`)) onDelete(); }}
+        style={S.cardDelBtn} title="Delete dream">
+        <Trash2 size={14} />
+      </button>
+    </div>
   );
 }
 
@@ -224,9 +238,19 @@ function GoalDetail({ goalId, onBack, onReload, onCelebrate, pickImage, musicId,
   };
   const changePhoto = (img) => api.updateGolden(goalId, { image: img }).then(() => { load(); onReload(); });
 
+  const remove = async () => {
+    if (!window.confirm(`Delete "${g.title}"? This cannot be undone from here.`)) return;
+    await api.deleteGolden(goalId);
+    onReload();
+    onBack();
+  };
+
   return (
     <>
-      <button onClick={onBack} style={S.backBtn}><ArrowLeft size={16} /> All dreams</button>
+      <div style={S.detailTopRow}>
+        <button onClick={onBack} style={S.backBtn}><ArrowLeft size={16} /> All dreams</button>
+        <button onClick={remove} style={S.deleteBtn} title="Delete dream"><Trash2 size={14} /> Delete</button>
+      </div>
 
       <div style={S.detailHero}>
         <label style={S.heroPhoto}>
@@ -357,7 +381,9 @@ const S = {
   sectionTitle: { display: "flex", alignItems: "center", gap: 7, fontSize: 13, fontWeight: 700, color: "var(--text-2)", marginBottom: 12 },
   badge: { fontSize: 11, fontWeight: 700, background: "var(--hover)", color: "var(--text-2)", borderRadius: 10, padding: "1px 7px" },
   grid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 14 },
-  goalCard: { textAlign: "left", border: "1px solid var(--border)", background: "var(--surface)", borderRadius: 14, overflow: "hidden", cursor: "pointer", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", padding: 0, fontFamily: "inherit", display: "flex", flexDirection: "column" },
+  goalCard: { textAlign: "left", border: "1px solid var(--border)", background: "var(--surface)", borderRadius: 14, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", display: "flex", flexDirection: "column" },
+  goalCardBtn: { textAlign: "left", border: "none", background: "none", cursor: "pointer", padding: 0, fontFamily: "inherit", display: "flex", flexDirection: "column", width: "100%" },
+  cardDelBtn: { position: "absolute", top: 8, left: 8, border: "none", background: "rgba(0,0,0,0.55)", color: "#fff", width: 26, height: 26, borderRadius: 7, cursor: "pointer", display: "grid", placeItems: "center", zIndex: 2 },
   thumbWrap: { position: "relative", width: "100%", aspectRatio: "16 / 10", background: "var(--surface-2)" },
   thumb: { width: "100%", height: "100%", objectFit: "cover", display: "block" },
   thumbEmpty: { width: "100%", height: "100%", display: "grid", placeItems: "center" },
@@ -368,7 +394,9 @@ const S = {
   metaPill: { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 700, padding: "2px 8px", borderRadius: 10 },
   metaDim: { fontSize: 11, color: "var(--text-3)", fontWeight: 500 },
 
-  backBtn: { display: "inline-flex", alignItems: "center", gap: 6, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-2)", padding: "7px 12px", borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", marginBottom: 16 },
+  detailTopRow: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, gap: 10 },
+  backBtn: { display: "inline-flex", alignItems: "center", gap: 6, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-2)", padding: "7px 12px", borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
+  deleteBtn: { display: "inline-flex", alignItems: "center", gap: 6, border: "1px solid rgba(194,83,107,0.4)", background: "rgba(194,83,107,0.08)", color: "#C2536B", padding: "7px 12px", borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
   detailHero: { display: "flex", flexDirection: "column", gap: 14, marginBottom: 16 },
   heroPhoto: { position: "relative", width: "100%", borderRadius: 14, overflow: "hidden", border: "1px solid var(--border)", cursor: "pointer", background: "var(--surface-2)", display: "flex", alignItems: "center", justifyContent: "center", minHeight: 120 },
   heroImg: { width: "100%", maxHeight: "62vh", objectFit: "contain", display: "block" },

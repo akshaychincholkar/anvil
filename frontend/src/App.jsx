@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import {
   LayoutGrid, Target, CheckSquare, BookOpen,
   GraduationCap, Star, RotateCcw, Menu, X,
-  Sparkles, LogOut, Trees, IndianRupee, Settings, Landmark, Rocket, Crown, Headphones, Trophy
+  Sparkles, LogOut, Trees, IndianRupee, Settings, Landmark, Rocket, Crown, Headphones, Trophy, PartyPopper, Wallet, ReceiptText
 } from "lucide-react";
 import QuadrantView from "./screens/QuadrantView.jsx";
 import GoalsWithGantt from "./screens/GoalsWithGantt.jsx";
@@ -15,16 +15,20 @@ import AffirmationsScreen from "./screens/AffirmationsScreen.jsx";
 import GroveScreen from "./screens/GroveScreen.jsx";
 import WorthScreen from "./screens/WorthScreen.jsx";
 import AuthScreen from "./screens/AuthScreen.jsx";
+import ResetPasswordScreen from "./screens/ResetPasswordScreen.jsx";
 import FinanceScreen from "./screens/FinanceScreen.jsx";
 import KickstartScreen from "./screens/KickstartScreen.jsx";
 import GoldenBookScreen from "./screens/GoldenBookScreen.jsx";
 import MindscapeScreen from "./screens/MindscapeScreen.jsx";
 import AchievementsScreen from "./screens/AchievementsScreen.jsx";
+import DelightScreen from "./screens/DelightScreen.jsx";
+import ExpensesScreen from "./screens/ExpensesScreen.jsx";
 import SettingsModal from "./screens/SettingsModal.jsx";
 import Ticker from "./components/Ticker.jsx";
 import { api, getToken, clearToken } from "./api.js";
 import { applyTheme, getStoredThemeId } from "./theme.js";
 import { getCurrencyCode, setCurrencyCode } from "./currency.js";
+import { getMonthStartDay, setMonthStartDay } from "./monthCycle.js";
 
 // Apply the stored theme immediately so there's no flash before React mounts.
 applyTheme(getStoredThemeId(), false);
@@ -41,7 +45,8 @@ const SCREENS = {
   goals:        { label: "Goals",        icon: Target,        component: GoalsWithGantt },
   grove:        { label: "Grove",        icon: Trees,         component: GroveScreen },
   worth:        { label: "Rewards",      icon: IndianRupee,   component: WorthScreen },
-  vault:        { label: "Vault",        icon: Landmark,      component: FinanceScreen },
+  vault:        { label: "Wallet",       icon: Wallet,        component: FinanceScreen },
+  expenses:     { label: "Expenses",     icon: ReceiptText,   component: ExpensesScreen },
   journal:      { label: "Journal",      icon: BookOpen,      component: JournalScreen },
   revision:     { label: "Revision",     icon: RotateCcw,     component: RevisionScreen },
   affirmations: { label: "Affirmations", icon: Sparkles,      component: AffirmationsScreen },
@@ -49,12 +54,13 @@ const SCREENS = {
   spiritual:    { label: "Spiritual",    icon: Star,          component: SpiritualScreen },
   mindscape:    { label: "Mindscape",    icon: Headphones,    component: MindscapeScreen },
   achievements: { label: "Achievements", icon: Trophy,        component: AchievementsScreen },
+  delight:      { label: "Delights",     icon: PartyPopper,   component: DelightScreen },
 };
 
 // Default sidebar order (flat items). Users can reorder/hide via Settings.
 const DEFAULT_ORDER = [
   "kickstart", "golden", "habits", "quadrant", "goals", "grove", "journal",
-  "revision", "affirmations", "skills", "spiritual", "mindscape", "achievements", "worth", "vault",
+  "revision", "affirmations", "skills", "spiritual", "mindscape", "achievements", "delight", "worth", "vault", "expenses",
 ];
 
 // Merge a saved order with the registry so newly-added screens always appear,
@@ -89,9 +95,11 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [themeId, setThemeId] = useState(getStoredThemeId());
   const [currency, setCurrency] = useState(getCurrencyCode());
+  const [monthStartDay, setMonthStartDayState] = useState(getMonthStartDay());
   const [ticker, setTicker] = useState({ enabled: false, statements: [], speed: 60, delay: 3 });
   const [order, setOrder] = useState(() => normalizeOrder(DEFAULT_ORDER));
   const [hidden, setHidden] = useState([]);
+  const [resetToken] = useState(() => new URLSearchParams(window.location.search).get("reset"));
   const isMobile = useIsMobile();
 
   // Track time spent per screen (for the Worth rewards system): a steady
@@ -131,6 +139,7 @@ export default function App() {
     if (!user) return;
     api.getSetting("theme").then((r) => { if (r?.value) setThemeId(applyTheme(r.value)); }).catch(() => {});
     api.getSetting("currency").then((r) => { if (r?.value) setCurrency(setCurrencyCode(r.value)); }).catch(() => {});
+    api.getSetting("month_start_day").then((r) => { if (r?.value) setMonthStartDayState(setMonthStartDay(r.value)); }).catch(() => {});
     api.getSetting("ticker").then((r) => { if (r?.value) setTicker((t) => ({ ...t, ...r.value })); }).catch(() => {});
     api.getSetting("default_screen").then((r) => {
       if (r?.value && SCREENS[r.value]) { setDefaultScreen(r.value); try { localStorage.setItem(DEFAULT_SCREEN_KEY, r.value); } catch { /* ignore */ } }
@@ -159,6 +168,10 @@ export default function App() {
     setCurrency(setCurrencyCode(code));
     api.setSetting("currency", code).catch(() => {});
   };
+  const selectMonthStartDay = (day) => {
+    setMonthStartDayState(setMonthStartDay(day));
+    api.setSetting("month_start_day", Number(day)).catch(() => {});
+  };
   const saveTicker = (cfg) => {
     setTicker(cfg);
     api.setSetting("ticker", cfg).catch(() => {});
@@ -181,6 +194,14 @@ export default function App() {
   };
 
   const visibleNav = order.filter((id) => !hidden.includes(id));
+
+  // A password-reset link (?reset=<token>) takes over before anything else.
+  if (resetToken) {
+    return <ResetPasswordScreen
+      token={resetToken}
+      onDone={() => { window.history.replaceState({}, "", window.location.pathname); window.location.reload(); }}
+    />;
+  }
 
   if (!authChecked) return <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", fontFamily: "'Inter',system-ui,sans-serif", color: "var(--text-3)" }}>Loading…</div>;
   if (!user) return <AuthScreen onAuthed={setUser} />;
@@ -256,7 +277,7 @@ export default function App() {
                 <X size={20} />
               </button>
             </div>
-            <NavItems />
+            <div style={S.drawerNav}><NavItems /></div>
             <UserFooter />
           </nav>
         </div>
@@ -288,6 +309,7 @@ export default function App() {
           hidden={hidden}
           themeId={themeId}
           currency={currency}
+          monthStartDay={monthStartDay}
           ticker={ticker}
           defaultScreen={defaultScreen}
           onSetDefault={setDefault}
@@ -295,6 +317,7 @@ export default function App() {
           onPreviewTheme={previewTheme}
           onCommitTheme={commitTheme}
           onSelectCurrency={selectCurrency}
+          onSelectMonthStartDay={selectMonthStartDay}
           onSaveTicker={saveTicker}
           onClose={closeSettings}
         />
@@ -383,6 +406,7 @@ const S = {
   footerWrap: {
     marginTop: "auto",
     paddingTop: 8,
+    flexShrink: 0,
   },
   settingsBtn: {
     display: "flex",
@@ -469,12 +493,21 @@ const S = {
     padding: "16px 10px",
     gap: 2,
     boxShadow: "4px 0 24px rgba(0,0,0,0.12)",
+    overflow: "hidden", // the nav list scrolls inside; header + footer stay pinned
+  },
+  // Scrollable nav-item region so the user profile / sign-out footer is always reachable.
+  drawerNav: {
+    flex: 1,
+    minHeight: 0,
+    overflowY: "auto",
+    overflowX: "hidden",
   },
   drawerHeader: {
     display: "flex",
     alignItems: "flex-start",
     justifyContent: "space-between",
     marginBottom: 4,
+    flexShrink: 0,
   },
   closeBtn: {
     border: "none",

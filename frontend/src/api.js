@@ -34,6 +34,8 @@ export const api = {
   register: (data) => req("POST", "/auth/register", data),
   login: (data) => req("POST", "/auth/login", data),
   me: () => req("GET", "/auth/me"),
+  forgotPassword: (email) => req("POST", "/auth/forgot", { email }),
+  resetPassword: (token, password) => req("POST", "/auth/reset", { token, password }),
 
   // Google Calendar auth
   getGcalStatus: () => req("GET", "/auth/google/status"),
@@ -87,12 +89,35 @@ export const api = {
   deleteKickstart: (id) => req("DELETE", `/kickstart/videos/${id}`),
   restoreKickstart: (id) => req("POST", `/kickstart/videos/${id}/restore`),
 
-  // Vault (finance)
+  // Wallet (finance)
   getTxns: () => req("GET", "/finance/txns"),
   createTxn: (data) => req("POST", "/finance/txns", data),
   updateTxn: (id, data) => req("PUT", `/finance/txns/${id}`, data),
   deleteTxn: (id) => req("DELETE", `/finance/txns/${id}`),
   restoreTxn: (id) => req("POST", `/finance/txns/${id}/restore`),
+
+  // Wallet investments (asset generation)
+  getInvestments: () => req("GET", "/finance/investments"),
+  createInvestment: (data) => req("POST", "/finance/investments", data),
+  updateInvestment: (id, data) => req("PUT", `/finance/investments/${id}`, data),
+  deleteInvestment: (id) => req("DELETE", `/finance/investments/${id}`),
+  restoreInvestment: (id) => req("POST", `/finance/investments/${id}/restore`),
+
+  // Wallet fixed items (recurring EMI/rent/SIP — auto-posted each billing cycle)
+  getFixedItems: () => req("GET", "/finance/fixed-items"),
+  createFixedItem: (data) => req("POST", "/finance/fixed-items", data),
+  updateFixedItem: (id, data) => req("PUT", `/finance/fixed-items/${id}`, data),
+  deleteFixedItem: (id) => req("DELETE", `/finance/fixed-items/${id}`),
+
+  // Expenses (icon-based daily spend tracker)
+  getExpenses: () => req("GET", "/expenses"),
+  createExpenseCategory: (data) => req("POST", "/expenses/categories", data),
+  updateExpenseCategory: (id, data) => req("PUT", `/expenses/categories/${id}`, data),
+  deleteExpenseCategory: (id) => req("DELETE", `/expenses/categories/${id}`),
+  createExpenseLog: (data) => req("POST", "/expenses/logs", data),
+  updateExpenseLog: (id, data) => req("PUT", `/expenses/logs/${id}`, data),
+  deleteExpenseLog: (id) => req("DELETE", `/expenses/logs/${id}`),
+  restoreExpenseLog: (id) => req("POST", `/expenses/logs/${id}/restore`),
 
   // Per-user settings (key/value)
   getSetting: (key) => req("GET", `/settings/${key}`),
@@ -180,4 +205,16 @@ export const api = {
   updateAchievement: (id, data) => req("PUT", `/achievements/${id}`, data),
   deleteAchievement: (id) => req("DELETE", `/achievements/${id}`),
   restoreAchievement: (id) => req("POST", `/achievements/${id}/restore`),
+
+  // Delights (customizable collections)
+  getDelight: () => req("GET", "/delight"),
+  createCollection: (data) => req("POST", "/delight/collections", data),
+  updateCollection: (id, data) => req("PUT", `/delight/collections/${id}`, data),
+  deleteCollection: (id) => req("DELETE", `/delight/collections/${id}`),
+  restoreCollection: (id) => req("POST", `/delight/collections/${id}/restore`),
+  createDelightItem: (cid, data) => req("POST", `/delight/collections/${cid}/items`, data),
+  updateDelightItem: (id, data) => req("PUT", `/delight/items/${id}`, data),
+  deleteDelightItem: (id) => req("DELETE", `/delight/items/${id}`),
+  restoreDelightItem: (id) => req("POST", `/delight/items/${id}/restore`),
+  arrangeDelight: (cid, order) => req("PUT", `/delight/collections/${cid}/arrange`, { order }),
 };

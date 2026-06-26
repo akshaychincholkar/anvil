@@ -54,12 +54,39 @@ def verify_token(token: str) -> Optional[int]:
     except Exception:
         return None
 
+# ── Password-reset tokens (signed, single-use, no DB needed) ────────────────────
+RESET_TTL = 60 * 60  # 1 hour
+
+def _cred_fingerprint(password_hash: str, salt: str) -> str:
+    """A short digest of the current credential. Baked into a reset token so the
+    link becomes single-use: once the password changes, the fingerprint no longer
+    matches and any outstanding link is rejected."""
+    return hashlib.sha256(f"{password_hash}:{salt}".encode()).hexdigest()[:16]
+
+def make_reset_token(uid: int, fp: str) -> str:
+    payload = _b64e(json.dumps({"uid": uid, "exp": int(time.time()) + RESET_TTL, "purpose": "reset", "fp": fp}).encode())
+    sig = _b64e(hmac.new(SECRET_KEY.encode(), payload.encode(), hashlib.sha256).digest())
+    return f"{payload}.{sig}"
+
+def verify_reset_token(token: str) -> Optional[dict]:
+    try:
+        payload, sig = token.split(".")
+        expected = _b64e(hmac.new(SECRET_KEY.encode(), payload.encode(), hashlib.sha256).digest())
+        if not hmac.compare_digest(sig, expected):
+            return None
+        data = json.loads(_b64d(payload))
+        if data.get("purpose") != "reset" or data.get("exp", 0) < int(time.time()):
+            return None
+        return data
+    except Exception:
+        return None
+
 def _bearer(request: Request) -> str:
     auth = request.headers.get("authorization", "")
     return auth[7:] if auth.lower().startswith("bearer ") else ""
 
 # Paths that do not require authentication.
-_PUBLIC_API = {"/api/auth/login", "/api/auth/register"}
+_PUBLIC_API = {"/api/auth/login", "/api/auth/register", "/api/auth/forgot", "/api/auth/reset"}
 
 async def auth_dependency(request: Request):
     """Global dependency: authenticate every /api route and stash the uid in a ContextVar."""
@@ -78,6 +105,35 @@ GOOGLE_CLIENT_ID     = os.environ.get("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
 BASE_URL             = os.environ.get("BASE_URL", "http://localhost:8000")
 GCAL_REDIRECT        = f"{BASE_URL}/api/auth/google/callback"
+
+# ── Email (Resend) ────────────────────────────────────────────────────────────
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
+# Default sender works only to your own address in Resend test mode; set a verified
+# domain sender (e.g. "Anvil <noreply@yourdomain.com>") for real delivery.
+RESEND_FROM    = os.environ.get("RESEND_FROM", "Anvil <onboarding@resend.dev>")
+
+def send_email(to: str, subject: str, html: str) -> bool:
+    """Send a transactional email via the Resend HTTP API (no SMTP port needed)."""
+    if not RESEND_API_KEY:
+        print(f"[email] RESEND_API_KEY not set — skipping email to {to}: {subject}")
+        return False
+    import urllib.request, urllib.error
+    data = json.dumps({"from": RESEND_FROM, "to": [to], "subject": subject, "html": html}).encode()
+    req = urllib.request.Request(
+        "https://api.resend.com/emails", data=data, method="POST",
+        headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.status in (200, 201)
+    except urllib.error.HTTPError as e:
+        try: detail = e.read().decode()
+        except Exception: detail = ""
+        print(f"[email] send failed: HTTP {e.code} — {detail}", flush=True)
+        return False
+    except Exception as e:
+        print(f"[email] send failed: {e}", flush=True)
+        return False
 GCAL_SCOPES          = ["https://www.googleapis.com/auth/calendar.events"]
 QUAD_SYMBOL          = {"Q1": "™", "Q2": "©", "Q3": "®", "Q4": "•"}
 
@@ -190,6 +246,62 @@ def login(body: LoginBody):
             raise HTTPException(401, "Invalid email or password")
         return {"token": make_token(row["id"]), "user": _user_public(row)}
 
+class ForgotBody(BaseModel):
+    email: str
+
+class ResetBody(BaseModel):
+    token: str
+    password: str
+
+@app.post("/api/auth/forgot")
+def forgot_password(body: ForgotBody):
+    """Email a password-reset link. Always returns ok so it can't be used to probe
+    which addresses have accounts."""
+    email = (body.email or "").strip().lower()
+    if email:
+        with db() as conn:
+            row = conn.execute(
+                "SELECT id, name, email, password_hash, salt FROM user WHERE lower(email)=?", (email,)
+            ).fetchone()
+        if row and row["password_hash"]:
+            token = make_reset_token(row["id"], _cred_fingerprint(row["password_hash"], row["salt"]))
+            link = f"{BASE_URL}/?reset={token}"
+            name = row["name"] or "there"
+            html = f"""
+            <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;color:#26241f">
+              <h2 style="font-family:Georgia,serif">Reset your Anvil password</h2>
+              <p>Hi {name}, we got a request to reset your password.</p>
+              <p style="margin:24px 0">
+                <a href="{link}" style="background:#4C9A6B;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:700;display:inline-block">Reset password</a>
+              </p>
+              <p style="color:#777;font-size:13px">This link expires in 1 hour and can be used once. If you didn't request this, you can safely ignore this email.</p>
+            </div>"""
+            ok = send_email(row["email"], "Reset your Anvil password", html)
+            if not ok:
+                # Dev fallback: no email provider configured (or send failed) — log the
+                # link so the reset flow is still testable locally without Resend.
+                print(f"[reset] password-reset link for {row['email']}:\n{link}", flush=True)
+    return {"ok": True}
+
+@app.post("/api/auth/reset")
+def reset_password(body: ResetBody):
+    if not body.password or len(body.password) < 6:
+        raise HTTPException(400, "Password must be at least 6 characters")
+    data = verify_reset_token(body.token)
+    if not data:
+        raise HTTPException(400, "This reset link is invalid or has expired")
+    with db() as conn:
+        row = conn.execute("SELECT id, password_hash, salt FROM user WHERE id=?", (data["uid"],)).fetchone()
+        if not row or not row["password_hash"]:
+            raise HTTPException(400, "This reset link is invalid or has expired")
+        # Single-use: token is bound to the credential it was minted for.
+        if data.get("fp") != _cred_fingerprint(row["password_hash"], row["salt"]):
+            raise HTTPException(400, "This reset link has already been used")
+        salt = secrets.token_hex(16)
+        conn.execute("UPDATE user SET password_hash=?, salt=? WHERE id=?",
+                     (hash_password(body.password, salt), salt, row["id"]))
+    return {"ok": True}
+
 @app.get("/api/auth/me")
 def auth_me():
     with db() as conn:
@@ -218,6 +330,22 @@ def _soft_delete(conn, table: str, id_val: int, id_col: str = "id"):
 
 def _restore(conn, table: str, id_val: int, id_col: str = "id"):
     conn.execute(f"UPDATE {table} SET deleted_at=NULL WHERE {id_col}=?", (id_val,))
+
+def _get_month_start_day(conn) -> int:
+    row = conn.execute(f"SELECT value FROM user_setting WHERE user_id={cu()} AND key='month_start_day'").fetchone()
+    try:
+        d = int(json.loads(row["value"])) if row and row["value"] else 1
+    except (ValueError, TypeError):
+        d = 1
+    return min(28, max(1, d))
+
+def _cycle_start(d: date, start_day: int) -> date:
+    """The ISO start date of the billing cycle that `d` falls in, given the configured start-of-month day."""
+    if d.day >= start_day:
+        y, m = d.year, d.month
+    else:
+        y, m = (d.year - 1, 12) if d.month == 1 else (d.year, d.month - 1)
+    return date(y, m, start_day)
 
 
 # ── Pillars ──────────────────────────────────────────────────────────────────
@@ -552,6 +680,7 @@ class HabitCreate(BaseModel):
     type: str = "regular"
     target_count: Optional[int] = None
     period: Optional[str] = None
+    days: Optional[list] = None  # weekly habits: scheduled weekdays (Mon=0..Sun=6)
 
 class HabitUpdate(BaseModel):
     name: Optional[str] = None
@@ -560,6 +689,7 @@ class HabitUpdate(BaseModel):
     type: Optional[str] = None
     target_count: Optional[int] = None
     period: Optional[str] = None
+    days: Optional[list] = None
 
 class HabitLogNote(BaseModel):
     note: str
@@ -590,10 +720,48 @@ def _streaks(logs: list):
             break
     return cur, best
 
+def _scheduled_streaks(logs: list, weekdays: list):
+    """Streaks for habits scheduled on specific weekdays (Mon=0..Sun=6): a chain is
+    consecutive *scheduled* occurrences all completed — non-scheduled days are ignored,
+    and today (if scheduled) is given grace until done."""
+    wset = {int(w) for w in (weekdays or []) if 0 <= int(w) <= 6}
+    if not wset:
+        return 0, 0
+    done = set()
+    for x in logs:
+        if x and len(x) >= 10:
+            try: done.add(date.fromisoformat(x[:10]))
+            except ValueError: pass
+    today = date.today()
+    if done:
+        today = max(today, max(done))
+    # Current chain: walk back from the anchor over scheduled days.
+    cur = 0
+    d = today
+    for _ in range(800):
+        if d.weekday() in wset:
+            if d in done:
+                cur += 1
+            elif d == today:
+                pass  # not done yet today — don't break the chain
+            else:
+                break
+        d -= timedelta(days=1)
+    # Best chain: scan forward from the earliest completion.
+    best = run = 0
+    if done:
+        d = min(done)
+        while d <= today:
+            if d.weekday() in wset:
+                run = run + 1 if d in done else 0
+                best = max(best, run)
+            d += timedelta(days=1)
+    return cur, best
+
 def _habit_full(conn, habit_id: int) -> dict:
     h = conn.execute(f"""
         SELECT h.id, p.name AS pillar, h.name, h.target_per_week, h.reminder_time,
-               h.type, h.target_count, h.period
+               h.type, h.target_count, h.period, h.days
         FROM habit h JOIN pillar p ON h.pillar_id=p.id
         WHERE h.id=? AND h.user_id={cu()} AND h.deleted_at IS NULL
     """, (habit_id,)).fetchone()
@@ -609,10 +777,17 @@ def _habit_full(conn, habit_id: int) -> dict:
         "SELECT date, count FROM habit_log WHERE habit_id=? AND count IS NOT NULL", (habit_id,)
     ).fetchall()}
     d = row_dict(h)
+    try:
+        d["days"] = json.loads(d["days"]) if d.get("days") else []
+    except Exception:
+        d["days"] = []
     d["logs"] = logs
     d["log_notes"] = log_notes
     d["log_counts"] = log_counts
-    cur, mx = _streaks(logs)
+    if d["type"] == "weekly" and d["days"]:
+        cur, mx = _scheduled_streaks(logs, d["days"])
+    else:
+        cur, mx = _streaks(logs)
     d["streak"] = cur
     d["max_streak"] = mx
     return d
@@ -629,9 +804,10 @@ def get_habits():
 def create_habit(body: HabitCreate):
     with db() as conn:
         pid = pillar_id(conn, body.pillar)
+        days = json.dumps(body.days) if body.days else None
         cur = conn.execute(
-            f"INSERT INTO habit (user_id,pillar_id,name,target_per_week,type,target_count,period) VALUES ({cu()},?,?,?,?,?,?)",
-            (pid, body.name, body.target_per_week, body.type, body.target_count, body.period)
+            f"INSERT INTO habit (user_id,pillar_id,name,target_per_week,type,target_count,period,days) VALUES ({cu()},?,?,?,?,?,?,?)",
+            (pid, body.name, body.target_per_week, body.type, body.target_count, body.period, days)
         )
         return _habit_full(conn, cur.lastrowid)
 
@@ -639,6 +815,8 @@ def create_habit(body: HabitCreate):
 def update_habit(habit_id: int, body: HabitUpdate):
     with db() as conn:
         updates = {k: v for k, v in body.dict().items() if v is not None}
+        if "days" in updates:  # store the weekday list as JSON
+            updates["days"] = json.dumps(updates["days"])
         if updates:
             sets = ", ".join(f"{k}=?" for k in updates)
             conn.execute(f"UPDATE habit SET {sets} WHERE id=? AND user_id={cu()}", (*updates.values(), habit_id))
@@ -1392,6 +1570,322 @@ def restore_txn(txn_id: int):
         return _txn_row(r) if r else {}
 
 
+# ── Wallet investments (asset generation: invested vs current value) ────────
+
+class InvestmentCreate(BaseModel):
+    name: str
+    kind: str = "Other"
+    invested: float = 0
+    current_value: float = 0
+    note: str = ""
+    date: Optional[str] = None   # YYYY-MM-DD
+
+class InvestmentUpdate(BaseModel):
+    name: Optional[str] = None
+    kind: Optional[str] = None
+    invested: Optional[float] = None
+    current_value: Optional[float] = None
+    note: Optional[str] = None
+    date: Optional[str] = None
+
+def _investment_row(r):
+    return {"id": r["id"], "name": r["name"], "kind": r["kind"], "invested": r["invested"],
+            "current_value": r["current_value"], "note": r["note"], "date": r["start_date"]}
+
+@app.get("/api/finance/investments")
+def get_investments():
+    with db() as conn:
+        _post_fixed_items(conn)
+        rows = conn.execute(
+            "SELECT id, name, kind, invested, current_value, note, start_date FROM investment "
+            f"WHERE user_id={cu()} AND deleted_at IS NULL ORDER BY start_date DESC, id DESC"
+        ).fetchall()
+        return [_investment_row(r) for r in rows]
+
+@app.post("/api/finance/investments", status_code=201)
+def create_investment(body: InvestmentCreate):
+    d = body.date or date.today().isoformat()
+    with db() as conn:
+        cur = conn.execute(
+            f"INSERT INTO investment (user_id, name, kind, invested, current_value, note, start_date) VALUES ({cu()}, ?, ?, ?, ?, ?, ?)",
+            (body.name.strip(), body.kind or "Other", abs(body.invested or 0), abs(body.current_value or 0), body.note or "", d)
+        )
+        r = conn.execute("SELECT id, name, kind, invested, current_value, note, start_date FROM investment WHERE id=?", (cur.lastrowid,)).fetchone()
+        return _investment_row(r)
+
+@app.put("/api/finance/investments/{inv_id}")
+def update_investment(inv_id: int, body: InvestmentUpdate):
+    updates = {k: v for k, v in body.dict().items() if v is not None}
+    if "date" in updates:
+        updates["start_date"] = updates.pop("date")
+    if "invested" in updates:
+        updates["invested"] = abs(updates["invested"])
+    if "current_value" in updates:
+        updates["current_value"] = abs(updates["current_value"])
+    if "name" in updates:
+        updates["name"] = updates["name"].strip()
+    with db() as conn:
+        if updates:
+            sets = ", ".join(f"{k}=?" for k in updates)
+            conn.execute(f"UPDATE investment SET {sets} WHERE id=? AND user_id={cu()}", (*updates.values(), inv_id))
+        r = conn.execute("SELECT id, name, kind, invested, current_value, note, start_date FROM investment WHERE id=?", (inv_id,)).fetchone()
+        if not r:
+            raise HTTPException(404)
+        return _investment_row(r)
+
+@app.delete("/api/finance/investments/{inv_id}", status_code=204)
+def delete_investment(inv_id: int):
+    with db() as conn:
+        _soft_delete(conn, "investment", inv_id)
+
+@app.post("/api/finance/investments/{inv_id}/restore")
+def restore_investment(inv_id: int):
+    with db() as conn:
+        _restore(conn, "investment", inv_id)
+        r = conn.execute("SELECT id, name, kind, invested, current_value, note, start_date FROM investment WHERE id=?", (inv_id,)).fetchone()
+        return _investment_row(r) if r else {}
+
+
+# ── Fixed items (recurring monthly EMI/rent/SIP — auto-post each billing cycle) ──
+
+class FixedItemCreate(BaseModel):
+    kind: str                       # 'expense' | 'investment'
+    name: str
+    amount: float = 0
+    category_id: Optional[int] = None   # required when kind='expense'
+    invest_kind: Optional[str] = None   # used when kind='investment'
+    note: str = ""
+
+class FixedItemUpdate(BaseModel):
+    name: Optional[str] = None
+    amount: Optional[float] = None
+    category_id: Optional[int] = None
+    invest_kind: Optional[str] = None
+    note: Optional[str] = None
+    active: Optional[bool] = None
+
+def _fixed_item_row(r):
+    return {"id": r["id"], "kind": r["kind"], "name": r["name"], "amount": r["amount"],
+            "category_id": r["category_id"], "invest_kind": r["invest_kind"], "note": r["note"],
+            "active": bool(r["active"])}
+
+@app.get("/api/finance/fixed-items")
+def get_fixed_items():
+    with db() as conn:
+        rows = conn.execute(
+            f"SELECT id, kind, name, amount, category_id, invest_kind, note, active FROM fixed_item "
+            f"WHERE user_id={cu()} AND deleted_at IS NULL ORDER BY id"
+        ).fetchall()
+        return [_fixed_item_row(r) for r in rows]
+
+@app.post("/api/finance/fixed-items", status_code=201)
+def create_fixed_item(body: FixedItemCreate):
+    if body.kind not in ("expense", "investment"):
+        raise HTTPException(400, "kind must be expense or investment")
+    if body.kind == "expense" and not body.category_id:
+        raise HTTPException(400, "category_id is required for a fixed expense")
+    with db() as conn:
+        cur = conn.execute(
+            f"INSERT INTO fixed_item (user_id, kind, name, amount, category_id, invest_kind, note) "
+            f"VALUES ({cu()}, ?, ?, ?, ?, ?, ?)",
+            (body.kind, body.name.strip(), abs(body.amount or 0), body.category_id, body.invest_kind, body.note or "")
+        )
+        r = conn.execute("SELECT id, kind, name, amount, category_id, invest_kind, note, active FROM fixed_item WHERE id=?", (cur.lastrowid,)).fetchone()
+        _post_fixed_items(conn, only_id=cur.lastrowid)  # post immediately for the current cycle
+        return _fixed_item_row(r)
+
+@app.put("/api/finance/fixed-items/{fid}")
+def update_fixed_item(fid: int, body: FixedItemUpdate):
+    updates = {k: v for k, v in body.dict().items() if v is not None}
+    if "amount" in updates:
+        updates["amount"] = abs(updates["amount"])
+    if "name" in updates:
+        updates["name"] = updates["name"].strip()
+    if "active" in updates:
+        updates["active"] = 1 if updates["active"] else 0
+    with db() as conn:
+        if updates:
+            sets = ", ".join(f"{k}=?" for k in updates)
+            conn.execute(f"UPDATE fixed_item SET {sets} WHERE id=? AND user_id={cu()}", (*updates.values(), fid))
+        r = conn.execute("SELECT id, kind, name, amount, category_id, invest_kind, note, active FROM fixed_item WHERE id=?", (fid,)).fetchone()
+        if not r:
+            raise HTTPException(404)
+        return _fixed_item_row(r)
+
+@app.delete("/api/finance/fixed-items/{fid}", status_code=204)
+def delete_fixed_item(fid: int):
+    with db() as conn:
+        _soft_delete(conn, "fixed_item", fid)
+
+def _post_fixed_items(conn, only_id: int = None):
+    """Auto-create the actual expense_log / investment row for the current
+    billing cycle for every active fixed_item that hasn't posted yet this cycle."""
+    start_day = _get_month_start_day(conn)
+    cycle_start = _cycle_start(date.today(), start_day).isoformat()
+    q = f"SELECT * FROM fixed_item WHERE user_id={cu()} AND active=1 AND deleted_at IS NULL"
+    if only_id:
+        q += f" AND id={only_id}"
+    items = conn.execute(q).fetchall()
+    for it in items:
+        already = conn.execute(
+            "SELECT id FROM fixed_posting WHERE fixed_item_id=? AND cycle_start=?", (it["id"], cycle_start)
+        ).fetchone()
+        if already:
+            continue
+        if it["kind"] == "expense":
+            cat = conn.execute(
+                f"SELECT id FROM expense_category WHERE id=? AND user_id={cu()} AND deleted_at IS NULL", (it["category_id"],)
+            ).fetchone()
+            if not cat:
+                continue
+            cur = conn.execute(
+                f"INSERT INTO expense_log (user_id, category_id, amount, note, log_date) VALUES ({cu()}, ?, ?, ?, ?)",
+                (it["category_id"], it["amount"], it["note"] or f"Fixed: {it['name']}", cycle_start)
+            )
+            conn.execute(
+                "INSERT INTO fixed_posting (fixed_item_id, cycle_start, expense_log_id) VALUES (?, ?, ?)",
+                (it["id"], cycle_start, cur.lastrowid)
+            )
+        else:
+            cur = conn.execute(
+                f"INSERT INTO investment (user_id, name, kind, invested, current_value, note, start_date) "
+                f"VALUES ({cu()}, ?, ?, ?, ?, ?, ?)",
+                (it["name"], it["invest_kind"] or "Other", it["amount"], it["amount"], it["note"] or f"Fixed: {it['name']}", cycle_start)
+            )
+            conn.execute(
+                "INSERT INTO fixed_posting (fixed_item_id, cycle_start, investment_id) VALUES (?, ?, ?)",
+                (it["id"], cycle_start, cur.lastrowid)
+            )
+
+
+# ── Expenses (icon-based daily spend tracker) ────────────────────────────────
+
+class ExpenseCategoryCreate(BaseModel):
+    name: str
+    icon: str = "ShoppingBag"
+    color: str = "#C9772E"
+
+class ExpenseCategoryUpdate(BaseModel):
+    name: Optional[str] = None
+    icon: Optional[str] = None
+    color: Optional[str] = None
+
+class ExpenseLogCreate(BaseModel):
+    category_id: int
+    amount: float = 0
+    note: str = ""
+    date: Optional[str] = None   # YYYY-MM-DD
+
+class ExpenseLogUpdate(BaseModel):
+    category_id: Optional[int] = None
+    amount: Optional[float] = None
+    note: Optional[str] = None
+    date: Optional[str] = None
+
+def _own_expense_category(conn, cid):
+    row = conn.execute(
+        f"SELECT id FROM expense_category WHERE id=? AND user_id={cu()} AND deleted_at IS NULL", (cid,)
+    ).fetchone()
+    if not row:
+        raise HTTPException(404, "Category not found")
+
+@app.get("/api/expenses")
+def get_expenses():
+    with db() as conn:
+        _post_fixed_items(conn)
+        cats = conn.execute(
+            f"SELECT id, name, icon, color, position FROM expense_category WHERE user_id={cu()} AND deleted_at IS NULL "
+            "ORDER BY position, id"
+        ).fetchall()
+        logs = conn.execute(
+            f"SELECT id, category_id, amount, note, log_date FROM expense_log WHERE user_id={cu()} AND deleted_at IS NULL "
+            "ORDER BY log_date DESC, id DESC"
+        ).fetchall()
+        return {
+            "categories": [{"id": c["id"], "name": c["name"], "icon": c["icon"], "color": c["color"], "position": c["position"]} for c in cats],
+            "logs": [{"id": l["id"], "category_id": l["category_id"], "amount": l["amount"], "note": l["note"], "date": l["log_date"]} for l in logs],
+        }
+
+@app.post("/api/expenses/categories", status_code=201)
+def create_expense_category(body: ExpenseCategoryCreate):
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(400, "Name is required")
+    with db() as conn:
+        pos = conn.execute(f"SELECT COALESCE(MAX(position),-1)+1 p FROM expense_category WHERE user_id={cu()}").fetchone()["p"]
+        cur = conn.execute(
+            f"INSERT INTO expense_category (user_id, name, icon, color, position) VALUES ({cu()}, ?, ?, ?, ?)",
+            (name, body.icon or "ShoppingBag", body.color or "#C9772E", pos)
+        )
+        r = conn.execute("SELECT id, name, icon, color, position FROM expense_category WHERE id=?", (cur.lastrowid,)).fetchone()
+        return dict(r)
+
+@app.put("/api/expenses/categories/{cid}")
+def update_expense_category(cid: int, body: ExpenseCategoryUpdate):
+    with db() as conn:
+        _own_expense_category(conn, cid)
+        updates = {k: v for k, v in body.dict().items() if v is not None}
+        if "name" in updates:
+            updates["name"] = updates["name"].strip()
+        if updates:
+            sets = ", ".join(f"{k}=?" for k in updates)
+            conn.execute(f"UPDATE expense_category SET {sets} WHERE id=?", (*updates.values(), cid))
+        r = conn.execute("SELECT id, name, icon, color, position FROM expense_category WHERE id=?", (cid,)).fetchone()
+        return dict(r)
+
+@app.delete("/api/expenses/categories/{cid}", status_code=204)
+def delete_expense_category(cid: int):
+    with db() as conn:
+        _own_expense_category(conn, cid)
+        _soft_delete(conn, "expense_category", cid)
+
+def _exp_log_row(r):
+    return {"id": r["id"], "category_id": r["category_id"], "amount": r["amount"], "note": r["note"], "date": r["log_date"]}
+
+@app.post("/api/expenses/logs", status_code=201)
+def create_expense_log(body: ExpenseLogCreate):
+    with db() as conn:
+        _own_expense_category(conn, body.category_id)
+        d = body.date or date.today().isoformat()
+        cur = conn.execute(
+            f"INSERT INTO expense_log (user_id, category_id, amount, note, log_date) VALUES ({cu()}, ?, ?, ?, ?)",
+            (body.category_id, abs(body.amount or 0), body.note or "", d)
+        )
+        r = conn.execute("SELECT id, category_id, amount, note, log_date FROM expense_log WHERE id=?", (cur.lastrowid,)).fetchone()
+        return _exp_log_row(r)
+
+@app.put("/api/expenses/logs/{lid}")
+def update_expense_log(lid: int, body: ExpenseLogUpdate):
+    updates = {k: v for k, v in body.dict().items() if v is not None}
+    if "category_id" in updates:
+        with db() as conn:
+            _own_expense_category(conn, updates["category_id"])
+    if "date" in updates:
+        updates["log_date"] = updates.pop("date")
+    if "amount" in updates:
+        updates["amount"] = abs(updates["amount"])
+    with db() as conn:
+        if updates:
+            sets = ", ".join(f"{k}=?" for k in updates)
+            conn.execute(f"UPDATE expense_log SET {sets} WHERE id=? AND user_id={cu()}", (*updates.values(), lid))
+        r = conn.execute("SELECT id, category_id, amount, note, log_date FROM expense_log WHERE id=?", (lid,)).fetchone()
+        if not r:
+            raise HTTPException(404)
+        return _exp_log_row(r)
+
+@app.delete("/api/expenses/logs/{lid}", status_code=204)
+def delete_expense_log(lid: int):
+    with db() as conn:
+        _soft_delete(conn, "expense_log", lid)
+
+@app.post("/api/expenses/logs/{lid}/restore")
+def restore_expense_log(lid: int):
+    with db() as conn:
+        _restore(conn, "expense_log", lid)
+        r = conn.execute("SELECT id, category_id, amount, note, log_date FROM expense_log WHERE id=?", (lid,)).fetchone()
+        return _exp_log_row(r) if r else {}
+
+
 # ── Kickstart (motivation video hub) ─────────────────────────────────────────
 
 class KickstartCreate(BaseModel):
@@ -1808,6 +2302,210 @@ def restore_achievement(aid: int):
         _restore(conn, "achievement", aid)
         r = conn.execute(f"SELECT {_ACH_COLS} FROM achievement WHERE id=?", (aid,)).fetchone()
         return _achievement_row(conn, r)
+
+
+# ── Delights (customizable collections: books, movies, places…) ─────────────────
+
+# Starter collections seeded the first time a user opens the section.
+DELIGHT_SEED = [
+    ("Books", [{"name": "Author", "type": "text"}, {"name": "Tag", "type": "text"}]),
+    ("Movies", [{"name": "Director", "type": "text"}, {"name": "Tag", "type": "text"}]),
+    ("Places to visit", [{"name": "Speciality", "type": "text"}, {"name": "Distance", "type": "text"}, {"name": "Tag", "type": "text"}]),
+    ("Restaurants", [{"name": "Cuisine", "type": "text"}, {"name": "Location", "type": "text"}, {"name": "Tag", "type": "text"}]),
+]
+
+DELIGHT_COL_TYPES = ("text", "number", "link")
+
+class CollectionCreate(BaseModel):
+    name: str
+    columns: list = []
+
+class CollectionUpdate(BaseModel):
+    name: Optional[str] = None
+    columns: Optional[list] = None
+
+DELIGHT_STATUSES = ("todo", "doing", "done")
+
+class DelightItemCreate(BaseModel):
+    name: str
+    fields: dict = {}
+    status: str = "todo"
+
+class DelightItemUpdate(BaseModel):
+    name: Optional[str] = None
+    fields: Optional[dict] = None
+    status: Optional[str] = None
+
+class ArrangeBody(BaseModel):
+    order: list  # [{id, status, position}] — the full desired arrangement for one collection
+
+def _clean_columns(cols) -> list:
+    out, seen = [], set()
+    for c in (cols or []):
+        if isinstance(c, dict):
+            label = str(c.get("name", "")).strip()
+            ctype = str(c.get("type", "text")).strip().lower()
+        else:
+            label = str(c).strip()
+            ctype = "text"
+        if ctype not in DELIGHT_COL_TYPES:
+            ctype = "text"
+        if label and label.lower() not in seen:
+            seen.add(label.lower())
+            out.append({"name": label, "type": ctype})
+    return out[:6]  # keep it sane
+
+def _delight_payload(conn):
+    cols = conn.execute(
+        f"SELECT id, name, columns, position FROM delight_collection WHERE user_id={cu()} AND deleted_at IS NULL "
+        "ORDER BY position, id"
+    ).fetchall()
+    result = []
+    for c in cols:
+        try: columns = json.loads(c["columns"] or "[]")
+        except Exception: columns = []
+        # Back-compat: older collections stored columns as plain strings.
+        columns = [
+            {"name": col, "type": "text"} if isinstance(col, str) else
+            {"name": col.get("name", ""), "type": col.get("type", "text")}
+            for col in columns
+        ]
+        items = conn.execute(
+            "SELECT id, name, fields, done, status, position FROM delight_item WHERE collection_id=? AND deleted_at IS NULL ORDER BY position, id",
+            (c["id"],)
+        ).fetchall()
+        item_list = []
+        for it in items:
+            try: fields = json.loads(it["fields"] or "{}")
+            except Exception: fields = {}
+            status = it["status"] if it["status"] in DELIGHT_STATUSES else "todo"
+            item_list.append({"id": it["id"], "name": it["name"], "fields": fields, "done": bool(it["done"]),
+                              "status": status, "position": it["position"]})
+        result.append({"id": c["id"], "name": c["name"], "columns": columns, "items": item_list})
+    return result
+
+def _own_collection(conn, cid):
+    row = conn.execute(
+        f"SELECT id FROM delight_collection WHERE id=? AND user_id={cu()} AND deleted_at IS NULL", (cid,)
+    ).fetchone()
+    if not row:
+        raise HTTPException(404, "Collection not found")
+
+@app.get("/api/delight")
+def get_delight():
+    with db() as conn:
+        # Seed the starter set the very first time (only when the user has no rows at all,
+        # so deleting them won't bring them back).
+        ever = conn.execute(f"SELECT COUNT(*) c FROM delight_collection WHERE user_id={cu()}").fetchone()["c"]
+        if ever == 0:
+            for i, (name, columns) in enumerate(DELIGHT_SEED):
+                conn.execute(
+                    f"INSERT INTO delight_collection (user_id, name, columns, position) VALUES ({cu()}, ?, ?, ?)",
+                    (name, json.dumps(columns), i)
+                )
+        return _delight_payload(conn)
+
+@app.post("/api/delight/collections", status_code=201)
+def create_collection(body: CollectionCreate):
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(400, "Name is required")
+    with db() as conn:
+        pos = conn.execute(f"SELECT COALESCE(MAX(position),-1)+1 p FROM delight_collection WHERE user_id={cu()}").fetchone()["p"]
+        conn.execute(
+            f"INSERT INTO delight_collection (user_id, name, columns, position) VALUES ({cu()}, ?, ?, ?)",
+            (name, json.dumps(_clean_columns(body.columns)), pos)
+        )
+        return _delight_payload(conn)
+
+@app.put("/api/delight/collections/{cid}")
+def update_collection(cid: int, body: CollectionUpdate):
+    with db() as conn:
+        _own_collection(conn, cid)
+        if body.name is not None and body.name.strip():
+            conn.execute("UPDATE delight_collection SET name=? WHERE id=?", (body.name.strip(), cid))
+        if body.columns is not None:
+            conn.execute("UPDATE delight_collection SET columns=? WHERE id=?", (json.dumps(_clean_columns(body.columns)), cid))
+        return _delight_payload(conn)
+
+@app.delete("/api/delight/collections/{cid}", status_code=204)
+def delete_collection(cid: int):
+    with db() as conn:
+        _soft_delete(conn, "delight_collection", cid)
+
+@app.post("/api/delight/collections/{cid}/restore")
+def restore_collection(cid: int):
+    with db() as conn:
+        _restore(conn, "delight_collection", cid)
+        return _delight_payload(conn)
+
+@app.post("/api/delight/collections/{cid}/items", status_code=201)
+def create_delight_item(cid: int, body: DelightItemCreate):
+    if not (body.name or "").strip():
+        raise HTTPException(400, "Name is required")
+    status = body.status if body.status in DELIGHT_STATUSES else "todo"
+    with db() as conn:
+        _own_collection(conn, cid)
+        pos = conn.execute(
+            "SELECT COALESCE(MAX(position),-1)+1 p FROM delight_item WHERE collection_id=? AND status=? AND deleted_at IS NULL",
+            (cid, status)
+        ).fetchone()["p"]
+        conn.execute(
+            "INSERT INTO delight_item (collection_id, name, fields, done, status, position) VALUES (?, ?, ?, ?, ?, ?)",
+            (cid, body.name.strip(), json.dumps(body.fields or {}), 1 if status == "done" else 0, status, pos)
+        )
+        return _delight_payload(conn)
+
+def _own_item(conn, iid):
+    row = conn.execute(
+        f"""SELECT i.id FROM delight_item i JOIN delight_collection c ON i.collection_id=c.id
+            WHERE i.id=? AND c.user_id={cu()}""", (iid,)
+    ).fetchone()
+    if not row:
+        raise HTTPException(404, "Item not found")
+
+@app.put("/api/delight/items/{iid}")
+def update_delight_item(iid: int, body: DelightItemUpdate):
+    with db() as conn:
+        _own_item(conn, iid)
+        if body.name is not None and body.name.strip():
+            conn.execute("UPDATE delight_item SET name=? WHERE id=?", (body.name.strip(), iid))
+        if body.fields is not None:
+            conn.execute("UPDATE delight_item SET fields=? WHERE id=?", (json.dumps(body.fields), iid))
+        if body.status is not None and body.status in DELIGHT_STATUSES:
+            conn.execute("UPDATE delight_item SET status=?, done=? WHERE id=?",
+                         (body.status, 1 if body.status == "done" else 0, iid))
+        return _delight_payload(conn)
+
+@app.put("/api/delight/collections/{cid}/arrange")
+def arrange_delight(cid: int, body: ArrangeBody):
+    """Persist the full kanban arrangement (lane + order) after a drag-and-drop."""
+    with db() as conn:
+        _own_collection(conn, cid)
+        for o in (body.order or []):
+            try:
+                iid = int(o.get("id"))
+                pos = int(o.get("position", 0))
+            except (TypeError, ValueError):
+                continue
+            status = o.get("status") if o.get("status") in DELIGHT_STATUSES else "todo"
+            conn.execute(
+                "UPDATE delight_item SET status=?, position=?, done=? WHERE id=? AND collection_id=?",
+                (status, pos, 1 if status == "done" else 0, iid, cid)
+            )
+        return _delight_payload(conn)
+
+@app.delete("/api/delight/items/{iid}", status_code=204)
+def delete_delight_item(iid: int):
+    with db() as conn:
+        _own_item(conn, iid)
+        _soft_delete(conn, "delight_item", iid)
+
+@app.post("/api/delight/items/{iid}/restore")
+def restore_delight_item(iid: int):
+    with db() as conn:
+        _restore(conn, "delight_item", iid)
+        return _delight_payload(conn)
 
 
 # ── Mindscape (audio-only media: Meditation Hub + Visualization) ─────────────

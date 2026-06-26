@@ -1,15 +1,18 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   TrendingUp, TrendingDown, Wallet, Plus, X, ArrowDownLeft, ArrowUpRight,
-  Calculator, PiggyBank, HeartPulse, LineChart, Landmark, Check, Pencil
+  Calculator, PiggyBank, HeartPulse, LineChart, Landmark, Check, Pencil, Sprout,
+  Repeat, Pause, Play
 } from "lucide-react";
 import { api } from "../api.js";
 import { useCurrency, fmtMoney, fmtCompact } from "../currency.js";
+import { useMonthStartDay, cycleRange } from "../monthCycle.js";
 import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
 import UndoToast from "../components/UndoToast.jsx";
 
 const INCOME_CATS  = ["Salary", "Stocks", "Business", "Interest", "Rent", "Gift", "Other"];
 const EXPENSE_CATS = ["Bills", "EMI", "Rent", "Food", "Shopping", "Transport", "Health", "Entertainment", "Education", "Other"];
+const INVEST_KINDS = ["Stocks", "Mutual Fund", "SIP", "Fixed Deposit", "Gold", "Real Estate", "PPF/EPF", "Crypto", "Other"];
 
 const CAT_COLOR = {
   Salary: "#4C9A6B", Stocks: "#3A7CA5", Business: "#C9A227", Interest: "#8268B0", Gift: "#C2773B",
@@ -18,8 +21,18 @@ const CAT_COLOR = {
 };
 const catColor = (c) => CAT_COLOR[c] || "#9A968C";
 
+// Investments shown inside "Outgoing" get their own green-shade palette per
+// holding type, so they read as "money set aside" rather than "money spent".
+const INVEST_CAT_COLOR = {
+  Stocks: "#2F6B4F", "Mutual Fund": "#3E9E6B", SIP: "#4FAE7E", "Fixed Deposit": "#6BBE92",
+  Gold: "#8ECDA8", "Real Estate": "#1F5C3F", "PPF/EPF": "#5BAE83", Crypto: "#7FC79E", Other: "#9AD4B3",
+};
+const investCatColor = (k) => INVEST_CAT_COLOR[k] || "#4C9A6B";
+
 const INCOME = "#3E9E6B";
 const EXPENSE = "#D1556E";
+const INVEST = "#3A7CA5";
+const FIXED = "#8268B0";
 
 const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const TODAY = iso(new Date());
@@ -30,10 +43,10 @@ const PRESETS = [
   { id: "year",  label: "This year" },
   { id: "all",   label: "All time" },
 ];
-function presetRange(id) {
+function presetRange(id, monthStartDay) {
   const now = new Date();
-  if (id === "month") return [iso(new Date(now.getFullYear(), now.getMonth(), 1)), TODAY];
-  if (id === "last")  return [iso(new Date(now.getFullYear(), now.getMonth() - 1, 1)), iso(new Date(now.getFullYear(), now.getMonth(), 0))];
+  if (id === "month") return cycleRange(now, monthStartDay);
+  if (id === "last")  return cycleRange(now, monthStartDay, -1);
   if (id === "year")  return [iso(new Date(now.getFullYear(), 0, 1)), TODAY];
   return ["0000-01-01", "9999-12-31"];
 }
@@ -42,18 +55,53 @@ export default function FinanceScreen() {
   const cur = useCurrency();
   const [tab, setTab] = useState("overview");
   const [txns, setTxns] = useState([]);
+  const [expCats, setExpCats] = useState([]);
+  const [expLogs, setExpLogs] = useState([]);
+  const [investments, setInvestments] = useState([]);
+  const [fixedItems, setFixedItems] = useState([]);
   const [loaded, setLoaded] = useState(false);
 
-  const load = useCallback(() => api.getTxns().then((t) => { setTxns(t); setLoaded(true); }).catch(() => setLoaded(true)), []);
+  const load = useCallback(() => {
+    // Order matters: getExpenses/getInvestments lazily auto-post due fixed
+    // items for the current cycle, so fetch fixed-items list last to reflect that.
+    return Promise.all([api.getTxns(), api.getExpenses(), api.getInvestments()])
+      .then(([t, e, inv]) => {
+        setTxns(t); setExpCats(e.categories); setExpLogs(e.logs); setInvestments(inv);
+        return api.getFixedItems();
+      })
+      .then(setFixedItems)
+      .then(() => setLoaded(true))
+      .catch(() => setLoaded(true));
+  }, []);
   useEffect(() => { load(); }, [load]);
+
+  // Expenses (the icon-based section) are the single source of truth for
+  // outgoing money — convert its logs into the same shape as a finance_txn
+  // so Overview/Money can treat income (finance_txn) and expenses (expense_log)
+  // uniformly. Any old expense-kind finance_txn rows still display (legacy),
+  // they just aren't editable from here anymore.
+  const expCatById = useMemo(() => { const m = {}; expCats.forEach((c) => (m[c.id] = c)); return m; }, [expCats]);
+  const expAsTxns = useMemo(() => expLogs.map((l) => ({
+    id: `exp-${l.id}`, rawId: l.id, source: "expense",
+    kind: "expense",
+    category: expCatById[l.category_id]?.name || "Other",
+    amount: l.amount, note: l.note, date: l.date,
+  })), [expLogs, expCatById]);
+
+  const legacyExpenseTxns = useMemo(() => txns.filter((t) => t.kind === "expense").map((t) => ({ ...t, source: "legacy" })), [txns]);
+  const incomeTxns = useMemo(() => txns.filter((t) => t.kind === "income").map((t) => ({ ...t, source: "legacy" })), [txns]);
+  const allTxns = useMemo(
+    () => [...incomeTxns, ...legacyExpenseTxns, ...expAsTxns].sort((a, b) => b.date.localeCompare(a.date)),
+    [incomeTxns, legacyExpenseTxns, expAsTxns]
+  );
 
   const money = (n) => fmtMoney(n, cur.code);
 
   return (
     <div style={S.page}>
       <div style={S.head}>
-        <div style={S.eyebrow}>Anvil · Vault</div>
-        <h1 style={S.h1}>Vault</h1>
+        <div style={S.eyebrow}>Anvil · Wallet</div>
+        <h1 style={S.h1}>Wallet</h1>
         <div style={S.subhead}>Your money — what comes in, what goes out, and where it's headed.</div>
       </div>
 
@@ -65,8 +113,8 @@ export default function FinanceScreen() {
         ))}
       </div>
 
-      {tab === "overview" && <Overview txns={txns} loaded={loaded} money={money} cur={cur} />}
-      {tab === "money" && <MoneyTab txns={txns} reload={load} money={money} />}
+      {tab === "overview" && <Overview txns={allTxns} investments={investments} loaded={loaded} money={money} cur={cur} />}
+      {tab === "money" && <MoneyTab txns={allTxns} expCats={expCats} investments={investments} fixedItems={fixedItems} reload={load} money={money} cur={cur} />}
       {tab === "calc" && <Calculators money={money} cur={cur} />}
     </div>
   );
@@ -74,9 +122,10 @@ export default function FinanceScreen() {
 
 /* ───────────────────────── Overview ───────────────────────── */
 
-function Overview({ txns, loaded, money, cur }) {
+function Overview({ txns, investments, loaded, money, cur }) {
+  const monthStartDay = useMonthStartDay();
   const [preset, setPreset] = useState("month");
-  const [lo, hi] = presetRange(preset);
+  const [lo, hi] = presetRange(preset, monthStartDay);
 
   const inRange = useMemo(
     () => txns.filter((t) => t.date >= lo && t.date <= hi),
@@ -87,13 +136,30 @@ function Overview({ txns, loaded, money, cur }) {
   const expense = inRange.filter((t) => t.kind === "expense");
   const totalIn = income.reduce((n, t) => n + t.amount, 0);
   const totalOut = expense.reduce((n, t) => n + t.amount, 0);
-  const net = totalIn - totalOut;
+
+  // Investments made within the selected period count as money set aside
+  // (an outgoing, but not a "spend") — they reduce net savings same as expenses.
+  const investedInRange = useMemo(() => investments.filter((i) => i.date >= lo && i.date <= hi), [investments, lo, hi]);
+  const totalInvestedInRange = investedInRange.reduce((n, i) => n + i.invested, 0);
+  const totalOutAll = totalOut + totalInvestedInRange;
+  const net = totalIn - totalOutAll;
+
+  const totalInvested = investments.reduce((n, i) => n + i.invested, 0);
+  const totalCurrentValue = investments.reduce((n, i) => n + i.current_value, 0);
+  const investGain = totalCurrentValue - totalInvested;
 
   const byCat = (list) => {
     const m = {};
     list.forEach((t) => { m[t.category] = (m[t.category] || 0) + t.amount; });
-    return Object.entries(m).map(([category, amount]) => ({ category, amount })).sort((a, b) => b.amount - a.amount);
+    return Object.entries(m).map(([category, amount]) => ({ category, amount, color: catColor(category) })).sort((a, b) => b.amount - a.amount);
   };
+  const expenseSegs = byCat(expense);
+  const investSegs = useMemo(() => {
+    const m = {};
+    investedInRange.forEach((i) => { m[i.kind] = (m[i.kind] || 0) + i.invested; });
+    return Object.entries(m).map(([category, amount]) => ({ category, amount, color: investCatColor(category) })).sort((a, b) => b.amount - a.amount);
+  }, [investedInRange]);
+  const outgoingSegs = [...expenseSegs, ...investSegs];
 
   return (
     <>
@@ -106,19 +172,43 @@ function Overview({ txns, loaded, money, cur }) {
       {/* Summary */}
       <div style={S.sumGrid}>
         <SumCard icon={<ArrowDownLeft size={16} />} label="Income" value={money(totalIn)} color={INCOME} />
-        <SumCard icon={<ArrowUpRight size={16} />} label="Expenses" value={money(totalOut)} color={EXPENSE} />
+        <SumCard icon={<ArrowUpRight size={16} />} label="Expenses" value={money(totalOutAll)} color={EXPENSE} />
         <SumCard icon={net >= 0 ? <TrendingUp size={16} /> : <TrendingDown size={16} />} label="Net savings" value={money(net)} color={net >= 0 ? INCOME : EXPENSE} />
       </div>
+      {totalInvestedInRange > 0 && (
+        <div style={S.investNote}>
+          <Sprout size={13} color={INVEST} /> Includes {money(totalInvestedInRange)} invested this period — counted as outgoing and deducted from net savings.
+        </div>
+      )}
 
-      {!loaded ? <div style={S.muted}>Loading…</div> : inRange.length === 0 ? (
+      {investments.length > 0 && (
+        <div style={S.card}>
+          <div style={S.cardTitleRow}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <Sprout size={18} color={INVEST} />
+              <div>
+                <div style={S.cardTitle}>Assets &amp; investments</div>
+                <div style={S.cardSub}>Across all your holdings, all time</div>
+              </div>
+            </div>
+            <div style={{ ...S.cardTotal, color: INVEST }}>{money(totalCurrentValue)}</div>
+          </div>
+          <div style={S.healthStats}>
+            <div style={S.healthStat}><span style={S.healthStatV}>{money(totalInvested)}</span><span style={S.healthStatL}>Total invested</span></div>
+            <div style={S.healthStat}><span style={{ ...S.healthStatV, color: investGain >= 0 ? INCOME : EXPENSE }}>{investGain >= 0 ? "+" : ""}{money(investGain)}</span><span style={S.healthStatL}>Unrealized gain</span></div>
+          </div>
+        </div>
+      )}
+
+      {!loaded ? <div style={S.muted}>Loading…</div> : inRange.length === 0 && investedInRange.length === 0 ? (
         <div style={S.card}><div style={S.muted}>No transactions in this period. Add some under the <b>Money</b> tab.</div></div>
       ) : (
         <>
-          <HealthCard totalIn={totalIn} totalOut={totalOut} />
+          <HealthCard totalIn={totalIn} totalOut={totalOutAll} />
 
           <div style={S.twoCol}>
             <CatChart title="Incoming" subtitle="Where your money comes from" total={totalIn} data={byCat(income)} accent={INCOME} cur={cur} />
-            <CatChart title="Outgoing" subtitle="Where your money goes" total={totalOut} data={byCat(expense)} accent={EXPENSE} cur={cur} />
+            <CatChart title="Outgoing" subtitle="Spending + money set aside in investments" total={totalOutAll} data={outgoingSegs} accent={EXPENSE} cur={cur} />
           </div>
         </>
       )}
@@ -137,17 +227,16 @@ function SumCard({ icon, label, value, color }) {
 }
 
 function CatChart({ title, subtitle, total, data, accent, cur }) {
-  // Build conic-gradient pie segments.
+  const [hoverIdx, setHoverIdx] = useState(null);
   let acc = 0;
   const segs = data.map((d) => {
     const start = total > 0 ? (acc / total) * 100 : 0;
     acc += d.amount;
     const end = total > 0 ? (acc / total) * 100 : 0;
-    return { ...d, start, end, color: catColor(d.category), pct: total > 0 ? (d.amount / total) * 100 : 0 };
+    return { ...d, start, end, color: d.color || catColor(d.category), pct: total > 0 ? (d.amount / total) * 100 : 0 };
   });
-  const gradient = segs.length
-    ? `conic-gradient(${segs.map((s) => `${s.color} ${s.start}% ${s.end}%`).join(", ")})`
-    : "var(--surface-2)";
+  const hovered = hoverIdx != null ? segs[hoverIdx] : null;
+  const single = segs.length === 1;
 
   return (
     <div style={S.card}>
@@ -160,16 +249,32 @@ function CatChart({ title, subtitle, total, data, accent, cur }) {
       </div>
       {data.length === 0 ? <div style={S.muted}>Nothing logged.</div> : (
         <div style={S.pieWrap}>
-          <div style={S.pieChart}>
-            <div style={{ ...S.pieDisc, background: gradient }} />
-            <div style={S.pieHole}>
-              <span style={S.pieHoleVal}>{fmtCompact(total, cur.code)}</span>
-              <span style={S.pieHoleLbl}>total</span>
+          <div style={S.pieChart} onMouseLeave={() => setHoverIdx(null)}>
+            <svg viewBox="0 0 120 120" style={S.pieSvg}>
+              {segs.map((s, i) => (
+                <path key={s.category} d={donutSlicePath(s.start, s.end, i === hoverIdx, single)} fill={s.color}
+                  onMouseEnter={() => setHoverIdx(i)}
+                  style={{ cursor: "pointer", transition: "transform 0.15s, filter 0.15s", filter: i === hoverIdx ? "brightness(1.08)" : "none" }} />
+              ))}
+            </svg>
+            <div style={{ ...S.pieHole, ...(hovered ? { transform: "translate(-50%,-50%) scale(1.06)", boxShadow: `0 0 0 4px ${hovered.color}33` } : {}) }}>
+              {hovered ? (
+                <>
+                  <span style={{ ...S.pieHoleVal, color: hovered.color, fontSize: 13 }}>{fmtCompact(hovered.amount, cur.code)}</span>
+                  <span style={S.pieHoleLbl}>{Math.round(hovered.pct)}% · {hovered.category}</span>
+                </>
+              ) : (
+                <>
+                  <span style={S.pieHoleVal}>{fmtCompact(total, cur.code)}</span>
+                  <span style={S.pieHoleLbl}>total</span>
+                </>
+              )}
             </div>
           </div>
           <div style={S.pieLegend}>
-            {segs.map((s) => (
-              <div key={s.category} style={S.legendRow}>
+            {segs.map((s, i) => (
+              <div key={s.category} style={{ ...S.legendRow, ...(i === hoverIdx ? S.legendRowOn : {}) }}
+                onMouseEnter={() => setHoverIdx(i)} onMouseLeave={() => setHoverIdx(null)}>
                 <span style={{ ...S.dot, background: s.color }} />
                 <span style={S.legendName}>{s.category}</span>
                 <span style={S.legendPct}>{Math.round(s.pct)}%</span>
@@ -181,6 +286,28 @@ function CatChart({ title, subtitle, total, data, accent, cur }) {
       )}
     </div>
   );
+}
+
+// SVG donut-slice path (annulus wedge) for percentage range [a,b) of a 0–100 circle, centered at (60,60).
+// When `popped`, the slice is pushed outward along its mid-angle so it visibly "comes out" on hover.
+function donutSlicePath(aPct, bPct, popped, single) {
+  const cx = 60, cy = 60, rOuter = 58, rInner = 35;
+  const pop = popped ? 6 : 0;
+  const toXY = (pct, r, ox = 0, oy = 0) => {
+    const a = (pct / 100) * 2 * Math.PI - Math.PI / 2;
+    return [cx + ox + r * Math.cos(a), cy + oy + r * Math.sin(a)];
+  };
+  const midA = ((aPct + bPct) / 2 / 100) * 2 * Math.PI - Math.PI / 2;
+  const ox = single ? 0 : Math.cos(midA) * pop, oy = single ? 0 : Math.sin(midA) * pop;
+  if (bPct - aPct >= 99.999) {
+    return `M ${cx + ox} ${cy + oy - rOuter} A ${rOuter} ${rOuter} 0 1 1 ${cx + ox - 0.01} ${cy + oy - rOuter} L ${cx + ox - 0.01} ${cy + oy - rInner} A ${rInner} ${rInner} 0 1 0 ${cx + ox} ${cy + oy - rInner} Z`;
+  }
+  const [ox1, oy1] = toXY(aPct, rOuter, ox, oy);
+  const [ox2, oy2] = toXY(bPct, rOuter, ox, oy);
+  const [ix2, iy2] = toXY(bPct, rInner, ox, oy);
+  const [ix1, iy1] = toXY(aPct, rInner, ox, oy);
+  const large = bPct - aPct > 50 ? 1 : 0;
+  return `M ${ox1} ${oy1} A ${rOuter} ${rOuter} 0 ${large} 1 ${ox2} ${oy2} L ${ix2} ${iy2} A ${rInner} ${rInner} 0 ${large} 0 ${ix1} ${iy1} Z`;
 }
 
 function HealthCard({ totalIn, totalOut }) {
@@ -236,36 +363,83 @@ function HealthCard({ totalIn, totalOut }) {
 
 /* ───────────────────────── Money (transactions) ───────────────────────── */
 
-function MoneyTab({ txns, reload, money }) {
-  const [kind, setKind] = useState("expense");
+function MoneyTab({ txns, expCats, investments, fixedItems, reload, money, cur }) {
   const [amount, setAmount] = useState("");
-  const [category, setCategory] = useState("Bills");
+  const [category, setCategory] = useState("Salary");
   const [date, setDate] = useState(TODAY);
   const [note, setNote] = useState("");
   const [edit, setEdit] = useState(null); // { id, kind, amount, category, date, note }
+  const [invForm, setInvForm] = useState(null); // add/edit investment modal
+  const [fixedForm, setFixedForm] = useState(null); // add/edit fixed-item modal
 
-  const { deleteItem, toasts, handleUndo, handleDismiss } = useUndoableDelete(api.deleteTxn, api.restoreTxn, reload);
+  const { deleteItem: deleteTxnItem, toasts: txnToasts, handleUndo: undoTxn, handleDismiss: dismissTxn } = useUndoableDelete(api.deleteTxn, api.restoreTxn, reload);
+  const { deleteItem: deleteExpItem, toasts: expToasts, handleUndo: undoExp, handleDismiss: dismissExp } = useUndoableDelete(api.deleteExpenseLog, api.restoreExpenseLog, reload);
+  const { deleteItem: deleteInvItem, toasts: invToasts, handleUndo: undoInv, handleDismiss: dismissInv } = useUndoableDelete(api.deleteInvestment, api.restoreInvestment, reload);
 
-  const cats = kind === "income" ? INCOME_CATS : EXPENSE_CATS;
-  const switchKind = (k) => { setKind(k); setCategory(k === "income" ? "Salary" : "Bills"); };
+  const openAddFixed = () => setFixedForm({ id: null, kind: "expense", name: "", amount: "", category_id: expCats[0]?.id || "", invest_kind: "Stocks", note: "" });
+  const openEditFixed = (f) => setFixedForm({ id: f.id, kind: f.kind, name: f.name, amount: String(f.amount), category_id: f.category_id || expCats[0]?.id || "", invest_kind: f.invest_kind || "Stocks", note: f.note || "" });
+  const saveFixed = async () => {
+    const name = fixedForm.name.trim();
+    const amt = parseFloat(fixedForm.amount) || 0;
+    if (!name || amt <= 0) return;
+    const payload = {
+      kind: fixedForm.kind, name, amount: amt, note: fixedForm.note.trim(),
+      ...(fixedForm.kind === "expense" ? { category_id: Number(fixedForm.category_id) } : { invest_kind: fixedForm.invest_kind }),
+    };
+    if (fixedForm.id) await api.updateFixedItem(fixedForm.id, payload);
+    else await api.createFixedItem(payload);
+    setFixedForm(null);
+    reload();
+  };
+  const removeFixed = async (f) => {
+    if (!window.confirm(`Stop "${f.name}" from auto-posting each month? Past entries it already created will stay.`)) return;
+    await api.deleteFixedItem(f.id);
+    reload();
+  };
+  const toggleFixedActive = async (f) => { await api.updateFixedItem(f.id, { active: !f.active }); reload(); };
+
+  const openAddInv = () => setInvForm({ id: null, name: "", kind: "Stocks", invested: "", current_value: "", date: TODAY, note: "" });
+  const openEditInv = (inv) => setInvForm({ id: inv.id, name: inv.name, kind: inv.kind, invested: String(inv.invested), current_value: String(inv.current_value), date: inv.date, note: inv.note || "" });
+  const saveInv = async () => {
+    const name = invForm.name.trim();
+    const invested = parseFloat(invForm.invested) || 0;
+    const current_value = parseFloat(invForm.current_value) || 0;
+    if (!name) return;
+    const payload = { name, kind: invForm.kind, invested, current_value, note: invForm.note.trim(), date: invForm.date };
+    if (invForm.id) await api.updateInvestment(invForm.id, payload);
+    else await api.createInvestment(payload);
+    setInvForm(null);
+    reload();
+  };
+  const investedTotal = investments.reduce((n, i) => n + i.invested, 0);
+  const currentTotal = investments.reduce((n, i) => n + i.current_value, 0);
+  const investGain = currentTotal - investedTotal;
 
   const add = async () => {
     const amt = parseFloat(amount);
     if (!amt || amt <= 0) return;
-    await api.createTxn({ kind, category, amount: amt, note: note.trim(), date });
+    await api.createTxn({ kind: "income", category, amount: amt, note: note.trim(), date });
     setAmount(""); setNote("");
     reload();
   };
 
-  const startEdit = (t) => setEdit({ id: t.id, kind: t.kind, amount: String(t.amount), category: t.category, date: t.date, note: t.note || "" });
-  const editCats = edit?.kind === "income" ? INCOME_CATS : EXPENSE_CATS;
-  const setEditKind = (k) => setEdit((e) => ({ ...e, kind: k, category: editCats.includes(e.category) ? e.category : (k === "income" ? "Salary" : "Bills") }));
+  const startEdit = (t) => setEdit({ id: t.id, rawId: t.rawId, source: t.source, kind: t.kind, amount: String(t.amount), category: t.category, date: t.date, note: t.note || "" });
+  const editCats = edit?.source === "expense" ? expCats.map((c) => c.name) : edit?.kind === "income" ? INCOME_CATS : EXPENSE_CATS;
   const saveEdit = async () => {
     const amt = parseFloat(edit.amount);
     if (!amt || amt <= 0) return;
-    await api.updateTxn(edit.id, { kind: edit.kind, category: edit.category, amount: amt, note: edit.note.trim(), date: edit.date });
+    if (edit.source === "expense") {
+      const cat = expCats.find((c) => c.name === edit.category);
+      await api.updateExpenseLog(edit.rawId, { amount: amt, note: edit.note.trim(), date: edit.date, ...(cat ? { category_id: cat.id } : {}) });
+    } else {
+      await api.updateTxn(edit.id, { kind: edit.kind, category: edit.category, amount: amt, note: edit.note.trim(), date: edit.date });
+    }
     setEdit(null);
     reload();
+  };
+  const removeTxn = (t) => {
+    if (t.source === "expense") deleteExpItem(t.rawId, t.category);
+    else deleteTxnItem(t.id, t.category);
   };
 
   // group by date
@@ -280,28 +454,101 @@ function MoneyTab({ txns, reload, money }) {
   return (
     <>
       <div style={S.card}>
-        <div style={S.cardTitle}>Add transaction</div>
-        <div style={S.kindToggle}>
-          <button onClick={() => switchKind("expense")} style={{ ...S.kindBtn, ...(kind === "expense" ? { background: EXPENSE, color: "#fff", borderColor: EXPENSE } : {}) }}>
-            <ArrowUpRight size={15} /> Expense
-          </button>
-          <button onClick={() => switchKind("income")} style={{ ...S.kindBtn, ...(kind === "income" ? { background: INCOME, color: "#fff", borderColor: INCOME } : {}) }}>
-            <ArrowDownLeft size={15} /> Income
-          </button>
-        </div>
+        <div style={S.cardTitle}>Add income</div>
+        <div style={S.cardSub}>Expenses are added from the <b>Expenses</b> section and show up here automatically.</div>
         <div style={S.formGrid}>
           <input type="number" inputMode="decimal" placeholder="Amount" value={amount}
             onChange={(e) => setAmount(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} style={S.input} autoFocus />
           <select value={category} onChange={(e) => setCategory(e.target.value)} style={S.input}>
-            {cats.map((c) => <option key={c}>{c}</option>)}
+            {INCOME_CATS.map((c) => <option key={c}>{c}</option>)}
           </select>
           <input type="date" value={date} max={TODAY} onChange={(e) => setDate(e.target.value)} style={S.input} />
         </div>
         <input placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && add()} style={{ ...S.input, marginTop: 8 }} />
-        <button onClick={add} style={{ ...S.addBtn, background: kind === "income" ? INCOME : EXPENSE }}>
-          <Plus size={15} /> Add {kind}
+        <button onClick={add} style={{ ...S.addBtn, background: INCOME }}>
+          <Plus size={15} /> Add income
         </button>
+      </div>
+
+      <div style={S.card}>
+        <div style={S.cardTitleRow}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Repeat size={18} color={FIXED} />
+            <div>
+              <div style={S.cardTitle}>Fixed items</div>
+              <div style={S.cardSub}>EMI, rent, SIP… auto-posted at the start of every billing cycle</div>
+            </div>
+          </div>
+          <button onClick={openAddFixed} style={{ ...S.invAddBtn, background: FIXED }}><Plus size={14} /> Add</button>
+        </div>
+
+        {fixedItems.length === 0 ? <div style={S.muted}>No fixed items yet — add an EMI or rent to auto-post it every cycle.</div> : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {fixedItems.map((f) => {
+              const catName = f.kind === "expense" ? (expCats.find((c) => c.id === f.category_id)?.name || "Other") : (f.invest_kind || "Other");
+              return (
+                <div key={f.id} style={{ ...S.invRow, opacity: f.active ? 1 : 0.5 }}>
+                  <span style={{ ...S.txnDot, background: f.kind === "expense" ? EXPENSE : INVEST }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={S.txnCat}>{f.name}</div>
+                    <div style={S.txnNote}>{f.kind === "expense" ? "Fixed expense" : "Fixed investment"} · {catName}</div>
+                  </div>
+                  <span style={{ ...S.txnAmt, color: f.kind === "expense" ? EXPENSE : INVEST }}>{money(f.amount)}/mo</span>
+                  <button onClick={() => toggleFixedActive(f)} style={S.delBtn} title={f.active ? "Pause" : "Resume"}>
+                    {f.active ? <Pause size={13} /> : <Play size={13} />}
+                  </button>
+                  <button onClick={() => openEditFixed(f)} style={S.delBtn}><Pencil size={13} /></button>
+                  <button onClick={() => removeFixed(f)} style={S.delBtn}><X size={14} /></button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div style={S.card}>
+        <div style={S.cardTitleRow}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Sprout size={18} color={INVEST} />
+            <div>
+              <div style={S.cardTitle}>Investments</div>
+              <div style={S.cardSub}>Asset generation — what you've put in vs. what it's worth now</div>
+            </div>
+          </div>
+          <button onClick={openAddInv} style={S.invAddBtn}><Plus size={14} /> Add</button>
+        </div>
+
+        {investments.length === 0 ? <div style={S.muted}>No investments tracked yet.</div> : (
+          <>
+            <div style={S.healthStats}>
+              <div style={S.healthStat}><span style={S.healthStatV}>{money(investedTotal)}</span><span style={S.healthStatL}>Invested</span></div>
+              <div style={S.healthStat}><span style={S.healthStatV}>{money(currentTotal)}</span><span style={S.healthStatL}>Current value</span></div>
+              <div style={S.healthStat}><span style={{ ...S.healthStatV, color: investGain >= 0 ? INCOME : EXPENSE }}>{investGain >= 0 ? "+" : ""}{money(investGain)}</span><span style={S.healthStatL}>Gain / loss</span></div>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
+              {investments.map((inv) => {
+                const gain = inv.current_value - inv.invested;
+                const pct = inv.invested > 0 ? (gain / inv.invested) * 100 : 0;
+                return (
+                  <div key={inv.id} style={S.invRow}>
+                    <span style={{ ...S.txnDot, background: INVEST }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={S.txnCat}>{inv.name}</div>
+                      <div style={S.txnNote}>{inv.kind} · invested {money(inv.invested)}</div>
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={S.txnAmt}>{money(inv.current_value)}</div>
+                      <div style={{ ...S.invPct, color: gain >= 0 ? INCOME : EXPENSE }}>{gain >= 0 ? "+" : ""}{Math.round(pct)}%</div>
+                    </div>
+                    <button onClick={() => openEditInv(inv)} style={S.delBtn}><Pencil size={13} /></button>
+                    <button onClick={() => deleteInvItem(inv.id, inv.name)} style={S.delBtn}><X size={14} /></button>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
       </div>
 
       <div style={S.card}>
@@ -314,14 +561,6 @@ function MoneyTab({ txns, reload, money }) {
                 {list.map((t) => (
                   edit?.id === t.id ? (
                     <div key={t.id} style={S.editTxn}>
-                      <div style={S.kindToggle}>
-                        <button onClick={() => setEditKind("expense")} style={{ ...S.kindBtn, ...(edit.kind === "expense" ? { background: EXPENSE, color: "#fff", borderColor: EXPENSE } : {}) }}>
-                          <ArrowUpRight size={14} /> Expense
-                        </button>
-                        <button onClick={() => setEditKind("income")} style={{ ...S.kindBtn, ...(edit.kind === "income" ? { background: INCOME, color: "#fff", borderColor: INCOME } : {}) }}>
-                          <ArrowDownLeft size={14} /> Income
-                        </button>
-                      </div>
                       <div style={S.formGrid}>
                         <input type="number" inputMode="decimal" value={edit.amount} onChange={(e) => setEdit({ ...edit, amount: e.target.value })} style={S.input} />
                         <select value={edit.category} onChange={(e) => setEdit({ ...edit, category: e.target.value })} style={S.input}>
@@ -347,7 +586,7 @@ function MoneyTab({ txns, reload, money }) {
                         {t.kind === "income" ? "+" : "−"}{money(t.amount)}
                       </span>
                       <button onClick={() => startEdit(t)} style={S.delBtn}><Pencil size={13} /></button>
-                      <button onClick={() => deleteItem(t.id, t.category)} style={S.delBtn}><X size={14} /></button>
+                      <button onClick={() => removeTxn(t)} style={S.delBtn}><X size={14} /></button>
                     </div>
                   )
                 ))}
@@ -357,7 +596,107 @@ function MoneyTab({ txns, reload, money }) {
         )}
       </div>
 
-      <UndoToast toasts={toasts} onUndo={handleUndo} onDismiss={handleDismiss} />
+      {invForm && (
+        <div style={S.overlay} onClick={() => setInvForm(null)}>
+          <div style={S.modal} onClick={(e) => e.stopPropagation()}>
+            <div style={S.modalHead}>
+              <span style={S.modalTitle}>{invForm.id ? "Edit investment" : "New investment"}</span>
+              <button onClick={() => setInvForm(null)} style={S.iconBtnPlain}><X size={16} /></button>
+            </div>
+            <label style={S.label}>Name *</label>
+            <input autoFocus value={invForm.name} onChange={(e) => setInvForm((f) => ({ ...f, name: e.target.value }))}
+              placeholder="e.g. Nifty Index Fund, HDFC FD…" style={S.input} />
+
+            <label style={S.label}>Type</label>
+            <select value={invForm.kind} onChange={(e) => setInvForm((f) => ({ ...f, kind: e.target.value }))} style={S.input}>
+              {INVEST_KINDS.map((k) => <option key={k}>{k}</option>)}
+            </select>
+
+            <div style={S.formGrid}>
+              <div>
+                <label style={S.label}>Invested</label>
+                <input type="number" inputMode="decimal" value={invForm.invested} onChange={(e) => setInvForm((f) => ({ ...f, invested: e.target.value }))} placeholder="0" style={S.input} />
+              </div>
+              <div>
+                <label style={S.label}>Current value</label>
+                <input type="number" inputMode="decimal" value={invForm.current_value} onChange={(e) => setInvForm((f) => ({ ...f, current_value: e.target.value }))} placeholder="0" style={S.input} />
+              </div>
+              <div>
+                <label style={S.label}>Date</label>
+                <input type="date" value={invForm.date} max={TODAY} onChange={(e) => setInvForm((f) => ({ ...f, date: e.target.value }))} style={S.input} />
+              </div>
+            </div>
+            <label style={S.label}>Note (optional)</label>
+            <input value={invForm.note} onChange={(e) => setInvForm((f) => ({ ...f, note: e.target.value }))} placeholder="Folio no., broker, etc." style={S.input} />
+
+            <div style={S.modalActions}>
+              <button onClick={() => setInvForm(null)} style={S.cancelBtn}>Cancel</button>
+              <button onClick={saveInv} disabled={!invForm.name.trim()}
+                style={{ ...S.saveBtn, ...(!invForm.name.trim() ? { opacity: 0.5, cursor: "not-allowed" } : {}) }}>
+                <Check size={15} /> {invForm.id ? "Save" : "Add"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {fixedForm && (
+        <div style={S.overlay} onClick={() => setFixedForm(null)}>
+          <div style={S.modal} onClick={(e) => e.stopPropagation()}>
+            <div style={S.modalHead}>
+              <span style={S.modalTitle}>{fixedForm.id ? "Edit fixed item" : "New fixed item"}</span>
+              <button onClick={() => setFixedForm(null)} style={S.iconBtnPlain}><X size={16} /></button>
+            </div>
+            <div style={S.kindToggle}>
+              <button onClick={() => setFixedForm((f) => ({ ...f, kind: "expense" }))} style={{ ...S.kindBtn, ...(fixedForm.kind === "expense" ? { background: EXPENSE, color: "#fff", borderColor: EXPENSE } : {}) }}>
+                <ArrowUpRight size={15} /> Expense
+              </button>
+              <button onClick={() => setFixedForm((f) => ({ ...f, kind: "investment" }))} style={{ ...S.kindBtn, ...(fixedForm.kind === "investment" ? { background: INVEST, color: "#fff", borderColor: INVEST } : {}) }}>
+                <Sprout size={15} /> Investment
+              </button>
+            </div>
+
+            <label style={S.label}>Name *</label>
+            <input autoFocus value={fixedForm.name} onChange={(e) => setFixedForm((f) => ({ ...f, name: e.target.value }))}
+              placeholder={fixedForm.kind === "expense" ? "e.g. Home loan EMI, Rent…" : "e.g. Monthly SIP — Nifty Index"} style={S.input} />
+
+            <div style={S.formGrid}>
+              <div>
+                <label style={S.label}>Amount / month</label>
+                <input type="number" inputMode="decimal" value={fixedForm.amount} onChange={(e) => setFixedForm((f) => ({ ...f, amount: e.target.value }))} placeholder="0" style={S.input} />
+              </div>
+              <div>
+                <label style={S.label}>{fixedForm.kind === "expense" ? "Category" : "Type"}</label>
+                {fixedForm.kind === "expense" ? (
+                  <select value={fixedForm.category_id} onChange={(e) => setFixedForm((f) => ({ ...f, category_id: e.target.value }))} style={S.input}>
+                    {expCats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                ) : (
+                  <select value={fixedForm.invest_kind} onChange={(e) => setFixedForm((f) => ({ ...f, invest_kind: e.target.value }))} style={S.input}>
+                    {INVEST_KINDS.map((k) => <option key={k}>{k}</option>)}
+                  </select>
+                )}
+              </div>
+            </div>
+            <label style={S.label}>Note (optional)</label>
+            <input value={fixedForm.note} onChange={(e) => setFixedForm((f) => ({ ...f, note: e.target.value }))} placeholder="Loan account no., etc." style={S.input} />
+
+            <p style={S.fixedHint}>Posts automatically at the start of every billing cycle (set in Settings → Currency). This one posts immediately for the current cycle when you save.</p>
+
+            <div style={S.modalActions}>
+              <button onClick={() => setFixedForm(null)} style={S.cancelBtn}>Cancel</button>
+              <button onClick={saveFixed} disabled={!fixedForm.name.trim() || !(parseFloat(fixedForm.amount) > 0)}
+                style={{ ...S.saveBtn, background: FIXED, ...(!fixedForm.name.trim() || !(parseFloat(fixedForm.amount) > 0) ? { opacity: 0.5, cursor: "not-allowed" } : {}) }}>
+                <Check size={15} /> {fixedForm.id ? "Save" : "Add"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <UndoToast toasts={txnToasts} onUndo={undoTxn} onDismiss={dismissTxn} />
+      <UndoToast toasts={expToasts} onUndo={undoExp} onDismiss={dismissExp} />
+      <UndoToast toasts={invToasts} onUndo={undoInv} onDismiss={dismissInv} />
     </>
   );
 }
@@ -676,15 +1015,17 @@ const S = {
 
   pieWrap: { display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap" },
   pieChart: { position: "relative", width: 132, height: 132, flexShrink: 0, margin: "0 auto" },
-  pieDisc: { width: "100%", height: "100%", borderRadius: "50%" },
-  pieHole: { position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: 80, height: 80, borderRadius: "50%", background: "var(--surface)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" },
+  pieSvg: { position: "absolute", inset: 0, width: "100%", height: "100%", overflow: "visible" },
+  pieHole: { position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: 80, height: 80, borderRadius: "50%", background: "var(--surface)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", transition: "transform 0.15s, box-shadow 0.15s", pointerEvents: "none", textAlign: "center", padding: 4, boxSizing: "border-box" },
   pieHoleVal: { fontSize: 15, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif" },
   pieHoleLbl: { fontSize: 10, color: "var(--text-3)", fontWeight: 600 },
   pieLegend: { flex: 1, minWidth: 160, display: "flex", flexDirection: "column", gap: 8 },
-  legendRow: { display: "flex", alignItems: "center", gap: 8 },
+  legendRow: { display: "flex", alignItems: "center", gap: 8, borderRadius: 8, padding: "3px 5px", margin: "-3px -5px", cursor: "default", transition: "background 0.15s" },
+  legendRowOn: { background: "var(--surface-2)" },
   legendName: { flex: 1, fontSize: 12.5, fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   legendPct: { fontSize: 11.5, color: "var(--text-3)", fontWeight: 600, width: 34, textAlign: "right" },
   legendAmt: { fontSize: 12.5, fontWeight: 700, fontFamily: "'Fraunces',Georgia,serif", minWidth: 64, textAlign: "right" },
+  investNote: { display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--text-3)", marginBottom: 14, marginTop: -4 },
 
   healthScore: { fontSize: 32, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif", lineHeight: 1 },
   healthStatus: { fontSize: 12.5, fontWeight: 700, marginTop: 2 },
@@ -701,6 +1042,21 @@ const S = {
   formGrid: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 },
   input: { border: "1px solid var(--border)", borderRadius: 9, padding: "9px 11px", fontSize: 13.5, fontFamily: "inherit", color: "var(--text)", background: "var(--surface)", outline: "none", width: "100%", boxSizing: "border-box" },
   addBtn: { display: "flex", alignItems: "center", justifyContent: "center", gap: 6, width: "100%", marginTop: 10, border: "none", color: "#fff", padding: "11px", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" },
+
+  invAddBtn: { display: "flex", alignItems: "center", gap: 5, border: "none", background: "var(--accent-strong)", color: "#fff", padding: "7px 13px", borderRadius: 9, fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 },
+  invRow: { display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid var(--border)" },
+  invPct: { fontSize: 11, fontWeight: 700, marginTop: 1 },
+
+  overlay: { position: "fixed", inset: 0, background: "rgba(38,36,31,0.5)", zIndex: 200, display: "grid", placeItems: "center", padding: 16 },
+  modal: { background: "var(--surface)", borderRadius: 16, padding: "20px 20px 18px", width: "100%", maxWidth: 440, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 12px 48px rgba(0,0,0,0.22)", boxSizing: "border-box" },
+  modalHead: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
+  modalTitle: { fontSize: 17, fontWeight: 700, fontFamily: "'Fraunces',Georgia,serif" },
+  iconBtnPlain: { border: "none", background: "var(--hover)", color: "var(--text-2)", width: 30, height: 30, borderRadius: 8, cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0 },
+  label: { display: "block", fontSize: 11.5, fontWeight: 700, color: "var(--text-2)", margin: "10px 0 5px", textTransform: "uppercase", letterSpacing: "0.04em" },
+  fixedHint: { fontSize: 11.5, color: "var(--text-3)", lineHeight: 1.5, marginTop: 10, marginBottom: 0 },
+  modalActions: { display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 },
+  cancelBtn: { border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-2)", padding: "9px 16px", borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
+  saveBtn: { display: "flex", alignItems: "center", gap: 6, border: "none", background: "#4C9A6B", color: "#fff", padding: "9px 18px", borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" },
 
   dateHead: { fontSize: 11, fontWeight: 700, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 },
   txnRow: { display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid var(--border)" },

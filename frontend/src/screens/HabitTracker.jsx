@@ -61,7 +61,7 @@ export default function HabitTracker() {
   const [adding, setAdding] = useState(false);
   const [editingHabit, setEditingHabit] = useState(null);
   const [countPopup, setCountPopup] = useState(null); // { habit, date }
-  const [newHabit, setNewHabit] = useState({ name: "", pillar: "Health", target_per_week: 7, type: "regular", target_count: null, period: "week" });
+  const [newHabit, setNewHabit] = useState({ name: "", pillar: "Health", target_per_week: 7, type: "regular", target_count: null, period: "week", days: [] });
   const [reordering, setReordering] = useState(false);
   const [habitOrder, setHabitOrder] = useState([]);
 
@@ -114,16 +114,20 @@ export default function HabitTracker() {
 
   const createHabit = async () => {
     if (!newHabit.name.trim()) return;
+    const needsCount = newHabit.type === "minimum" || newHabit.type === "maximum";
+    const isWeekly = newHabit.type === "weekly";
+    if (isWeekly && newHabit.days.length === 0) return; // a weekly habit needs at least one day
     const body = {
       name: newHabit.name.trim(),
       pillar: newHabit.pillar,
       target_per_week: Number(newHabit.target_per_week) || 7,
       type: newHabit.type,
-      target_count: newHabit.type !== "regular" ? Number(newHabit.target_count) || 1 : null,
-      period: newHabit.type !== "regular" ? newHabit.period : null,
+      target_count: needsCount ? Number(newHabit.target_count) || 1 : null,
+      period: needsCount ? newHabit.period : null,
+      days: isWeekly ? newHabit.days : null,
     };
     await api.createHabit(body);
-    setNewHabit({ name: "", pillar: "Health", target_per_week: 7, type: "regular", target_count: null, period: "week" });
+    setNewHabit({ name: "", pillar: "Health", target_per_week: 7, type: "regular", target_count: null, period: "week", days: [] });
     setAdding(false);
     load();
   };
@@ -241,8 +245,21 @@ export default function HabitTracker() {
   );
 }
 
+function DayPicker({ days, onToggle }) {
+  return (
+    <div style={S.dayPick}>
+      {DAYS.map((d, i) => (
+        <button key={d} type="button" onClick={() => onToggle(i)}
+          style={{ ...S.dayChip, ...(days.includes(i) ? S.dayChipOn : {}) }}>{d}</button>
+      ))}
+    </div>
+  );
+}
+
 function AddHabitForm({ habit, onChange, onSave, onCancel }) {
-  const needsCount = habit.type !== "regular";
+  const needsCount = habit.type === "minimum" || habit.type === "maximum";
+  const isWeekly = habit.type === "weekly";
+  const toggleDay = (i) => onChange((n) => ({ ...n, days: n.days.includes(i) ? n.days.filter((x) => x !== i) : [...n.days, i].sort((a, b) => a - b) }));
   return (
     <div style={S.addBox}>
       <input autoFocus placeholder="Habit name" value={habit.name}
@@ -254,9 +271,16 @@ function AddHabitForm({ habit, onChange, onSave, onCancel }) {
       </select>
       <select value={habit.type} onChange={(e) => onChange((n) => ({ ...n, type: e.target.value }))} style={S.sideInput}>
         <option value="regular">Regular (yes/no)</option>
+        <option value="weekly">Weekly (specific days)</option>
         <option value="minimum">Minimum (at least N)</option>
         <option value="maximum">Maximum (no more than N)</option>
       </select>
+      {isWeekly && (
+        <>
+          <div style={S.pickHint}>Do this on…</div>
+          <DayPicker days={habit.days} onToggle={toggleDay} />
+        </>
+      )}
       {needsCount && (
         <div style={{ display: "flex", gap: 6 }}>
           <input type="number" min={1} placeholder="N" value={habit.target_count || ""}
@@ -281,8 +305,22 @@ function EditHabitModal({ habit, onSave, onClose }) {
   const [targetCount, setTargetCount] = useState(habit.target_count || "");
   const [period, setPeriod] = useState(habit.period || "week");
   const [reminder, setReminder] = useState(habit.reminder_time || "");
+  const [days, setDays] = useState(habit.days || []);
 
-  const save = () => onSave({ name: name.trim(), type, target_count: type !== "regular" ? Number(targetCount) : null, period: type !== "regular" ? period : null, reminder_time: reminder || null });
+  const needsCount = type === "minimum" || type === "maximum";
+  const isWeekly = type === "weekly";
+  const toggleDay = (i) => setDays((d) => (d.includes(i) ? d.filter((x) => x !== i) : [...d, i].sort((a, b) => a - b)));
+
+  const save = () => {
+    if (isWeekly && days.length === 0) return;
+    onSave({
+      name: name.trim(), type,
+      target_count: needsCount ? Number(targetCount) : null,
+      period: needsCount ? period : null,
+      days: isWeekly ? days : [],
+      reminder_time: reminder || null,
+    });
+  };
 
   return (
     <div style={S.modalOverlay} onClick={onClose}>
@@ -293,10 +331,17 @@ function EditHabitModal({ habit, onSave, onClose }) {
         <label style={S.modalLabel}>Type</label>
         <select value={type} onChange={(e) => setType(e.target.value)} style={S.sideInput}>
           <option value="regular">Regular (yes/no)</option>
+          <option value="weekly">Weekly (specific days)</option>
           <option value="minimum">Minimum (at least N)</option>
           <option value="maximum">Maximum (no more than N)</option>
         </select>
-        {type !== "regular" && (
+        {isWeekly && (
+          <>
+            <label style={S.modalLabel}>Days</label>
+            <DayPicker days={days} onToggle={toggleDay} />
+          </>
+        )}
+        {needsCount && (
           <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
             <input type="number" min={1} value={targetCount} onChange={(e) => setTargetCount(e.target.value)} style={{ ...S.sideInput, width: 70 }} />
             <select value={period} onChange={(e) => setPeriod(e.target.value)} style={S.sideInput}>
@@ -474,6 +519,13 @@ function AllHabitsWeekly({ habits, dayAction, logSet, onDelete, onEdit }) {
           const c = PILLARS[h.pillar]?.dot || "#9A968C";
           const soft = PILLARS[h.pillar]?.soft || "rgba(0,0,0,0.05)";
           const logs = logSet(h);
+          const isWeekly = h.type === "weekly";
+          const sched = new Set(h.days || []);
+          // Weekly habits: once every scheduled day in the week is done, the whole
+          // week row chains together — same rule as the "minimum per week" habits.
+          const schedIdx = [0, 1, 2, 3, 4, 5, 6].filter((i) => sched.has(i));
+          const wkRowAchieved = isWeekly && schedIdx.length > 0 && schedIdx.every((i) => logs.has(weekDates[i]));
+          const wkConnected = isWeekly ? Array(7).fill(wkRowAchieved) : null;
           // Minimum "N times a week/month/year" chains: a day is part of a connected
           // chain when its whole period (week, month or year) has met the target.
           const isMinChain = h.type === "minimum" && ["week", "month", "year"].includes(h.period);
@@ -500,12 +552,22 @@ function AllHabitsWeekly({ habits, dayAction, logSet, onDelete, onEdit }) {
                   <span style={{ ...S.sideDot, background: c }} />
                   <span style={S.weekHabitName}>{h.name}</span>
                 </div>
-                {h.type !== "regular" && (
+                {h.type === "weekly" ? (
+                  <span style={S.typeBadge}>{(h.days || []).map((i) => DAYS[i]).join("·") || "—"}</span>
+                ) : h.type !== "regular" ? (
                   <span style={S.typeBadge}>{h.type === "minimum" ? `≥${h.target_count}/${h.period}` : `≤${h.target_count}/${h.period}`}</span>
-                )}
+                ) : null}
               </div>
 
               {weekDates.map((dateStr, di) => {
+                if (isWeekly && !sched.has(di)) {
+                  return (
+                    <div key={dateStr} style={{ ...S.weekCell, position: "relative", zIndex: 0 }}>
+                      {wkConnected[di] && <span style={{ ...S.chainLine, background: c, left: wkConnected[di - 1] ? 0 : "50%", right: wkConnected[di + 1] ? 0 : "50%" }} />}
+                      <span style={{ ...S.offDay, position: "relative", zIndex: 1 }} title="Not scheduled">·</span>
+                    </div>
+                  );
+                }
                 const done = logs.has(dateStr);
                 const future = dateStr > TODAY;
                 const isPerDayCount = (h.type === "minimum" || h.type === "maximum") && h.period === "day";
@@ -517,12 +579,12 @@ function AllHabitsWeekly({ habits, dayAction, logSet, onDelete, onEdit }) {
                 const nextAch = di < weekDates.length - 1 && cellAchieved(weekDates[di + 1]);
                 const filled = done || ach;
                 return (
-                  <div key={dateStr} style={{ ...S.weekCell, position: "relative" }}>
+                  <div key={dateStr} style={{ ...S.weekCell, position: "relative", zIndex: 0 }}>
                     {ach && <span style={{ ...S.chainLine, background: c, left: prevAch ? 0 : "50%", right: nextAch ? 0 : "50%" }} />}
+                    {isWeekly && wkConnected[di] && <span style={{ ...S.chainLine, background: c, left: wkConnected[di - 1] ? 0 : "50%", right: wkConnected[di + 1] ? 0 : "50%" }} />}
                     <button disabled={future} onClick={() => dayAction(h, dateStr)}
                       style={{
                         ...S.tick,
-                        position: "relative", zIndex: 1,
                         ...(filled ? { background: c, borderColor: c, color: "#fff" } : {}),
                         ...(isPerDayCount && hasCount && !done ? { borderColor: c, color: c } : {}),
                         ...(future && !filled ? S.tickFuture : {}),
@@ -536,7 +598,9 @@ function AllHabitsWeekly({ habits, dayAction, logSet, onDelete, onEdit }) {
                 );
               })}
               <div style={S.weekStreakCol}>
-                {rowAchieved
+                {wkRowAchieved
+                  ? <span style={{ ...S.streakPill, background: soft, color: c }}><Link2 size={12} /> {schedIdx.length}/{schedIdx.length}</span>
+                  : rowAchieved
                   ? <span style={{ ...S.streakPill, background: soft, color: c }}><Link2 size={12} /> {periodCount}/{target}</span>
                   : <span style={{ ...S.streakPill, background: soft, color: c }}><Flame size={12} /> {h.streak}</span>}
               </div>
@@ -575,9 +639,23 @@ function SingleHabitMonthly({ habit, dayAction, logSet, onDelete, onEdit, setNot
   const c = PILLARS[habit.pillar]?.dot || "#9A968C";
   const soft = PILLARS[habit.pillar]?.soft || "rgba(0,0,0,0.05)";
   const logs = logSet(habit);
+  const isWeekly = habit.type === "weekly";
+  const sched = new Set(habit.days || []);
+  const weekdayOf = (d) => (new Date(d + "T00:00").getDay() + 6) % 7; // Mon=0..Sun=6
+  const onSchedule = (d) => !isWeekly || sched.has(weekdayOf(d));
+  // Which cells in the Mon–Sun week of `dateStr` chain together: once every scheduled
+  // day in that week is done, the whole week connects (same rule as "minimum per week").
+  const weekConnected = (dateStr) => {
+    const d = new Date(dateStr + "T00:00"); const dow = d.getDay();
+    const mon = new Date(d); mon.setDate(d.getDate() + (dow === 0 ? -6 : 1 - dow));
+    const wk = Array.from({ length: 7 }, (_, k) => { const x = new Date(mon); x.setDate(mon.getDate() + k); return toISO(x); });
+    const schedIdx = [0, 1, 2, 3, 4, 5, 6].filter((i) => sched.has(i));
+    const achieved = schedIdx.length > 0 && schedIdx.every((i) => logs.has(wk[i]));
+    return Array(7).fill(achieved);
+  };
   const { dates: monthDates, startOffset: monthGridOffset, label: monthLabel, year: viewYear } = getMonthInfo(monthOffset);
-  const completed = monthDates.filter((d) => d <= TODAY && logs.has(d)).length;
-  const daysPassed = monthDates.filter((d) => d <= TODAY).length;
+  const completed = monthDates.filter((d) => d <= TODAY && onSchedule(d) && logs.has(d)).length;
+  const daysPassed = monthDates.filter((d) => d <= TODAY && onSchedule(d)).length;
   const rate = daysPassed > 0 ? Math.round((completed / daysPassed) * 100) : 0;
 
   // "N times a month/year" chain: the whole period connects once the target is met.
@@ -639,6 +717,8 @@ function SingleHabitMonthly({ habit, dayAction, logSet, onDelete, onEdit, setNot
         <Stat label="Completion" value={`${rate}%`} c={c} soft={soft} />
         {habit.type === "regular"
           ? <Stat label="Weekly target" value={`${habit.target_per_week}×`} c={c} soft={soft} />
+          : habit.type === "weekly"
+          ? <Stat label="Days" value={(habit.days || []).map((i) => DAYS[i]).join(", ") || "—"} c={c} soft={soft} />
           : <Stat label={habit.type === "minimum" ? "Min target" : "Max allowed"} value={`${habit.target_count}/${habit.period}`} c={c} soft={soft} />}
       </div>
 
@@ -677,6 +757,15 @@ function SingleHabitMonthly({ habit, dayAction, logSet, onDelete, onEdit, setNot
           {Array.from({ length: monthGridOffset }).map((_, i) => <div key={`pad${i}`} />)}
           {monthDates.map((dateStr, i) => {
             const day = i + 1;
+            if (isWeekly && !onSchedule(dateStr)) {
+              const owd = weekdayOf(dateStr); const oconn = weekConnected(dateStr); const ocol = (monthGridOffset + i) % 7;
+              return (
+                <div key={dateStr} style={{ position: "relative" }}>
+                  {oconn[owd] && <span style={{ ...S.chainLine, background: c, ...(ocol === 0 ? { left: "50%" } : { left: oconn[owd - 1] ? -6 : "50%" }), ...(ocol === 6 ? { right: "50%" } : { right: oconn[owd + 1] ? -6 : "50%" }) }} />}
+                  <div style={{ ...S.monthDay, ...S.monthDayOff, width: "100%", position: "relative", zIndex: 1 }}>{day}</div>
+                </div>
+              );
+            }
             const done = logs.has(dateStr);
             const future = dateStr > TODAY;
             const isToday = dateStr === TODAY;
@@ -692,6 +781,7 @@ function SingleHabitMonthly({ habit, dayAction, logSet, onDelete, onEdit, setNot
                 {ach && (
                   <span style={{ ...S.chainLine, background: c, ...(col === 0 ? { left: "50%" } : { left: -6 }), ...(col === 6 ? { right: "50%" } : { right: -6 }) }} />
                 )}
+                {isWeekly && (() => { const wd = weekdayOf(dateStr); const conn = weekConnected(dateStr); return conn[wd] ? <span style={{ ...S.chainLine, background: c, ...(col === 0 ? { left: "50%" } : { left: conn[wd - 1] ? -6 : "50%" }), ...(col === 6 ? { right: "50%" } : { right: conn[wd + 1] ? -6 : "50%" }) }} /> : null; })()}
                 <button
                   disabled={future}
                   onClick={() => dayAction(habit, dateStr)}
@@ -773,13 +863,13 @@ function ReorderModal({ habits, onSave, onClose }) {
 
   return (
     <div style={S.modalOverlay} onClick={onClose}>
-      <div style={{ ...S.modal, maxHeight: "80vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
-        <div style={S.modalHead}>
+      <div style={{ ...S.modal, maxHeight: "80vh", overflow: "hidden" }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ ...S.modalHead, flexShrink: 0 }}>
           Reorder Habits
           <button onClick={onClose} style={S.closeBtn}><X size={16} /></button>
         </div>
-        <p style={{ fontSize: 12, color: "var(--text-3)", margin: "0 0 10px" }}>Use arrows to set the display order.</p>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <p style={{ fontSize: 12, color: "var(--text-3)", margin: "0 0 10px", flexShrink: 0 }}>Use arrows to set the display order.</p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, overflowY: "auto", minHeight: 0 }}>
           {items.map((h, i) => {
             const c = PILLARS[h.pillar]?.dot || "#9A968C";
             return (
@@ -797,7 +887,7 @@ function ReorderModal({ habits, onSave, onClose }) {
           })}
         </div>
         <button onClick={() => onSave(items.map((h) => h.id))}
-          style={{ ...S.sideAddBtn, width: "100%", marginTop: 14, height: 38, justifyContent: "center" }}>
+          style={{ ...S.sideAddBtn, width: "100%", marginTop: 14, height: 38, justifyContent: "center", flexShrink: 0 }}>
           <Check size={14} /> Save Order
         </button>
       </div>
@@ -879,14 +969,14 @@ const S = {
   ringLabel: { fontSize: 14, fontWeight: 700, color: "var(--text)" },
   ringSub: { fontSize: 11.5, color: "var(--text-3)", fontWeight: 500, marginTop: 2 },
   weekCard: { background: "var(--surface)", borderRadius: 12, padding: "8px 14px 14px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", overflowX: "auto" },
-  weekHeadRow: { display: "flex", alignItems: "flex-end", padding: "10px 0", borderBottom: "1px solid var(--border)", minWidth: 480 },
-  weekNameCol: { width: 160, flexShrink: 0, display: "flex", alignItems: "center", gap: 8 },
+  weekHeadRow: { display: "flex", alignItems: "flex-end", padding: "10px 0", borderBottom: "1px solid var(--border)", minWidth: 480, position: "relative", zIndex: 0 },
+  weekNameCol: { width: 160, flexShrink: 0, alignSelf: "stretch", display: "flex", alignItems: "center", gap: 8, position: "sticky", left: 0, zIndex: 5, background: "var(--surface)", boxShadow: "6px 0 6px -6px rgba(0,0,0,0.15)" },
   weekDayHead: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 },
   weekDayName: { fontSize: 10, fontWeight: 600, color: "var(--text-3)", textTransform: "uppercase" },
   weekDayNum: { fontSize: 12, fontWeight: 600, color: "var(--text-2)", width: 22, height: 22, display: "grid", placeItems: "center", borderRadius: "50%" },
   weekDayToday: { background: "var(--accent-strong)", color: "#fff" },
   weekStreakCol: { width: 64, flexShrink: 0, textAlign: "center", fontSize: 10, fontWeight: 600, color: "var(--text-3)", textTransform: "uppercase" },
-  weekRow: { display: "flex", alignItems: "center", padding: "9px 0", borderBottom: "1px solid #F4F2EC", minWidth: 480 },
+  weekRow: { display: "flex", alignItems: "center", padding: "9px 0", borderBottom: "1px solid #F4F2EC", minWidth: 480, position: "relative", zIndex: 0 },
   weekHabitName: { fontSize: 13, fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
   weekCell: { flex: 1, display: "grid", placeItems: "center" },
   typeBadge: { fontSize: 10, color: "var(--text-3)", background: "var(--hover)", padding: "1px 6px", borderRadius: 8, fontWeight: 600 },
@@ -905,6 +995,12 @@ const S = {
   monthGrid: { display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 6 },
   monthDay: { aspectRatio: "1", border: "1.5px solid var(--border)", background: "var(--surface)", borderRadius: 8, fontSize: 12.5, fontWeight: 600, color: "var(--text-2)", cursor: "pointer", fontFamily: "inherit", display: "grid", placeItems: "center" },
   monthDayFuture: { opacity: 0.4, cursor: "not-allowed", background: "var(--surface-2)" },
+  monthDayOff: { background: "var(--surface-2)", borderStyle: "dashed", color: "var(--text-3)", opacity: 0.5, cursor: "default" },
+  dayPick: { display: "flex", gap: 4, flexWrap: "wrap" },
+  dayChip: { border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-2)", borderRadius: 7, padding: "5px 7px", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", minWidth: 34 },
+  dayChipOn: { background: "var(--accent-strong)", color: "#fff", borderColor: "var(--accent-strong)" },
+  pickHint: { fontSize: 11, color: "var(--text-3)", fontWeight: 600 },
+  offDay: { color: "var(--text-3)", opacity: 0.4, fontSize: 18, lineHeight: 1, userSelect: "none" },
   noteIndicator: { position: "absolute", top: 3, right: 3, width: 5, height: 5, borderRadius: "50%", background: "#3A7CA5" },
   cellNoteBubble: { position: "absolute", top: 2, right: "calc(50% - 16px)", width: 5, height: 5, borderRadius: "50%", background: "#3A7CA5" },
   countBadge: { position: "absolute", bottom: 2, right: 2, minWidth: 13, height: 13, padding: "0 2px", borderRadius: 7, color: "#fff", fontSize: 9, fontWeight: 700, display: "grid", placeItems: "center", lineHeight: 1 },

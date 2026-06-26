@@ -38,6 +38,8 @@ def migrate_db():
         add_col("habit", "type", "TEXT NOT NULL DEFAULT 'regular'")
         add_col("habit", "target_count", "INTEGER")
         add_col("habit", "period", "TEXT")
+        # weekly habits scheduled on specific weekdays (JSON list, Mon=0..Sun=6)
+        add_col("habit", "days", "TEXT")
 
         # habit_log note (item 4)
         add_col("habit_log", "note", "TEXT")
@@ -57,6 +59,14 @@ def migrate_db():
         add_col("user", "email", "TEXT")
         add_col("user", "password_hash", "TEXT")
         add_col("user", "salt", "TEXT")
+
+        # delight kanban fields (status lane + order) for pre-existing tables
+        di_cols = [r[1] for r in conn.execute("PRAGMA table_info(delight_item)").fetchall()]
+        if di_cols and "status" not in di_cols:
+            conn.execute("ALTER TABLE delight_item ADD COLUMN status TEXT NOT NULL DEFAULT 'todo'")
+            conn.execute("UPDATE delight_item SET status='done' WHERE done=1")
+        if di_cols:
+            add_col("delight_item", "position", "INTEGER NOT NULL DEFAULT 0")
 
 def init_db():
     with db() as conn:
@@ -361,6 +371,94 @@ def init_db():
             deleted_at TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+
+        -- Delights: customizable collections of fun things (books, movies, places…)
+        CREATE TABLE IF NOT EXISTS delight_collection (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            name TEXT NOT NULL,
+            columns TEXT NOT NULL DEFAULT '[]',   -- JSON array of user-named column labels
+            position INTEGER NOT NULL DEFAULT 0,
+            deleted_at TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS delight_item (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            collection_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            fields TEXT NOT NULL DEFAULT '{}',     -- JSON {column: value}
+            done INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'todo',   -- kanban lane: todo | doing | done
+            position INTEGER NOT NULL DEFAULT 0,   -- order within its lane
+            deleted_at TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        -- Expenses: user-customizable icon categories (veggies, grocery, movie…) + daily logs.
+        CREATE TABLE IF NOT EXISTS expense_category (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            name TEXT NOT NULL,
+            icon TEXT NOT NULL DEFAULT 'ShoppingBag',
+            color TEXT NOT NULL DEFAULT '#C9772E',
+            position INTEGER NOT NULL DEFAULT 0,
+            deleted_at TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS expense_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            category_id INTEGER NOT NULL,
+            amount REAL NOT NULL DEFAULT 0,
+            note TEXT NOT NULL DEFAULT '',
+            log_date TEXT NOT NULL,
+            deleted_at TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        -- Wallet: investment holdings (asset generation) — invested vs current value.
+        CREATE TABLE IF NOT EXISTS investment (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            name TEXT NOT NULL,
+            kind TEXT NOT NULL DEFAULT 'Other',
+            invested REAL NOT NULL DEFAULT 0,
+            current_value REAL NOT NULL DEFAULT 0,
+            note TEXT NOT NULL DEFAULT '',
+            start_date TEXT NOT NULL,
+            deleted_at TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        -- Wallet/Expenses: recurring "fixed" items (EMI, rent, SIP…) that auto-post
+        -- a real expense_log / investment row at the start of every billing cycle.
+        CREATE TABLE IF NOT EXISTS fixed_item (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            kind TEXT NOT NULL CHECK(kind IN ('expense','investment')),
+            name TEXT NOT NULL,
+            amount REAL NOT NULL DEFAULT 0,
+            category_id INTEGER,            -- expense_category id, when kind='expense'
+            invest_kind TEXT,                -- investment "kind" label, when kind='investment'
+            note TEXT NOT NULL DEFAULT '',
+            active INTEGER NOT NULL DEFAULT 1,
+            deleted_at TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        -- One row per fixed_item per billing cycle it has already posted into —
+        -- prevents double-posting and lets the actual log/investment be freely edited or deleted.
+        CREATE TABLE IF NOT EXISTS fixed_posting (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fixed_item_id INTEGER NOT NULL,
+            cycle_start TEXT NOT NULL,
+            expense_log_id INTEGER,
+            investment_id INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(fixed_item_id, cycle_start)
+        );
         """)
 
         migrate_db()
@@ -376,6 +474,26 @@ def init_db():
                     ("Relationship", "#C2536B"),
                     ("Health",       "#4C9A6B"),
                     ("Spiritual",    "#8268B0"),
+                ]
+            )
+
+        # Seed starter expense categories if none exist
+        ecount = conn.execute("SELECT COUNT(*) FROM expense_category WHERE user_id=1").fetchone()[0]
+        if ecount == 0:
+            conn.executemany(
+                "INSERT INTO expense_category (user_id, name, icon, color, position) VALUES (1, ?, ?, ?, ?)",
+                [
+                    ("Vegetables",   "Carrot",        "#4C9A6B", 0),
+                    ("Grocery",      "ShoppingCart",  "#C9A227", 1),
+                    ("Movie",        "Clapperboard",  "#8268B0", 2),
+                    ("Shopping",     "ShoppingBag",   "#C2536B", 3),
+                    ("Petrol",       "Fuel",          "#C2773B", 4),
+                    ("Cosmetics",    "Sparkles",      "#D1556E", 5),
+                    ("Clothing",     "Shirt",         "#3A7CA5", 6),
+                    ("Laundry",      "WashingMachine","#5B7C99", 7),
+                    ("Electricity",  "Zap",           "#C9772E", 8),
+                    ("DishTV",       "Tv",            "#A23E57", 9),
+                    ("Water bill",   "Droplet",       "#3A7CA5", 10),
                 ]
             )
 

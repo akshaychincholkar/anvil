@@ -843,7 +843,7 @@ export default function GoalsWithGantt() {
                       <div style={{ position: "relative", flex: 1, minHeight: 36, minWidth: 0, backgroundImage: `repeating-linear-gradient(to right, var(--border) 0, var(--border) 1px, transparent 1px, transparent calc(100% / ${N}))` }}>
                         {todayInRange && <div style={{ ...S.gTodayLine, left: `${todayPct}%` }} />}
                         <div
-                          onPointerDown={(e) => { e.preventDefault(); pointerXRef.current = e.clientX; const tw = e.currentTarget.parentNode.offsetWidth; setDrag({ id: g.id, startX: e.clientX, dx: 0, g, pxPerDay: (tw / N) / 30.44 }); }}
+                          onPointerDown={(e) => { e.preventDefault(); pointerXRef.current = e.clientX; const tw = e.currentTarget.parentNode.offsetWidth; setDrag({ id: g.id, startX: e.clientX, dx: 0, g, pxPerDay: tw / totalDays }); }}
                           style={{
                             ...S.gBar, left: `${leftPct}%`, width: `${widthPct}%`, background: c,
                             cursor: isDragging ? "grabbing" : "grab",
