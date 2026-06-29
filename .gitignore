@@ -1,3 +1,8 @@
 .venv/
 backend/.env.local
 backend/*.log
+
+# Local SQLite database — never commit (contains real data + OAuth tokens)
+backend/anvil.db
+backend/anvil.db-wal
+backend/anvil.db-shm
