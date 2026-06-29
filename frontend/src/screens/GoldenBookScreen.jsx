@@ -770,7 +770,7 @@ const S = {
   tAffShow: { display: "flex", alignItems: "flex-start", gap: 9, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 12, padding: "12px 14px", marginBottom: 14 },
   tAffText: { flex: 1, fontSize: 15, fontFamily: "'Fraunces',Georgia,serif", fontStyle: "italic", lineHeight: 1.5, margin: 0, whiteSpace: "pre-wrap" },
 
-  tWindows: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 14 },
+  tWindows: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 14 },
   tWindow: { background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 12, padding: "11px 12px", transition: "box-shadow 0.2s, border-color 0.2s" },
   tWindowHead: { display: "flex", alignItems: "center", gap: 6 },
   tWindowLabel: { fontSize: 13, fontWeight: 700 },

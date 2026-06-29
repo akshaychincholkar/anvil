@@ -181,7 +181,11 @@ export default function ExpensesScreen() {
     load();
   };
   const removeCat = async (c) => {
-    if (!window.confirm(`Delete "${c.name}"? Its logged expenses will stay, but you won't be able to add new ones to it.`)) return;
+    const n = logs.filter((l) => l.category_id === c.id).length;
+    const msg = n > 0
+      ? `Delete "${c.name}"? Its ${n} transaction${n === 1 ? "" : "s"} will be moved to "Other".`
+      : `Delete "${c.name}"?`;
+    if (!window.confirm(msg)) return;
     await api.deleteExpenseCategory(c.id);
     load();
   };

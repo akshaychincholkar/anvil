@@ -145,6 +145,7 @@ export const api = {
   toggleHabitLog: (id, date) => req("POST", `/habits/${id}/log/${date}`),
   setHabitLogNote: (id, date, note) => req("PUT", `/habits/${id}/log/${date}/note`, { note }),
   setHabitLogCount: (id, date, count, note) => req("PUT", `/habits/${id}/log/${date}/count`, { count, note }),
+  incrementHabitLog: (id, date) => req("POST", `/habits/${id}/log/${date}/increment`),
   clearHabitLog: (id, date) => req("DELETE", `/habits/${id}/log/${date}`),
   getHabitsYearly: (year) => req("GET", `/habits/yearly/${year}`),
 

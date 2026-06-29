@@ -493,6 +493,7 @@ class HabitCreate(BaseModel):
     target_count: Optional[int] = None
     period: Optional[str] = None
     days: Optional[list] = None  # weekly habits: scheduled weekdays (Mon=0..Sun=6)
+    min_interval_min: int = 0
 
 class HabitUpdate(BaseModel):
     name: Optional[str] = None
@@ -502,6 +503,8 @@ class HabitUpdate(BaseModel):
     target_count: Optional[int] = None
     period: Optional[str] = None
     days: Optional[list] = None
+    min_interval_min: Optional[int] = None
+    active: Optional[bool] = None
 
 class HabitLogNote(BaseModel):
     note: str
@@ -573,7 +576,7 @@ def _scheduled_streaks(logs: list, weekdays: list):
 def _habit_full(conn, habit_id: int) -> dict:
     h = conn.execute(f"""
         SELECT h.id, p.name AS pillar, h.name, h.target_per_week, h.reminder_time,
-               h.type, h.target_count, h.period, h.days
+               h.type, h.target_count, h.period, h.days, h.min_interval_min, h.active
         FROM habit h JOIN pillar p ON h.pillar_id=p.id
         WHERE h.id=? AND h.user_id={cu()} AND h.deleted_at IS NULL
     """, (habit_id,)).fetchone()
@@ -588,14 +591,19 @@ def _habit_full(conn, habit_id: int) -> dict:
     log_counts = {r["date"]: r["count"] for r in conn.execute(
         "SELECT date, count FROM habit_log WHERE habit_id=? AND count IS NOT NULL", (habit_id,)
     ).fetchall()}
+    log_count_times = {r["date"]: r["last_count_at"] for r in conn.execute(
+        "SELECT date, last_count_at FROM habit_log WHERE habit_id=? AND last_count_at IS NOT NULL", (habit_id,)
+    ).fetchall()}
     d = row_dict(h)
     try:
         d["days"] = json.loads(d["days"]) if d.get("days") else []
     except Exception:
         d["days"] = []
+    d["active"] = bool(d.get("active", 1))
     d["logs"] = logs
     d["log_notes"] = log_notes
     d["log_counts"] = log_counts
+    d["log_count_times"] = log_count_times
     if d["type"] == "weekly" and d["days"]:
         cur, mx = _scheduled_streaks(logs, d["days"])
     else:
@@ -618,8 +626,8 @@ def create_habit(body: HabitCreate):
         pid = pillar_id(conn, body.pillar)
         days = json.dumps(body.days) if body.days else None
         cur = conn.execute(
-            f"INSERT INTO habit (user_id,pillar_id,name,target_per_week,type,target_count,period,days) VALUES ({cu()},?,?,?,?,?,?,?)",
-            (pid, body.name, body.target_per_week, body.type, body.target_count, body.period, days)
+            f"INSERT INTO habit (user_id,pillar_id,name,target_per_week,type,target_count,period,days,min_interval_min) VALUES ({cu()},?,?,?,?,?,?,?,?)",
+            (pid, body.name, body.target_per_week, body.type, body.target_count, body.period, days, max(0, body.min_interval_min or 0))
         )
         return _habit_full(conn, cur.lastrowid)
 
@@ -702,6 +710,50 @@ def set_habit_log_count(habit_id: int, log_date: str, body: HabitLogCount):
             )
         return _habit_full(conn, habit_id)
 
+@app.post("/api/habits/{habit_id}/log/{log_date}/increment")
+def increment_habit_log(habit_id: int, log_date: str):
+    """Add one to a per-day count, enforcing the habit's min interval between
+    increments. Stamps last_count_at = now. 429 if you're inside the cooldown."""
+    with db() as conn:
+        h = conn.execute(
+            f"SELECT type, target_count, min_interval_min FROM habit WHERE id=? AND user_id={cu()}", (habit_id,)
+        ).fetchone()
+        if not h:
+            raise HTTPException(404, "Habit not found")
+        existing = conn.execute(
+            "SELECT id, count, last_count_at FROM habit_log WHERE habit_id=? AND date=?", (habit_id, log_date)
+        ).fetchone()
+        interval = h["min_interval_min"] or 0
+        now = datetime.now()
+        if interval > 0 and existing and existing["last_count_at"]:
+            try:
+                last = datetime.fromisoformat(existing["last_count_at"])
+                wait = (last + timedelta(minutes=interval) - now).total_seconds()
+                if wait > 0:
+                    raise HTTPException(429, f"Wait {int(wait // 60)}m {int(wait % 60)}s before the next entry.")
+            except ValueError:
+                pass
+        count = (existing["count"] if existing and existing["count"] is not None else 0) + 1
+        target = h["target_count"] or 0
+        if h["type"] == "minimum":
+            done = 1 if count >= target else 0
+        elif h["type"] == "maximum":
+            done = 1 if 0 < count <= target else 0
+        else:
+            done = 1 if count > 0 else 0
+        stamp = now.isoformat(timespec="seconds")
+        if existing:
+            conn.execute(
+                "UPDATE habit_log SET count=?, done=?, last_count_at=? WHERE id=?",
+                (count, done, stamp, existing["id"])
+            )
+        else:
+            conn.execute(
+                "INSERT INTO habit_log (habit_id,date,done,count,last_count_at) VALUES (?,?,?,?,?)",
+                (habit_id, log_date, done, count, stamp)
+            )
+        return _habit_full(conn, habit_id)
+
 @app.delete("/api/habits/{habit_id}/log/{log_date}")
 def clear_habit_log(habit_id: int, log_date: str):
     """Remove a day's entry entirely (count, note, done)."""
@@ -715,7 +767,7 @@ def get_habits_yearly(year: int):
     with db() as conn:
         habits = conn.execute(
             "SELECT h.id, h.name, h.target_per_week, h.type, h.target_count, h.period "
-            f"FROM habit h WHERE h.user_id={cu()} AND h.deleted_at IS NULL ORDER BY h.id"
+            f"FROM habit h WHERE h.user_id={cu()} AND h.deleted_at IS NULL AND h.active=1 ORDER BY h.id"
         ).fetchall()
         result = []
         for h in habits:
@@ -1649,6 +1701,28 @@ def update_expense_category(cid: int, body: ExpenseCategoryUpdate):
 def delete_expense_category(cid: int):
     with db() as conn:
         _own_expense_category(conn, cid)
+        # Reassign any logged expenses to an "Other" category (created if absent)
+        # so transactions are never orphaned.
+        has_logs = conn.execute(
+            f"SELECT 1 FROM expense_log WHERE category_id=? AND user_id={cu()} AND deleted_at IS NULL LIMIT 1", (cid,)
+        ).fetchone()
+        if has_logs:
+            other = conn.execute(
+                f"SELECT id FROM expense_category WHERE user_id={cu()} AND deleted_at IS NULL "
+                "AND lower(name)='other' AND id<>? ORDER BY id LIMIT 1", (cid,)
+            ).fetchone()
+            if other:
+                other_id = other["id"]
+            else:
+                pos = conn.execute(f"SELECT COALESCE(MAX(position),-1)+1 p FROM expense_category WHERE user_id={cu()}").fetchone()["p"]
+                cur = conn.execute(
+                    f"INSERT INTO expense_category (user_id, name, icon, color, position) VALUES ({cu()}, 'Other', 'ShoppingBag', '#9A968C', ?)",
+                    (pos,)
+                )
+                other_id = cur.lastrowid
+            conn.execute(
+                f"UPDATE expense_log SET category_id=? WHERE category_id=? AND user_id={cu()}", (other_id, cid)
+            )
         _soft_delete(conn, "expense_category", cid)
 
 def _exp_log_row(r):
@@ -2297,11 +2371,15 @@ class DelightItemCreate(BaseModel):
     name: str
     fields: dict = {}
     status: str = "todo"
+    completed_date: Optional[str] = None
+    completion_note: Optional[str] = None
 
 class DelightItemUpdate(BaseModel):
     name: Optional[str] = None
     fields: Optional[dict] = None
     status: Optional[str] = None
+    completed_date: Optional[str] = None
+    completion_note: Optional[str] = None
 
 class ArrangeBody(BaseModel):
     order: list  # [{id, status, position}] — the full desired arrangement for one collection
@@ -2338,7 +2416,8 @@ def _delight_payload(conn):
             for col in columns
         ]
         items = conn.execute(
-            "SELECT id, name, fields, done, status, position FROM delight_item WHERE collection_id=? AND deleted_at IS NULL ORDER BY position, id",
+            "SELECT id, name, fields, done, status, position, completed_date, completion_note "
+            "FROM delight_item WHERE collection_id=? AND deleted_at IS NULL ORDER BY position, id",
             (c["id"],)
         ).fetchall()
         item_list = []
@@ -2347,7 +2426,8 @@ def _delight_payload(conn):
             except Exception: fields = {}
             status = it["status"] if it["status"] in DELIGHT_STATUSES else "todo"
             item_list.append({"id": it["id"], "name": it["name"], "fields": fields, "done": bool(it["done"]),
-                              "status": status, "position": it["position"]})
+                              "status": status, "position": it["position"],
+                              "completed_date": it["completed_date"], "completion_note": it["completion_note"]})
         result.append({"id": c["id"], "name": c["name"], "columns": columns, "items": item_list})
     return result
 
@@ -2417,9 +2497,12 @@ def create_delight_item(cid: int, body: DelightItemCreate):
             "SELECT COALESCE(MAX(position),-1)+1 p FROM delight_item WHERE collection_id=? AND status=? AND deleted_at IS NULL",
             (cid, status)
         ).fetchone()["p"]
+        comp_date = (body.completed_date or date.today().isoformat()) if status == "done" else None
+        comp_note = body.completion_note if status == "done" else None
         conn.execute(
-            "INSERT INTO delight_item (collection_id, name, fields, done, status, position) VALUES (?, ?, ?, ?, ?, ?)",
-            (cid, body.name.strip(), json.dumps(body.fields or {}), 1 if status == "done" else 0, status, pos)
+            "INSERT INTO delight_item (collection_id, name, fields, done, status, position, completed_date, completion_note) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (cid, body.name.strip(), json.dumps(body.fields or {}), 1 if status == "done" else 0, status, pos, comp_date, comp_note)
         )
         return _delight_payload(conn)
 
@@ -2440,8 +2523,29 @@ def update_delight_item(iid: int, body: DelightItemUpdate):
         if body.fields is not None:
             conn.execute("UPDATE delight_item SET fields=? WHERE id=?", (json.dumps(body.fields), iid))
         if body.status is not None and body.status in DELIGHT_STATUSES:
+            prev = conn.execute("SELECT status FROM delight_item WHERE id=?", (iid,)).fetchone()
+            was_done = prev and prev["status"] == "done"
+            now_done = body.status == "done"
             conn.execute("UPDATE delight_item SET status=?, done=? WHERE id=?",
-                         (body.status, 1 if body.status == "done" else 0, iid))
+                         (body.status, 1 if now_done else 0, iid))
+            if now_done:
+                # Entering or staying done: set completion date (today unless given);
+                # don't overwrite an existing date on a stay-done edit unless provided.
+                if not was_done or body.completed_date is not None:
+                    conn.execute("UPDATE delight_item SET completed_date=? WHERE id=?",
+                                 (body.completed_date or date.today().isoformat(), iid))
+                if body.completion_note is not None or not was_done:
+                    conn.execute("UPDATE delight_item SET completion_note=? WHERE id=?",
+                                 (body.completion_note, iid))
+            else:
+                # Left the done lane — clear completion metadata.
+                conn.execute("UPDATE delight_item SET completed_date=NULL, completion_note=NULL WHERE id=?", (iid,))
+        elif body.completed_date is not None or body.completion_note is not None:
+            # Editing completion details without changing status.
+            if body.completed_date is not None:
+                conn.execute("UPDATE delight_item SET completed_date=? WHERE id=?", (body.completed_date, iid))
+            if body.completion_note is not None:
+                conn.execute("UPDATE delight_item SET completion_note=? WHERE id=?", (body.completion_note, iid))
         return _delight_payload(conn)
 
 @app.put("/api/delight/collections/{cid}/arrange")
@@ -2460,6 +2564,17 @@ def arrange_delight(cid: int, body: ArrangeBody):
                 "UPDATE delight_item SET status=?, position=?, done=? WHERE id=? AND collection_id=?",
                 (status, pos, 1 if status == "done" else 0, iid, cid)
             )
+            if status == "done":
+                # Stamp a completion date when first dragged into Satisfied (keep any existing).
+                conn.execute(
+                    "UPDATE delight_item SET completed_date=? WHERE id=? AND collection_id=? AND completed_date IS NULL",
+                    (date.today().isoformat(), iid, cid)
+                )
+            else:
+                conn.execute(
+                    "UPDATE delight_item SET completed_date=NULL, completion_note=NULL WHERE id=? AND collection_id=?",
+                    (iid, cid)
+                )
         return _delight_payload(conn)
 
 @app.delete("/api/delight/items/{iid}", status_code=204)

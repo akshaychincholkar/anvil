@@ -40,11 +40,17 @@ def migrate_db():
         add_col("habit", "period", "TEXT")
         # weekly habits scheduled on specific weekdays (JSON list, Mon=0..Sun=6)
         add_col("habit", "days", "TEXT")
+        # minimum minutes required between two count increments (0 = no limit)
+        add_col("habit", "min_interval_min", "INTEGER NOT NULL DEFAULT 0")
+        # enabled/disabled: disabled habits are hidden from views (kept, not deleted)
+        add_col("habit", "active", "INTEGER NOT NULL DEFAULT 1")
 
         # habit_log note (item 4)
         add_col("habit_log", "note", "TEXT")
         # habit_log per-day count for minimum/maximum habits
         add_col("habit_log", "count", "INTEGER")
+        # timestamp of the most recent count increment (for min-interval enforcement)
+        add_col("habit_log", "last_count_at", "TEXT")
 
         # skill stage tracking (item 11)
         add_col("skill", "completed_stages", "TEXT NOT NULL DEFAULT '{}'")
@@ -69,6 +75,9 @@ def migrate_db():
             conn.execute("UPDATE delight_item SET status='done' WHERE done=1")
         if di_cols:
             add_col("delight_item", "position", "INTEGER NOT NULL DEFAULT 0")
+        # delight completion metadata (date + optional note when marked Satisfied)
+        add_col("delight_item", "completed_date", "TEXT")
+        add_col("delight_item", "completion_note", "TEXT")
 
         # Tesla 369 method: per-dream toggle + its own affirmation text.
         add_col("golden_goal", "t369_enabled", "INTEGER NOT NULL DEFAULT 0")
@@ -169,6 +178,8 @@ def init_db():
             type TEXT NOT NULL DEFAULT 'regular',
             target_count INTEGER,
             period TEXT,
+            min_interval_min INTEGER NOT NULL DEFAULT 0,
+            active INTEGER NOT NULL DEFAULT 1,
             deleted_at TEXT
         );
 
@@ -179,6 +190,7 @@ def init_db():
             done INTEGER NOT NULL DEFAULT 1,
             note TEXT,
             count INTEGER,
+            last_count_at TEXT,
             UNIQUE(habit_id, date)
         );
 
@@ -428,6 +440,8 @@ def init_db():
             done INTEGER NOT NULL DEFAULT 0,
             status TEXT NOT NULL DEFAULT 'todo',   -- kanban lane: todo | doing | done
             position INTEGER NOT NULL DEFAULT 0,   -- order within its lane
+            completed_date TEXT,                   -- when marked Satisfied (done)
+            completion_note TEXT,                  -- optional note on completion
             deleted_at TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );

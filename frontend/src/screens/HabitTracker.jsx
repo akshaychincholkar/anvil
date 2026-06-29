@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { Pencil, Plus, Bell, Check, Flame, LayoutGrid, Menu, X, MoreHorizontal, FileText, Link2, ChevronLeft, ChevronRight } from "lucide-react";
+import { Pencil, Plus, Bell, Check, Flame, LayoutGrid, Menu, X, MoreHorizontal, FileText, Link2, ChevronLeft, ChevronRight, Power } from "lucide-react";
 import { api } from "../api.js";
 import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
 import UndoToast from "../components/UndoToast.jsx";
@@ -61,12 +61,18 @@ export default function HabitTracker() {
   const [adding, setAdding] = useState(false);
   const [editingHabit, setEditingHabit] = useState(null);
   const [countPopup, setCountPopup] = useState(null); // { habit, date }
-  const [newHabit, setNewHabit] = useState({ name: "", pillar: "Health", target_per_week: 7, type: "regular", target_count: null, period: "week", days: [] });
+  const [newHabit, setNewHabit] = useState({ name: "", pillar: "Health", target_per_week: 7, type: "regular", target_count: null, period: "week", days: [], min_interval_min: 0 });
   const [reordering, setReordering] = useState(false);
   const [habitOrder, setHabitOrder] = useState([]);
 
   const load = useCallback(() => api.getHabits().then(setHabits).catch(console.error), []);
   useEffect(() => { load(); }, [load]);
+
+  // Merge a single updated habit (returned by log/count/clear endpoints) into
+  // state so the UI updates instantly instead of refetching every habit.
+  const mergeHabit = useCallback((updated) => {
+    if (updated && updated.id != null) setHabits((hs) => hs.map((h) => (h.id === updated.id ? updated : h)));
+  }, []);
 
   useEffect(() => {
     api.getSetting("habit_order").then((r) => { if (Array.isArray(r?.value)) setHabitOrder(r.value); }).catch(() => {});
@@ -83,10 +89,25 @@ export default function HabitTracker() {
     });
   }, [habits, habitOrder]);
 
+  // Enabled habits only — used for the sidebar list and the All Habits grid.
+  // (Disabled habits stay in `sortedHabits` so the reorder/edit modal can show them.)
+  const activeHabits = useMemo(() => sortedHabits.filter((h) => h.active !== false), [sortedHabits]);
+
+  // If the open habit gets disabled, drop back to the All Habits view.
+  useEffect(() => {
+    if (selected !== "ALL" && habits.some((h) => h.id === selected && h.active === false)) {
+      setSelected("ALL");
+    }
+  }, [habits, selected]);
+
   const saveOrder = async (ids) => {
     setHabitOrder(ids);
     await api.setSetting("habit_order", ids);
     setReordering(false);
+  };
+
+  const toggleActive = async (habitId, active) => {
+    mergeHabit(await api.updateHabit(habitId, { active }));
   };
 
   useEffect(() => {
@@ -108,9 +129,16 @@ export default function HabitTracker() {
       toggleDay(habit.id, dateStr);
     }
   };
-  const toggleDay = async (habitId, dateStr) => { await api.toggleHabitLog(habitId, dateStr); load(); };
-  const saveCount = async (habitId, dateStr, count, note) => { await api.setHabitLogCount(habitId, dateStr, count, note); setCountPopup(null); load(); };
-  const clearLog = async (habitId, dateStr) => { await api.clearHabitLog(habitId, dateStr); setCountPopup(null); load(); };
+  const toggleDay = async (habitId, dateStr) => { mergeHabit(await api.toggleHabitLog(habitId, dateStr)); };
+  const saveCount = async (habitId, dateStr, count, note) => { mergeHabit(await api.setHabitLogCount(habitId, dateStr, count, note)); setCountPopup(null); };
+  const clearLog = async (habitId, dateStr) => { mergeHabit(await api.clearHabitLog(habitId, dateStr)); setCountPopup(null); };
+  const incrementCount = async (habitId, dateStr) => {
+    const updated = await api.incrementHabitLog(habitId, dateStr);
+    mergeHabit(updated);
+    // Keep the open popup's habit reference fresh so its countdown re-arms.
+    setCountPopup((p) => (p && p.habit.id === habitId ? { ...p, habit: updated } : p));
+    return updated;
+  };
 
   const createHabit = async () => {
     if (!newHabit.name.trim()) return;
@@ -125,9 +153,10 @@ export default function HabitTracker() {
       target_count: needsCount ? Number(newHabit.target_count) || 1 : null,
       period: needsCount ? newHabit.period : null,
       days: isWeekly ? newHabit.days : null,
+      min_interval_min: needsCount ? Number(newHabit.min_interval_min) || 0 : 0,
     };
     await api.createHabit(body);
-    setNewHabit({ name: "", pillar: "Health", target_per_week: 7, type: "regular", target_count: null, period: "week", days: [] });
+    setNewHabit({ name: "", pillar: "Health", target_per_week: 7, type: "regular", target_count: null, period: "week", days: [], min_interval_min: 0 });
     setAdding(false);
     load();
   };
@@ -168,7 +197,7 @@ export default function HabitTracker() {
         </div>
         <div style={S.sideDivider} />
 
-        {sortedHabits.map((h) => {
+        {activeHabits.map((h) => {
           const on = selected === h.id;
           const c = PILLARS[h.pillar]?.dot || "#9A968C";
           return (
@@ -200,13 +229,14 @@ export default function HabitTracker() {
           </button>
         )}
         {selected === "ALL"
-          ? <AllHabitsWeekly habits={sortedHabits} dayAction={dayAction} logSet={logSet}
+          ? <AllHabitsWeekly habits={activeHabits} dayAction={dayAction} logSet={logSet}
               onDelete={deleteHabit}
               onEdit={(h) => setEditingHabit(h)} />
           : <SingleHabitMonthly habit={current} dayAction={dayAction} logSet={logSet}
               onDelete={() => deleteHabit(current.id, current.name)}
               onEdit={() => setEditingHabit(current)}
-              setNote={(date, note) => api.setHabitLogNote(current.id, date, note).then(load)} />}
+              onToggleActive={toggleActive}
+              setNote={(date, note) => api.setHabitLogNote(current.id, date, note).then(mergeHabit)} />}
 
         {/* Yearly bar chart always shown in All view */}
         {selected === "ALL" && <YearlyChart year={THIS_YEAR} />}
@@ -216,6 +246,7 @@ export default function HabitTracker() {
         <ReorderModal
           habits={sortedHabits}
           onSave={saveOrder}
+          onToggleActive={toggleActive}
           onClose={() => setReordering(false)}
         />
       )}
@@ -236,6 +267,7 @@ export default function HabitTracker() {
           initialNote={countPopup.habit.log_notes?.[countPopup.date] ?? ""}
           onSave={(count, note) => saveCount(countPopup.habit.id, countPopup.date, count, note)}
           onClear={() => clearLog(countPopup.habit.id, countPopup.date)}
+          onIncrement={() => incrementCount(countPopup.habit.id, countPopup.date)}
           onClose={() => setCountPopup(null)}
         />
       )}
@@ -282,14 +314,20 @@ function AddHabitForm({ habit, onChange, onSave, onCancel }) {
         </>
       )}
       {needsCount && (
-        <div style={{ display: "flex", gap: 6 }}>
-          <input type="number" min={1} placeholder="N" value={habit.target_count || ""}
-            onChange={(e) => onChange((n) => ({ ...n, target_count: e.target.value }))}
-            style={{ ...S.sideInput, width: 60 }} />
-          <select value={habit.period} onChange={(e) => onChange((n) => ({ ...n, period: e.target.value }))} style={S.sideInput}>
-            {["day","week","month","year"].map((p) => <option key={p}>{p}</option>)}
-          </select>
-        </div>
+        <>
+          <div style={{ display: "flex", gap: 6 }}>
+            <input type="number" min={1} placeholder="N" value={habit.target_count || ""}
+              onChange={(e) => onChange((n) => ({ ...n, target_count: e.target.value }))}
+              style={{ ...S.sideInput, width: 60 }} />
+            <select value={habit.period} onChange={(e) => onChange((n) => ({ ...n, period: e.target.value }))} style={S.sideInput}>
+              {["day","week","month","year"].map((p) => <option key={p}>{p}</option>)}
+            </select>
+          </div>
+          <div style={S.pickHint}>Min gap between entries (minutes)</div>
+          <input type="number" min={0} placeholder="0" value={habit.min_interval_min ?? 0}
+            onChange={(e) => onChange((n) => ({ ...n, min_interval_min: e.target.value }))}
+            style={S.sideInput} />
+        </>
       )}
       <div style={{ display: "flex", gap: 6 }}>
         <button onClick={onSave} style={S.sideAddBtn}><Check size={13} /></button>
@@ -306,6 +344,7 @@ function EditHabitModal({ habit, onSave, onClose }) {
   const [period, setPeriod] = useState(habit.period || "week");
   const [reminder, setReminder] = useState(habit.reminder_time || "");
   const [days, setDays] = useState(habit.days || []);
+  const [interval, setInterval_] = useState(habit.min_interval_min ?? 0);
 
   const needsCount = type === "minimum" || type === "maximum";
   const isWeekly = type === "weekly";
@@ -319,6 +358,7 @@ function EditHabitModal({ habit, onSave, onClose }) {
       period: needsCount ? period : null,
       days: isWeekly ? days : [],
       reminder_time: reminder || null,
+      min_interval_min: needsCount ? Number(interval) || 0 : 0,
     });
   };
 
@@ -342,12 +382,16 @@ function EditHabitModal({ habit, onSave, onClose }) {
           </>
         )}
         {needsCount && (
-          <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-            <input type="number" min={1} value={targetCount} onChange={(e) => setTargetCount(e.target.value)} style={{ ...S.sideInput, width: 70 }} />
-            <select value={period} onChange={(e) => setPeriod(e.target.value)} style={S.sideInput}>
-              {["day","week","month","year"].map((p) => <option key={p}>{p}</option>)}
-            </select>
-          </div>
+          <>
+            <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+              <input type="number" min={1} value={targetCount} onChange={(e) => setTargetCount(e.target.value)} style={{ ...S.sideInput, width: 70 }} />
+              <select value={period} onChange={(e) => setPeriod(e.target.value)} style={S.sideInput}>
+                {["day","week","month","year"].map((p) => <option key={p}>{p}</option>)}
+              </select>
+            </div>
+            <label style={S.modalLabel}>Min gap between entries (minutes)</label>
+            <input type="number" min={0} value={interval} onChange={(e) => setInterval_(e.target.value)} style={S.sideInput} />
+          </>
         )}
         <label style={S.modalLabel}>Reminder time</label>
         <input type="time" value={reminder} onChange={(e) => setReminder(e.target.value)} style={S.sideInput} />
@@ -357,14 +401,54 @@ function EditHabitModal({ habit, onSave, onClose }) {
   );
 }
 
-function CountPopup({ habit, date, initialCount, initialNote, onSave, onClear, onClose }) {
+function CountPopup({ habit, date, initialCount, initialNote, onSave, onClear, onClose, onIncrement }) {
   const [count, setCount] = useState(initialCount ?? 0);
   const [note, setNote] = useState(initialNote ?? "");
+  const [now, setNow] = useState(Date.now());
+  const [busy, setBusy] = useState(false);
   const target = habit.target_count;
   const meets = habit.type === "minimum" ? count >= target : (count > 0 && count <= target);
   const over = habit.type === "maximum" && count > target;
   const statusColor = meets ? "#4C9A6B" : (over ? "#C2536B" : "#C2773B");
   const statusText = meets ? "✓ Goal met" : (over ? "Over the limit" : "Not met yet");
+
+  // Min-interval gating: only for today's entry on a habit that defines a gap.
+  const interval = habit.min_interval_min || 0;
+  const isToday = date === todayISO();
+  const gated = interval > 0 && isToday;
+  const lastAt = habit.log_count_times?.[date];
+  const nextAllowed = gated && lastAt ? new Date(lastAt).getTime() + interval * 60000 : 0;
+  const waitMs = Math.max(0, nextAllowed - now);
+
+  // Tick every second while we're inside a cooldown so the countdown updates live.
+  useEffect(() => {
+    if (!gated || waitMs <= 0) return;
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [gated, waitMs]);
+
+  const fmtWait = (ms) => {
+    const s = Math.ceil(ms / 1000);
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  };
+
+  const plus = async () => {
+    if (gated) {
+      if (waitMs > 0 || busy) return;
+      setBusy(true);
+      try {
+        const updated = await onIncrement(); // server-validated; returns fresh habit
+        if (updated) {
+          setCount(updated.log_counts?.[date] ?? count + 1);
+          setNow(Date.now());
+        }
+      } catch (e) {
+        alert(e.message || "Too soon — please wait.");
+      } finally { setBusy(false); }
+    } else {
+      setCount((n) => n + 1);
+    }
+  };
 
   return (
     <div style={S.modalOverlay} onClick={onClose}>
@@ -372,12 +456,21 @@ function CountPopup({ habit, date, initialCount, initialNote, onSave, onClear, o
         <div style={S.modalHead}>{habit.name}<button onClick={onClose} style={S.closeBtn}><X size={16} /></button></div>
         <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 2 }}>
           {date} · {habit.type === "minimum" ? `at least ${target}` : `no more than ${target}`} / {habit.period}
+          {interval > 0 && <> · {interval}m between entries</>}
         </div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 20, margin: "14px 0 6px" }}>
-          <button onClick={() => setCount((n) => Math.max(0, n - 1))} style={S.counterBtn}>−</button>
+          <button onClick={() => setCount((n) => Math.max(0, n - 1))} disabled={gated}
+            style={{ ...S.counterBtn, ...(gated ? { opacity: 0.45, cursor: "not-allowed" } : {}) }}
+            title={gated ? "Manual changes are off for timed habits — use Delete to reset the day" : undefined}>−</button>
           <span style={{ fontSize: 38, fontWeight: 700, fontFamily: "'Fraunces',Georgia,serif", minWidth: 52, textAlign: "center", color: statusColor }}>{count}</span>
-          <button onClick={() => setCount((n) => n + 1)} style={S.counterBtn}>+</button>
+          <button onClick={plus} disabled={gated && (waitMs > 0 || busy)}
+            style={{ ...S.counterBtn, ...(gated && waitMs > 0 ? { opacity: 0.45, cursor: "not-allowed" } : {}) }}>+</button>
         </div>
+        {gated && waitMs > 0 && (
+          <div style={{ textAlign: "center", fontSize: 12, fontWeight: 700, color: "#C2773B", marginBottom: 8 }}>
+            Wait {fmtWait(waitMs)} before the next entry
+          </div>
+        )}
         <div style={{ textAlign: "center", fontSize: 12.5, fontWeight: 700, color: statusColor, marginBottom: 12 }}>{statusText}</div>
         <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Add a comment (optional)…"
           style={{ ...S.sideInput, minHeight: 56, resize: "vertical" }} />
@@ -628,7 +721,7 @@ function AllHabitsWeekly({ habits, dayAction, logSet, onDelete, onEdit }) {
   );
 }
 
-function SingleHabitMonthly({ habit, dayAction, logSet, onDelete, onEdit, setNote }) {
+function SingleHabitMonthly({ habit, dayAction, logSet, onDelete, onEdit, setNote, onToggleActive }) {
   const [menuDate, setMenuDate] = useState(null);
   const [noteInput, setNoteInput] = useState("");
   const [noteDate, setNoteDate] = useState(null);
@@ -703,8 +796,12 @@ function SingleHabitMonthly({ habit, dayAction, logSet, onDelete, onEdit, setNot
           <div style={S.eyebrow}><span style={{ ...S.sideDot, background: c, marginRight: 6 }} />{habit.pillar} · Monthly view</div>
           <h1 style={S.h1}>{habit.name}</h1>
         </div>
-        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+        <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
           <button onClick={onEdit} style={S.actionBtn}><Pencil size={14} /> Edit</button>
+          <button onClick={() => onToggleActive(habit.id, habit.active === false)}
+            style={{ ...S.actionBtn, ...(habit.active === false ? { color: "#4C9A6B", borderColor: "#4C9A6B" } : {}) }}>
+            {habit.active === false ? <><Check size={14} /> Enable</> : <><Power size={14} /> Disable</>}
+          </button>
           <button onClick={onDelete} style={{ ...S.actionBtn, color: "#C2536B", borderColor: "#C2536B" }}><X size={14} /> Delete</button>
           {habit.reminder_time && <button style={S.actionBtn}><Bell size={14} /> {habit.reminder_time}</button>}
         </div>
@@ -850,32 +947,43 @@ function LongPressMenu({ onEdit, onDelete, onAddNote, onRemind, onClose }) {
   );
 }
 
-function ReorderModal({ habits, onSave, onClose }) {
-  const [items, setItems] = useState([...habits]);
+function ReorderModal({ habits, onSave, onToggleActive, onClose }) {
+  // Track order locally; pull live `active` state from the latest `habits` prop.
+  const [order, setOrder] = useState(() => habits.map((h) => h.id));
+  const byId = useMemo(() => { const m = {}; habits.forEach((h) => (m[h.id] = h)); return m; }, [habits]);
+  const items = order.map((id) => byId[id]).filter(Boolean);
 
   const move = (i, dir) => {
-    const next = [...items];
     const j = i + dir;
-    if (j < 0 || j >= next.length) return;
+    if (j < 0 || j >= order.length) return;
+    const next = [...order];
     [next[i], next[j]] = [next[j], next[i]];
-    setItems(next);
+    setOrder(next);
   };
 
   return (
     <div style={S.modalOverlay} onClick={onClose}>
       <div style={{ ...S.modal, maxHeight: "80vh", overflow: "hidden" }} onClick={(e) => e.stopPropagation()}>
         <div style={{ ...S.modalHead, flexShrink: 0 }}>
-          Reorder Habits
+          Edit Habits
           <button onClick={onClose} style={S.closeBtn}><X size={16} /></button>
         </div>
-        <p style={{ fontSize: 12, color: "var(--text-3)", margin: "0 0 10px", flexShrink: 0 }}>Use arrows to set the display order.</p>
+        <p style={{ fontSize: 12, color: "var(--text-3)", margin: "0 0 10px", flexShrink: 0 }}>Reorder with the arrows. Toggle a habit off to hide it from your views (its history is kept).</p>
         <div style={{ display: "flex", flexDirection: "column", gap: 6, overflowY: "auto", minHeight: 0 }}>
           {items.map((h, i) => {
             const c = PILLARS[h.pillar]?.dot || "#9A968C";
+            const isOn = h.active !== false;
             return (
-              <div key={h.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 10px", background: "var(--bg)", borderRadius: 9, border: "1px solid var(--border)" }}>
+              <div key={h.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 10px", background: "var(--bg)", borderRadius: 9, border: "1px solid var(--border)", opacity: isOn ? 1 : 0.5 }}>
                 <span style={{ ...S.sideDot, background: c }} />
-                <span style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>{h.name}</span>
+                <span style={{ flex: 1, fontSize: 13, fontWeight: 500, textDecoration: isOn ? "none" : "line-through" }}>{h.name}</span>
+                <button
+                  onClick={() => onToggleActive(h.id, !isOn)}
+                  title={isOn ? "Disable (hide) habit" : "Enable habit"}
+                  style={{ ...S.activeToggle, ...(isOn ? S.activeToggleOn : {}) }}
+                  role="switch" aria-checked={isOn}>
+                  <span style={{ ...S.activeKnob, ...(isOn ? S.activeKnobOn : {}) }} />
+                </button>
                 <button
                   onClick={() => move(i, -1)} disabled={i === 0}
                   style={{ ...S.navBtn, width: 28, height: 28, opacity: i === 0 ? 0.3 : 1, fontSize: 14 }}>↑</button>
@@ -886,7 +994,7 @@ function ReorderModal({ habits, onSave, onClose }) {
             );
           })}
         </div>
-        <button onClick={() => onSave(items.map((h) => h.id))}
+        <button onClick={() => onSave(order)}
           style={{ ...S.sideAddBtn, width: "100%", marginTop: 14, height: 38, justifyContent: "center", flexShrink: 0 }}>
           <Check size={14} /> Save Order
         </button>
@@ -1005,6 +1113,10 @@ const S = {
   cellNoteBubble: { position: "absolute", top: 2, right: "calc(50% - 16px)", width: 5, height: 5, borderRadius: "50%", background: "#3A7CA5" },
   countBadge: { position: "absolute", bottom: 2, right: 2, minWidth: 13, height: 13, padding: "0 2px", borderRadius: 7, color: "#fff", fontSize: 9, fontWeight: 700, display: "grid", placeItems: "center", lineHeight: 1 },
   counterBtn: { width: 44, height: 44, borderRadius: "50%", border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: 24, fontWeight: 700, cursor: "pointer", display: "grid", placeItems: "center", fontFamily: "inherit", lineHeight: 1 },
+  activeToggle: { position: "relative", width: 38, height: 22, borderRadius: 11, border: "none", background: "var(--border)", cursor: "pointer", flexShrink: 0, transition: "background 0.2s", padding: 0 },
+  activeToggleOn: { background: "#4C9A6B" },
+  activeKnob: { position: "absolute", top: 3, left: 3, width: 16, height: 16, borderRadius: "50%", background: "#fff", transition: "left 0.2s", boxShadow: "0 1px 2px rgba(0,0,0,0.3)" },
+  activeKnobOn: { left: 19 },
   chainLine: { position: "absolute", top: "calc(50% - 3px)", left: 0, right: 0, height: 6, zIndex: 0, opacity: 0.9 },
   chainBanner: { display: "flex", alignItems: "center", gap: 8, borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 12.5, fontWeight: 700, fontFamily: "'Inter',system-ui,sans-serif" },
   navBar: { display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 16 },

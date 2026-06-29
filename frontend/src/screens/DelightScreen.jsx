@@ -14,6 +14,9 @@ function useIsMobile(bp = 760) {
   return m;
 }
 
+const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+const fmtDate = (iso) => iso ? new Date(iso + "T00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "";
+
 const ACCENT = "#C9772E";
 const STATUSES = [
   { id: "todo",  label: "Want to",   color: "#3A7CA5" },
@@ -35,6 +38,7 @@ export default function DelightScreen() {
   const [loaded, setLoaded] = useState(false);
   const [colForm, setColForm] = useState(null);
   const [itemForm, setItemForm] = useState(null);
+  const [completeForm, setCompleteForm] = useState(null); // { item, date, note } when moving to Satisfied
   const [drag, setDrag] = useState(null);    // floating ghost { id, item, x, y, w, offX, offY }
   const [target, setTarget] = useState(null); // { status, index }
   const [activeTags, setActiveTags] = useState([]); // tag filter (empty = show all)
@@ -156,6 +160,10 @@ export default function DelightScreen() {
       ? { ...c, items: order.map((o) => ({ ...c.items.find((x) => x.id === o.id), status: o.status, position: o.position })) }
       : c));
     api.arrangeDelight(selId, order).then(load).catch(load);
+    // Just moved into Satisfied → ask for completion date + optional comment.
+    if (t.status === "done" && item.status !== "done") {
+      setCompleteForm({ item, date: todayISO(), note: "" });
+    }
   };
 
   const deleteCollection = async (c) => {
@@ -187,10 +195,37 @@ export default function DelightScreen() {
   const saveItem = async () => {
     const name = itemForm.name.trim();
     if (!name || !selected) return;
+    // Was this item already in Satisfied before saving?
+    const prev = itemForm.id ? (selected.items || []).find((x) => x.id === itemForm.id) : null;
+    const wasDone = prev?.status === "done";
     const payload = { name, fields: itemForm.fields, status: itemForm.status };
-    if (itemForm.id) await api.updateDelightItem(itemForm.id, payload);
-    else await api.createDelightItem(selected.id, payload);
+    let saved;
+    if (itemForm.id) saved = await api.updateDelightItem(itemForm.id, payload);
+    else saved = await api.createDelightItem(selected.id, payload);
     setItemForm(null);
+    await load();
+    // Newly entered Satisfied → prompt for completion date + comment.
+    if (itemForm.status === "done" && !wasDone) {
+      const justSaved = findItemInData(saved, selected.id, name);
+      setCompleteForm({ item: justSaved || { id: itemForm.id, name }, date: todayISO(), note: "" });
+    }
+  };
+
+  // Locate the saved item id in a returned collections payload (create returns no id directly).
+  const findItemInData = (payload, collectionId, name) => {
+    const coll = Array.isArray(payload) ? payload.find((c) => c.id === collectionId) : null;
+    if (!coll) return null;
+    const matches = (coll.items || []).filter((it) => it.name === name && it.status === "done");
+    return matches.length ? matches[matches.length - 1] : null;
+  };
+
+  const saveCompletion = async () => {
+    if (!completeForm?.item?.id) { setCompleteForm(null); return; }
+    await api.updateDelightItem(completeForm.item.id, {
+      completed_date: completeForm.date || todayISO(),
+      completion_note: completeForm.note || "",
+    });
+    setCompleteForm(null);
     load();
   };
 
@@ -223,6 +258,12 @@ export default function DelightScreen() {
         {tags.length > 0 && (
           <div style={S.tagWrap}>
             {tags.map((t, i) => <span key={i} style={S.tag}>{t}</span>)}
+          </div>
+        )}
+        {it.status === "done" && it.completed_date && (
+          <div style={S.doneMeta}>
+            <span style={S.doneDate}>✓ {fmtDate(it.completed_date)}</span>
+            {it.completion_note && <span style={S.doneNote}>{it.completion_note}</span>}
           </div>
         )}
       </div>
@@ -406,7 +447,7 @@ export default function DelightScreen() {
             <div style={S.statusPick}>
               {STATUSES.map((s) => (
                 <button key={s.id} type="button" onClick={() => setItemForm((f) => ({ ...f, status: s.id }))}
-                  style={{ ...S.statusChip, ...(itemForm.status === s.id ? { background: s.color, color: "#fff", borderColor: s.color } : {}) }}>
+                  style={{ ...S.statusChip, ...(itemForm.status === s.id ? { background: s.color, color: "#fff", border: `1px solid ${s.color}` } : {}) }}>
                   {s.label}
                 </button>
               ))}
@@ -418,6 +459,29 @@ export default function DelightScreen() {
                 style={{ ...S.saveBtn, ...(!itemForm.name.trim() ? { opacity: 0.5, cursor: "not-allowed" } : {}) }}>
                 <Check size={15} /> {itemForm.id ? "Save" : "Add"}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Completion prompt (date + optional comment) when an item becomes Satisfied */}
+      {completeForm && (
+        <div style={S.overlay} onClick={() => setCompleteForm(null)}>
+          <div style={{ ...S.modal, maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
+            <div style={S.modalHead}>
+              <span style={S.modalTitle}>Satisfied! 🎉</span>
+              <button onClick={() => setCompleteForm(null)} style={S.iconBtn}><X size={16} /></button>
+            </div>
+            <div style={S.muted2}>"{completeForm.item.name}" — when did you complete it?</div>
+            <label style={S.label}>Completed on</label>
+            <input type="date" value={completeForm.date} max={todayISO()}
+              onChange={(e) => setCompleteForm((f) => ({ ...f, date: e.target.value }))} style={S.input} />
+            <label style={S.label}>Comment (optional)</label>
+            <textarea value={completeForm.note} onChange={(e) => setCompleteForm((f) => ({ ...f, note: e.target.value }))}
+              placeholder="How was it?" style={{ ...S.input, minHeight: 64, resize: "vertical" }} />
+            <div style={S.modalActions}>
+              <button onClick={() => setCompleteForm(null)} style={S.cancelBtn}>Skip</button>
+              <button onClick={saveCompletion} style={S.saveBtn}><Check size={15} /> Save</button>
             </div>
           </div>
         </div>
@@ -470,6 +534,9 @@ const S = {
   fieldLabel: { fontWeight: 700, color: "var(--text-3)", minWidth: 64, flexShrink: 0 },
   tagWrap: { display: "flex", flexWrap: "wrap", gap: 5, marginTop: 8, paddingLeft: 19 },
   tag: { fontSize: 10.5, fontWeight: 700, color: ACCENT, background: "color-mix(in srgb, " + ACCENT + " 14%, transparent)", border: "1px solid color-mix(in srgb, " + ACCENT + " 30%, transparent)", borderRadius: 12, padding: "2px 8px", whiteSpace: "nowrap" },
+  doneMeta: { marginTop: 8, paddingLeft: 19, display: "flex", flexDirection: "column", gap: 3 },
+  doneDate: { fontSize: 11, fontWeight: 700, color: "#4C9A6B" },
+  doneNote: { fontSize: 11.5, color: "var(--text-2)", fontStyle: "italic", wordBreak: "break-word" },
 
   ghost: { position: "fixed", zIndex: 300, pointerEvents: "none", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: "9px 10px", boxShadow: "0 8px 28px rgba(0,0,0,0.28)", opacity: 0.95, transform: "rotate(1.5deg)" },
 
