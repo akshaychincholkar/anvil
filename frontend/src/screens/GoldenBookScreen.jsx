@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Plus, X, Check, ChevronLeft, ChevronRight, Pencil, ImagePlus, Flame,
-  Sparkles, Music, Music2, ArrowLeft, Trophy, Quote, Trash2
+  Sparkles, Music, Music2, ArrowLeft, Trophy, Quote, Trash2,
+  Sunrise, Sun, Moon, Bell, BellOff, Undo2, Zap
 } from "lucide-react";
 import { api } from "../api.js";
 import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
@@ -167,6 +168,231 @@ export default function GoldenBookScreen() {
   );
 }
 
+// ── Tesla 369 method ──────────────────────────────────────────────────────────
+const WINDOWS = [
+  { key: "morning", label: "Morning", time: "6 AM – 12 PM", Icon: Sunrise, color: "#E0883B" },
+  { key: "noon",    label: "Noon",    time: "12 – 6 PM",    Icon: Sun,     color: "#C9A227" },
+  { key: "night",   label: "Night",   time: "6 PM – 2 AM",  Icon: Moon,    color: "#6B6FB0" },
+];
+
+// Days → "Xy Xmo Xd" once it grows past a month; plain days below that.
+const fmtStreak = (days) => {
+  if (days < 31) return `${days} day${days === 1 ? "" : "s"}`;
+  const years = Math.floor(days / 365);
+  const months = Math.floor((days % 365) / 30);
+  const rem = (days % 365) % 30;
+  const parts = [];
+  if (years) parts.push(`${years}y`);
+  if (months) parts.push(`${months}mo`);
+  if (rem) parts.push(`${rem}d`);
+  return parts.join(" ");
+};
+
+const REMIND_KEY = "tesla369_reminders";
+
+// 369 tracker for a single dream. `g` is the loaded goal detail (carries
+// g.t369 summary + g.t369_affirmation). `onChanged` receives fresh detail.
+function Tesla369Tracker({ g, onChanged, musicId, musicOn, setMusicOn }) {
+  const [writing, setWriting] = useState("");
+  const [pasteBlocked, setPasteBlocked] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [remOn, setRemOn] = useState(() => localStorage.getItem(REMIND_KEY) === "1");
+
+  const t = g.t369;
+  const affirmation = (g.t369_affirmation || "").trim();
+  useReminders(remOn && !!affirmation, t, g.title);
+
+  if (!t) return null;
+
+  const { window: activeWindow, targets, counts, current_streak,
+          best_streak, min_streak, min_reached, day_complete } = t;
+  const totalDone = (counts.morning || 0) + (counts.noon || 0) + (counts.night || 0);
+  const totalTarget = targets.morning + targets.noon + targets.night;
+
+  const writeOne = async () => {
+    if (!affirmation) return;
+    if (writing.trim() !== affirmation) return; // must type it out, exactly
+    if (!activeWindow) return;
+    setBusy(true);
+    try {
+      onChanged(await api.logTesla369(g.id));
+      setWriting("");
+    } catch (e) {
+      alert(e.message || "Could not log this write.");
+    } finally { setBusy(false); }
+  };
+
+  const undoOne = async () => {
+    setBusy(true);
+    try { onChanged(await api.undoTesla369(g.id)); } catch { /* ignore */ } finally { setBusy(false); }
+  };
+
+  const toggleReminders = async () => {
+    if (!remOn) {
+      const ok = await ensureNotifyPermission();
+      if (!ok) { alert("Enable notifications in your browser to get 369 reminders."); return; }
+    }
+    const next = !remOn;
+    setRemOn(next);
+    localStorage.setItem(REMIND_KEY, next ? "1" : "0");
+  };
+
+  const typedMatch = writing.trim() === affirmation && affirmation !== "";
+  const windowFull = activeWindow && (counts[activeWindow] || 0) >= targets[activeWindow];
+
+  return (
+    <div style={S.tCard}>
+      <div style={S.tHead}>
+        <div style={S.tTitleWrap}>
+          <span style={S.tBadge}><Zap size={14} /> 369</span>
+          <div>
+            <div style={S.tTitle}>369 Method</div>
+            <div style={S.tSub}>Write it 3× morning · 6× noon · 9× night.</div>
+          </div>
+        </div>
+        <div style={S.tHeadBtns}>
+          {musicId && (
+            <button onClick={() => setMusicOn((v) => !v)} style={{ ...S.tRemBtn, ...(musicOn ? S.tuneOn : {}) }}
+              title={musicOn ? "Soft tunes on" : "Play soft tunes"}>
+              {musicOn ? <Music2 size={14} /> : <Music size={14} />} Soft tunes
+            </button>
+          )}
+          <button onClick={toggleReminders} style={{ ...S.tRemBtn, ...(remOn ? S.tRemOn : {}) }}
+            title={remOn ? "Reminders on" : "Turn on reminders"}>
+            {remOn ? <Bell size={14} /> : <BellOff size={14} />} {remOn ? "Reminders on" : "Remind me"}
+          </button>
+        </div>
+      </div>
+
+      {/* Streak strip */}
+      <div style={S.tStreakRow}>
+        <div style={S.tStreakBox}>
+          <div style={S.tStreakLabel}><Flame size={13} color="#C2773B" /> Current streak</div>
+          <div style={S.tStreakVal}>{fmtStreak(current_streak)}</div>
+          {!min_reached ? (
+            <div style={S.tStreakHint}>Day {current_streak} of {min_streak} minimum</div>
+          ) : (
+            <div style={{ ...S.tStreakHint, color: "#4C9A6B" }}>✓ {min_streak}-day minimum met — keep going until it manifests</div>
+          )}
+          {!min_reached && (
+            <div style={S.tProgTrack}>
+              <div style={{ ...S.tProgFill, width: `${Math.min(100, (current_streak / min_streak) * 100)}%` }} />
+            </div>
+          )}
+        </div>
+        <div style={S.tStreakBox}>
+          <div style={S.tStreakLabel}><Trophy size={13} color="#C9A227" /> All-time best</div>
+          <div style={S.tStreakVal}>{fmtStreak(best_streak)}</div>
+          <div style={S.tStreakHint}>Today: {totalDone}/{totalTarget} written {day_complete ? "✓" : ""}</div>
+        </div>
+      </div>
+
+      {!affirmation ? (
+        <div style={S.tClosed}>Set a 369 affirmation above to start writing.</div>
+      ) : (
+        <>
+          {/* Window counters */}
+          <div style={S.tWindows}>
+            {WINDOWS.map(({ key, label, time, Icon, color }) => {
+              const done = counts[key] || 0;
+              const target = targets[key];
+              const isActive = activeWindow === key;
+              const complete = done >= target;
+              return (
+                <div key={key} style={{ ...S.tWindow, ...(isActive ? { border: `1px solid ${color}`, boxShadow: `0 0 0 2px ${color}22` } : {}) }}>
+                  <div style={S.tWindowHead}>
+                    <Icon size={15} color={color} />
+                    <span style={S.tWindowLabel}>{label}</span>
+                    {isActive && <span style={{ ...S.tNow, color }}>now</span>}
+                  </div>
+                  <div style={S.tWindowTime}>{time}</div>
+                  <div style={S.tDots}>
+                    {Array.from({ length: target }).map((_, i) => (
+                      <span key={i} style={{ ...S.tDot, ...(i < done ? { background: color, borderColor: color } : {}) }} />
+                    ))}
+                  </div>
+                  <div style={{ ...S.tCount, ...(complete ? { color } : {}) }}>{done}/{target}{complete ? " ✓" : ""}</div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Writing box — must type, no paste */}
+          <div style={S.tWriteBox}>
+            {!activeWindow ? (
+              <div style={S.tClosed}>Writing windows: 6 AM–12 PM, 12–6 PM, 6 PM–2 AM. Come back during a window.</div>
+            ) : windowFull ? (
+              <div style={S.tDoneMsg}>✓ {WINDOWS.find((w) => w.key === activeWindow).label} complete. {day_complete ? "All 18 done today! 🔥" : "Next window unlocks ahead."}</div>
+            ) : (
+              <>
+                <div style={S.tNote}>✍️ Type it out by hand — no copy-pasting. The act of writing is the point.</div>
+                <textarea
+                  value={writing}
+                  onChange={(e) => setWriting(e.target.value)}
+                  onPaste={(e) => { e.preventDefault(); setPasteBlocked(true); setTimeout(() => setPasteBlocked(false), 2500); }}
+                  onDrop={(e) => e.preventDefault()}
+                  placeholder="Type your affirmation here…"
+                  style={{ ...S.writeArea, ...(typedMatch ? { border: "1px solid #4C9A6B" } : {}) }} />
+                {pasteBlocked && <div style={S.tPasteWarn}>Pasting is disabled — please type it.</div>}
+                <div style={S.tWriteActions}>
+                  <button onClick={undoOne} disabled={busy || (counts[activeWindow] || 0) === 0} style={S.tUndoBtn} title="Undo last write">
+                    <Undo2 size={14} /> Undo
+                  </button>
+                  <button onClick={writeOne} disabled={busy || !typedMatch}
+                    style={{ ...S.writeSave, flex: 1, ...(typedMatch ? {} : S.saveDisabled) }}>
+                    <Check size={15} /> {typedMatch ? "Log this write" : "Type it to log"}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// Request Notification permission; returns true if granted.
+async function ensureNotifyPermission() {
+  if (!("Notification" in window)) return false;
+  if (Notification.permission === "granted") return true;
+  if (Notification.permission === "denied") return false;
+  const p = await Notification.requestPermission();
+  return p === "granted";
+}
+
+// Fire a local notification at most once per window per day while the app is
+// open (or installed as a PWA). No push server — purely client-side scheduling.
+function useReminders(on, t, dreamTitle) {
+  const firedRef = useRef({});
+  useEffect(() => {
+    if (!on || !t) return;
+    const check = () => {
+      if (Notification.permission !== "granted") return;
+      const w = t.window;
+      if (!w) return;
+      const counts = t.counts || {};
+      const targets = t.targets || {};
+      if ((counts[w] || 0) >= (targets[w] || 0)) return; // already done this window
+      const today = t.today;
+      const tag = `369-${dreamTitle || ""}-${today}-${w}`;
+      if (firedRef.current[tag]) return;
+      firedRef.current[tag] = true;
+      const label = WINDOWS.find((x) => x.key === w)?.label || "";
+      const left = (targets[w] || 0) - (counts[w] || 0);
+      try {
+        new Notification("369 — time to write ✍️", {
+          body: `${dreamTitle ? `"${dreamTitle}" · ` : ""}${label} window: ${left} more to go. Type your affirmation.`,
+          tag,
+        });
+      } catch { /* ignore */ }
+    };
+    check();
+    const id = setInterval(check, 60 * 1000);
+    return () => clearInterval(id);
+  }, [on, t, dreamTitle]);
+}
+
 function GoalCard({ g, onOpen, onDelete, achieved }) {
   return (
     <div style={{ ...S.goalCard, ...(achieved ? { opacity: 0.96 } : {}), position: "relative" }}>
@@ -203,17 +429,28 @@ function GoalDetail({ goalId, onBack, onReload, onCelebrate, pickImage, musicId,
   const [viewDate, setViewDate] = useState(todayISO());
   const [draft, setDraft] = useState("");
   const [editTitle, setEditTitle] = useState(null);
+  const [editAff, setEditAff] = useState(null); // 369 affirmation draft, or null
   const today = todayISO();
 
-  const load = useCallback(async () => {
-    const d = await api.getGoldenGoal(goalId);
+  const applyDetail = useCallback((d) => {
     setG(d);
     const m = {};
-    d.entries.forEach((e) => { m[e.date] = e.text; });
+    (d.entries || []).forEach((e) => { m[e.date] = e.text; });
     setEntries(m);
     setDraft(m[today] || "");
-  }, [goalId, today]);
+  }, [today]);
+
+  const load = useCallback(async () => {
+    applyDetail(await api.getGoldenGoal(goalId));
+  }, [goalId, applyDetail]);
   useEffect(() => { load(); }, [load]);
+
+  // While 369 is on, refresh on a slow tick so the active window stays current.
+  useEffect(() => {
+    if (!g?.t369_enabled) return;
+    const id = setInterval(() => { api.getGoldenGoal(goalId).then(applyDetail).catch(() => {}); }, 60 * 1000);
+    return () => clearInterval(id);
+  }, [g?.t369_enabled, goalId, applyDetail]);
 
   if (!g) return <div style={S.muted}>Loading…</div>;
 
@@ -237,6 +474,15 @@ function GoalDetail({ goalId, onBack, onReload, onCelebrate, pickImage, musicId,
     setEditTitle(null); await load(); onReload();
   };
   const changePhoto = (img) => api.updateGolden(goalId, { image: img }).then(() => { load(); onReload(); });
+
+  const toggle369 = async () => {
+    await api.updateGolden(goalId, { t369_enabled: !g.t369_enabled });
+    await load(); onReload();
+  };
+  const saveAff = async () => {
+    await api.updateGolden(goalId, { t369_affirmation: (editAff || "").trim() });
+    setEditAff(null); await load();
+  };
 
   const remove = async () => {
     if (!window.confirm(`Delete "${g.title}"? This cannot be undone from here.`)) return;
@@ -283,7 +529,56 @@ function GoalDetail({ goalId, onBack, onReload, onCelebrate, pickImage, musicId,
         </div>
       </div>
 
-      {/* Daily writing / history */}
+      {/* 369 mode toggle */}
+      {!g.achieved && (
+        <div style={S.t369Row}>
+          <div style={S.t369RowLeft}>
+            <span style={{ ...S.tBadge, ...(g.t369_enabled ? {} : S.tBadgeOff) }}><Zap size={13} /> 369</span>
+            <div>
+              <div style={S.t369RowTitle}>Tesla's 369 Method</div>
+              <div style={S.t369RowSub}>
+                {g.t369_enabled ? "On — write this dream 3×/6×/9× across the day." : "Off — using the simple daily entry."}
+              </div>
+            </div>
+          </div>
+          <button onClick={toggle369} style={{ ...S.switch, ...(g.t369_enabled ? S.switchOn : {}) }}
+            role="switch" aria-checked={g.t369_enabled} title="Toggle 369 method">
+            <span style={{ ...S.switchKnob, ...(g.t369_enabled ? S.switchKnobOn : {}) }} />
+          </button>
+        </div>
+      )}
+
+      {/* 369 affirmation + tracker (when on) */}
+      {g.t369_enabled && !g.achieved && (
+        <>
+          {editAff !== null || !g.t369_affirmation ? (
+            <div style={S.card}>
+              <div style={S.cardTitle}>Your 369 affirmation</div>
+              <textarea autoFocus value={editAff ?? g.t369_affirmation ?? ""}
+                onChange={(e) => setEditAff(e.target.value)}
+                placeholder="The exact line you'll write 18× a day, e.g. 'I am grateful for my dream home.'"
+                style={S.textarea} />
+              <div style={S.formActions}>
+                {g.t369_affirmation && <button onClick={() => setEditAff(null)} style={S.cancelBtn}><X size={14} /> Cancel</button>}
+                <button onClick={saveAff} disabled={!(editAff ?? "").trim() && !g.t369_affirmation}
+                  style={{ ...S.saveBtn, ...((editAff ?? g.t369_affirmation ?? "").trim() ? {} : S.saveDisabled) }}>
+                  <Check size={15} /> Save affirmation
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div style={S.tAffShow}>
+              <Quote size={15} color={GOLD} />
+              <p style={S.tAffText}>{g.t369_affirmation}</p>
+              <button onClick={() => setEditAff(g.t369_affirmation)} style={S.ghostBtn} title="Edit affirmation"><Pencil size={13} /></button>
+            </div>
+          )}
+          <Tesla369Tracker g={g} onChanged={applyDetail} musicId={musicId} musicOn={musicOn} setMusicOn={setMusicOn} />
+        </>
+      )}
+
+      {/* Daily writing / history (only when 369 is off) */}
+      {!g.t369_enabled && (
       <div style={S.writeCard}>
         <div style={S.tuneRow}>
           {musicId ? (
@@ -316,6 +611,7 @@ function GoalDetail({ goalId, onBack, onReload, onCelebrate, pickImage, musicId,
           </div>
         )}
       </div>
+      )}
 
       {/* Manifest action */}
       {!g.achieved ? (
@@ -440,4 +736,55 @@ const S = {
   celebDream: { fontSize: 15, fontStyle: "italic", fontFamily: "'Fraunces',Georgia,serif", lineHeight: 1.5, marginBottom: 10 },
   celebSub: { fontSize: 13.5, color: "var(--text-2)", lineHeight: 1.5, marginBottom: 22 },
   celebBtn: { border: "none", background: GOLD, color: "#fff", padding: "11px 28px", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" },
+
+  // 369 toggle row
+  t369Row: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, padding: "12px 16px", marginBottom: 14, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
+  t369RowLeft: { display: "flex", alignItems: "center", gap: 11 },
+  t369RowTitle: { fontSize: 14, fontWeight: 700 },
+  t369RowSub: { fontSize: 11.5, color: "var(--text-3)", marginTop: 2 },
+  tBadgeOff: { background: "var(--border)", color: "var(--text-3)" },
+  switch: { position: "relative", width: 46, height: 26, borderRadius: 14, border: "none", background: "var(--border)", cursor: "pointer", flexShrink: 0, transition: "background 0.2s", padding: 0 },
+  switchOn: { background: GOLD },
+  switchKnob: { position: "absolute", top: 3, left: 3, width: 20, height: 20, borderRadius: "50%", background: "#fff", transition: "left 0.2s", boxShadow: "0 1px 2px rgba(0,0,0,0.3)" },
+  switchKnobOn: { left: 23 },
+
+  // Tesla 369
+  tCard: { background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, padding: 18, marginBottom: 20, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
+  tHead: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap", marginBottom: 14 },
+  tTitleWrap: { display: "flex", alignItems: "center", gap: 11 },
+  tBadge: { display: "inline-flex", alignItems: "center", gap: 4, background: "linear-gradient(135deg,#C9A227,#E0BD45)", color: "#fff", fontSize: 14, fontWeight: 800, padding: "6px 10px", borderRadius: 10, letterSpacing: "0.02em", flexShrink: 0 },
+  tTitle: { fontSize: 17, fontWeight: 700, fontFamily: "'Fraunces',Georgia,serif" },
+  tSub: { fontSize: 12, color: "var(--text-3)", marginTop: 2 },
+  tHeadBtns: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" },
+  tRemBtn: { display: "inline-flex", alignItems: "center", gap: 6, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-2)", padding: "7px 12px", borderRadius: 16, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
+  tRemOn: { background: GOLD, color: "#fff", borderColor: GOLD },
+
+  tStreakRow: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 },
+  tStreakBox: { background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 12, padding: "12px 14px" },
+  tStreakLabel: { display: "flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 600, color: "var(--text-2)" },
+  tStreakVal: { fontSize: 21, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif", marginTop: 4, lineHeight: 1.1 },
+  tStreakHint: { fontSize: 11, color: "var(--text-3)", marginTop: 4, fontWeight: 500 },
+  tProgTrack: { height: 5, borderRadius: 4, background: "var(--border)", marginTop: 8, overflow: "hidden" },
+  tProgFill: { height: "100%", background: "linear-gradient(90deg,#C2773B,#C9A227)", borderRadius: 4, transition: "width 0.4s" },
+
+  tAffShow: { display: "flex", alignItems: "flex-start", gap: 9, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 12, padding: "12px 14px", marginBottom: 14 },
+  tAffText: { flex: 1, fontSize: 15, fontFamily: "'Fraunces',Georgia,serif", fontStyle: "italic", lineHeight: 1.5, margin: 0, whiteSpace: "pre-wrap" },
+
+  tWindows: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 14 },
+  tWindow: { background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 12, padding: "11px 12px", transition: "box-shadow 0.2s, border-color 0.2s" },
+  tWindowHead: { display: "flex", alignItems: "center", gap: 6 },
+  tWindowLabel: { fontSize: 13, fontWeight: 700 },
+  tNow: { fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em", marginLeft: "auto" },
+  tWindowTime: { fontSize: 10.5, color: "var(--text-3)", marginTop: 2, marginBottom: 8, fontWeight: 500 },
+  tDots: { display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 7 },
+  tDot: { width: 11, height: 11, borderRadius: "50%", border: "1.5px solid var(--border)", background: "transparent", transition: "background 0.2s" },
+  tCount: { fontSize: 12, fontWeight: 700, color: "var(--text-2)" },
+
+  tWriteBox: { borderTop: "1px solid var(--border)", paddingTop: 14 },
+  tNote: { fontSize: 12, fontWeight: 600, color: "#C2773B", background: "rgba(194,119,59,0.10)", borderRadius: 8, padding: "8px 11px", marginBottom: 9 },
+  tPasteWarn: { fontSize: 11.5, color: "#C2536B", fontWeight: 600, marginTop: 6 },
+  tWriteActions: { display: "flex", gap: 8, marginTop: 10 },
+  tUndoBtn: { display: "inline-flex", alignItems: "center", gap: 5, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-2)", padding: "11px 14px", borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
+  tClosed: { fontSize: 12.5, color: "var(--text-3)", textAlign: "center", padding: "10px 4px", lineHeight: 1.5 },
+  tDoneMsg: { fontSize: 13, fontWeight: 700, color: "#4C9A6B", textAlign: "center", padding: "10px 4px" },
 };

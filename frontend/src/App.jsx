@@ -16,7 +16,6 @@ import AffirmationsScreen from "./screens/AffirmationsScreen.jsx";
 import GroveScreen from "./screens/GroveScreen.jsx";
 import WorthScreen from "./screens/WorthScreen.jsx";
 import AuthScreen from "./screens/AuthScreen.jsx";
-import ResetPasswordScreen from "./screens/ResetPasswordScreen.jsx";
 import FinanceScreen from "./screens/FinanceScreen.jsx";
 import KickstartScreen from "./screens/KickstartScreen.jsx";
 import GoldenBookScreen from "./screens/GoldenBookScreen.jsx";
@@ -26,7 +25,7 @@ import DelightScreen from "./screens/DelightScreen.jsx";
 import ExpensesScreen from "./screens/ExpensesScreen.jsx";
 import SettingsModal from "./screens/SettingsModal.jsx";
 import Ticker from "./components/Ticker.jsx";
-import { api, getToken, clearToken } from "./api.js";
+import { api, getToken, setToken, clearToken } from "./api.js";
 import { applyTheme, getStoredThemeId } from "./theme.js";
 import { getCurrencyCode, setCurrencyCode } from "./currency.js";
 import { getMonthStartDay, setMonthStartDay } from "./monthCycle.js";
@@ -101,7 +100,6 @@ export default function App() {
   const [ticker, setTicker] = useState({ enabled: false, statements: [], speed: 60, delay: 3 });
   const [order, setOrder] = useState(() => normalizeOrder(DEFAULT_ORDER));
   const [hidden, setHidden] = useState([]);
-  const [resetToken] = useState(() => new URLSearchParams(window.location.search).get("reset"));
   const isMobile = useIsMobile();
 
   // Track time spent per screen (for the Worth rewards system): a steady
@@ -126,6 +124,13 @@ export default function App() {
     let cancelled = false;
     const logout = () => { clearToken(); setUser(null); };
     window.addEventListener("anvil-unauthorized", logout);
+    // After a Google sign-in redirect, the backend hands back a fresh app token
+    // via ?login=<token> (browser navigation can't carry an Authorization header).
+    const loginToken = new URLSearchParams(window.location.search).get("login");
+    if (loginToken) {
+      setToken(loginToken);
+      window.history.replaceState({}, "", window.location.pathname);
+    }
     if (getToken()) {
       api.me().then((u) => { if (!cancelled) setUser(u); })
         .catch(() => {})
@@ -197,16 +202,8 @@ export default function App() {
 
   const visibleNav = order.filter((id) => !hidden.includes(id));
 
-  // A password-reset link (?reset=<token>) takes over before anything else.
-  if (resetToken) {
-    return <ResetPasswordScreen
-      token={resetToken}
-      onDone={() => { window.history.replaceState({}, "", window.location.pathname); window.location.reload(); }}
-    />;
-  }
-
   if (!authChecked) return <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", fontFamily: "'Inter',system-ui,sans-serif", color: "var(--text-3)" }}>Loading…</div>;
-  if (!user) return <AuthScreen onAuthed={setUser} />;
+  if (!user) return <AuthScreen />;
 
   const screen = SCREENS[active];
   const Screen = screen.component;

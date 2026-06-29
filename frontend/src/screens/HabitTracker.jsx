@@ -980,7 +980,7 @@ const S = {
   weekHabitName: { fontSize: 13, fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
   weekCell: { flex: 1, display: "grid", placeItems: "center" },
   typeBadge: { fontSize: 10, color: "var(--text-3)", background: "var(--hover)", padding: "1px 6px", borderRadius: 8, fontWeight: 600 },
-  tick: { width: 26, height: 26, borderRadius: 7, border: "2px solid var(--border)", background: "var(--surface)", cursor: "pointer", display: "grid", placeItems: "center", padding: 0 },
+  tick: { width: 26, height: 26, borderRadius: 7, border: "2px solid var(--border)", background: "var(--surface)", cursor: "pointer", display: "grid", placeItems: "center", padding: 0, position: "relative", zIndex: 1 },
   tickFuture: { opacity: 0.4, cursor: "not-allowed", borderStyle: "dashed" },
   streakPill: { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 700, padding: "3px 9px", borderRadius: 12 },
   tinyBtn: { border: "none", background: "none", color: "var(--text-3)", cursor: "pointer", padding: "2px 3px", display: "grid", placeItems: "center", borderRadius: 4 },

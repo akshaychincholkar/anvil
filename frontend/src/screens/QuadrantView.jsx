@@ -62,13 +62,11 @@ export default function QuadrantView() {
   const [draft, setDraft]         = useState(EMPTY_DRAFT());
   const [editing, setEditing]     = useState(null);
   const [editDraft, setEditDraft] = useState(EMPTY_DRAFT());
-  const [gcal, setGcal]           = useState({ connected: false, configured: false });
 
   const load = useCallback(() => api.getTasks().then(setTasks).catch(console.error), []);
 
   useEffect(() => {
     load();
-    api.getGcalStatus().then(setGcal).catch(() => {});
     api.getGoals().then((gs) => setGoals(gs.filter((g) => g.horizon === "Weekly"))).catch(() => {});
   }, [load]);
 
@@ -91,10 +89,6 @@ export default function QuadrantView() {
   const totalMin = (q) => byQ(q).reduce((s, t) => s + t.time_estimate_min, 0);
   const fmt = (m) => m >= 60 ? `${Math.floor(m/60)}h${m%60 ? ` ${m%60}m` : ""}` : `${m}m`;
 
-  const calendarTitle = (t) => {
-    const sym = QUADRANTS.find((q) => q.id === t.quadrant)?.symbol ?? "";
-    return `${sym} ${t.title}`;
-  };
 
   const addTask = async (q) => {
     if (!draft.title.trim()) return;
@@ -213,22 +207,6 @@ export default function QuadrantView() {
               </span>
             ))}
           </div>
-          {/* Google Calendar connection badge */}
-          {gcal.configured && (
-            gcal.connected ? (
-              <button
-                style={S.gcalBadgeOn}
-                title="Disconnect Google Calendar"
-                onClick={() => api.disconnectGoogle().then(() => setGcal({ ...gcal, connected: false }))}
-              >
-                <CalendarPlus size={13} /> Google Calendar connected
-              </button>
-            ) : (
-              <button style={S.gcalBadgeOff} onClick={() => api.connectGoogle()}>
-                <CalendarPlus size={13} /> Connect Google Calendar
-              </button>
-            )
-          )}
         </div>
       </div>
 
@@ -282,7 +260,6 @@ export default function QuadrantView() {
             <div style={S.list}>
               {byQ(quad.id).map((t) => {
                 const p = PILLARS[t.pillar] || PILLARS.Financial;
-                const scheduled = !!t.gcal_event_id;
                 if (editing === t.id) {
                   return (
                     <div key={t.id} style={S.addBox}>
@@ -326,7 +303,6 @@ export default function QuadrantView() {
                         <div style={S.eventTime}>
                           <CalendarPlus size={10} />
                           {fmtEventTime(t.start_datetime)}
-                          {scheduled && <span style={S.syncedDot} title="Synced to Google Calendar" />}
                         </div>
                       )}
                       <div style={S.cardMeta}>
@@ -338,11 +314,6 @@ export default function QuadrantView() {
                       </div>
                     </div>
                     <div style={S.cardActions}>
-                      {scheduled && (
-                        <span title={`On calendar as "${calendarTitle(t)}"`} style={S.calDoneIcon}>
-                          <Check size={14} />
-                        </span>
-                      )}
                       <button onClick={() => startEdit(t)} onPointerDown={(e) => e.stopPropagation()} style={S.delBtn} title="Edit"><Pencil size={12} /></button>
                       <button onClick={() => deleteTask(t.id, t.title)} onPointerDown={(e) => e.stopPropagation()} style={S.delBtn}><X size={13} /></button>
                     </div>
@@ -412,11 +383,6 @@ export default function QuadrantView() {
                       style={{ ...S.input, width: 60 }}
                     />
                     <span style={S.minLabel}>min</span>
-                    {gcal.connected && (
-                      <span style={S.gcalHint} title="Will sync to Google Calendar">
-                        <CalendarPlus size={12} />
-                      </span>
-                    )}
                     <button onClick={() => addTask(quad.id)} style={S.saveBtn}><Check size={14} /></button>
                     <button onClick={() => { setAdding(null); setDraft(EMPTY_DRAFT()); }} style={S.cancelBtn}><X size={14} /></button>
                   </div>
@@ -447,8 +413,6 @@ const S = {
   legend: { display: "flex", gap: 14, flexWrap: "wrap" },
   legendItem: { display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text-2)", fontWeight: 500 },
   dot: { width: 9, height: 9, borderRadius: "50%", display: "inline-block", flexShrink: 0 },
-  gcalBadgeOn:  { display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 500, color: "#4C9A6B", background: "rgba(76,154,107,0.10)", border: "1px solid rgba(76,154,107,0.3)", borderRadius: 20, padding: "5px 12px", cursor: "pointer" },
-  gcalBadgeOff: { display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 500, color: "var(--text-2)", background: "var(--surface)", border: "1px solid #DCDAD3", borderRadius: 20, padding: "5px 12px", cursor: "pointer" },
   filterBar: { display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 10 },
   pillChip: { display: "inline-flex", alignItems: "center", gap: 6, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-2)", padding: "6px 12px", borderRadius: 18, fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
   goalBar: { display: "flex", gap: 7, flexWrap: "wrap", alignItems: "center", marginBottom: 18, paddingBottom: 14, borderBottom: "1px solid var(--border)" },
@@ -471,11 +435,9 @@ const S = {
   cardBody: { flex: 1, minWidth: 0 },
   cardTitle: { fontSize: 13.5, fontWeight: 500, lineHeight: 1.35, marginBottom: 4 },
   eventTime: { display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#3A7CA5", fontWeight: 500, marginBottom: 5 },
-  syncedDot: { width: 6, height: 6, borderRadius: "50%", background: "#4C9A6B", display: "inline-block", marginLeft: 2 },
   cardMeta: { display: "flex", gap: 8, flexWrap: "wrap" },
   metaPill: { display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "var(--text-2)", fontWeight: 500 },
   cardActions: { display: "flex", flexDirection: "column", gap: 4, alignSelf: "center", flexShrink: 0 },
-  calDoneIcon: { width: 30, height: 30, borderRadius: 8, background: "#4C9A6B", color: "#fff", display: "grid", placeItems: "center" },
   delBtn: { width: 30, height: 30, borderRadius: 8, border: "none", background: "none", color: "var(--text-3)", cursor: "pointer", display: "grid", placeItems: "center" },
   addTrigger: { display: "flex", alignItems: "center", gap: 5, fontSize: 12.5, color: "var(--text-3)", background: "none", border: "1px dashed var(--border)", borderRadius: 8, padding: "8px 10px", cursor: "pointer", fontWeight: 500, marginTop: 2 },
   addBox: { border: "1px solid var(--border)", borderRadius: 9, padding: 10, display: "flex", flexDirection: "column", gap: 8 },
@@ -490,7 +452,6 @@ const S = {
   input: { border: "1px solid var(--border)", borderRadius: 6, padding: "7px 9px", fontSize: 13, fontFamily: "inherit", outline: "none", flex: 1, minWidth: 0 },
   select: { border: "1px solid var(--border)", borderRadius: 6, padding: "7px 8px", fontSize: 12.5, fontFamily: "inherit", flex: 1 },
   minLabel: { fontSize: 11, color: "var(--text-3)" },
-  gcalHint: { color: "#3A7CA5", display: "grid", placeItems: "center" },
   saveBtn: { border: "none", background: "#4C9A6B", color: "#fff", width: 30, height: 30, borderRadius: 6, cursor: "pointer", display: "grid", placeItems: "center" },
   cancelBtn: { border: "none", background: "var(--hover)", color: "var(--text-2)", width: 30, height: 30, borderRadius: 6, cursor: "pointer", display: "grid", placeItems: "center" },
   dragClone: { position: "fixed", zIndex: 1000, pointerEvents: "none", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 12px", fontSize: 13, fontWeight: 600, color: "var(--text)", boxShadow: "0 8px 24px rgba(0,0,0,0.25)", maxWidth: 220, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },

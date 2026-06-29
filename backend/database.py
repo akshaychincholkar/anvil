@@ -59,6 +59,8 @@ def migrate_db():
         add_col("user", "email", "TEXT")
         add_col("user", "password_hash", "TEXT")
         add_col("user", "salt", "TEXT")
+        # Google Sign-In: stable subject id from the verified ID token
+        add_col("user", "google_sub", "TEXT")
 
         # delight kanban fields (status lane + order) for pre-existing tables
         di_cols = [r[1] for r in conn.execute("PRAGMA table_info(delight_item)").fetchall()]
@@ -67,6 +69,28 @@ def migrate_db():
             conn.execute("UPDATE delight_item SET status='done' WHERE done=1")
         if di_cols:
             add_col("delight_item", "position", "INTEGER NOT NULL DEFAULT 0")
+
+        # Tesla 369 method: per-dream toggle + its own affirmation text.
+        add_col("golden_goal", "t369_enabled", "INTEGER NOT NULL DEFAULT 0")
+        add_col("golden_goal", "t369_affirmation", "TEXT NOT NULL DEFAULT ''")
+        # Migrate any earlier global-369 schema: drop the standalone table and
+        # the goal-less log rows so the per-dream model starts clean.
+        conn.execute("DROP TABLE IF EXISTS tesla369")
+        t369_cols = [r[1] for r in conn.execute("PRAGMA table_info(tesla369_log)").fetchall()]
+        if t369_cols and "goal_id" not in t369_cols:
+            # Old global logs can't be attributed to a dream — clear them.
+            conn.execute("DROP TABLE tesla369_log")
+            conn.execute("""
+                CREATE TABLE tesla369_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL DEFAULT 1,
+                    goal_id INTEGER NOT NULL,
+                    log_date TEXT NOT NULL,
+                    window TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_tesla369_log_goal_date ON tesla369_log (goal_id, log_date)")
 
 def init_db():
     with db() as conn:
@@ -306,6 +330,19 @@ def init_db():
             text TEXT NOT NULL DEFAULT '',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(goal_id, entry_date)
+        );
+
+        -- Tesla 369 method is a per-dream mode (see golden_goal.t369_enabled).
+        -- One row per individual write; window ('morning'|'noon'|'night') is
+        -- derived from the wall-clock time the write was logged. (The goal_id
+        -- column + index are ensured in migrate_db so older DBs upgrade cleanly.)
+        CREATE TABLE IF NOT EXISTS tesla369_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            goal_id INTEGER NOT NULL,
+            log_date TEXT NOT NULL,
+            window TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
         CREATE TABLE IF NOT EXISTS spiritual_deck (

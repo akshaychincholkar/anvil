@@ -1,125 +1,43 @@
-import { useState } from "react";
-import { api, setToken } from "../api.js";
+import { api } from "../api.js";
 
-export default function AuthScreen({ onAuthed }) {
-  const [mode, setMode] = useState("login"); // login | register | forgot
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [sent, setSent] = useState(false);
-
-  const isRegister = mode === "register";
-  const isForgot = mode === "forgot";
-
-  const switchMode = (m) => { setMode(m); setError(""); setSent(false); };
-
-  const submit = async (e) => {
-    e.preventDefault();
-    setError("");
-    if (isForgot) {
-      if (!email.trim()) { setError("Enter your email."); return; }
-      setBusy(true);
-      try { await api.forgotPassword(email); setSent(true); }
-      catch (err) { setError(err.message || "Something went wrong."); }
-      finally { setBusy(false); }
-      return;
-    }
-    if (!email.trim() || !password) { setError("Email and password are required."); return; }
-    if (isRegister && password.length < 6) { setError("Password must be at least 6 characters."); return; }
-    setBusy(true);
-    try {
-      const res = isRegister
-        ? await api.register({ name, email, password })
-        : await api.login({ email, password });
-      setToken(res.token);
-      onAuthed(res.user);
-    } catch (err) {
-      setError(err.message || "Something went wrong.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
+export default function AuthScreen() {
   return (
     <div style={S.page}>
-      <form style={S.card} onSubmit={submit}>
+      <div style={S.card}>
         <div style={S.brand}>
           <div style={S.logo}>B</div>
           <span style={S.brandName}>Anvil</span>
         </div>
-        <h1 style={S.title}>{isForgot ? "Reset your password" : isRegister ? "Create your account" : "Welcome back"}</h1>
-        <p style={S.sub}>{isForgot ? "We'll email you a link to set a new password." : isRegister ? "Start forging your days." : "Sign in to continue."}</p>
+        <h1 style={S.title}>Welcome to Anvil</h1>
+        <p style={S.sub}>Sign in with Google to continue.</p>
 
-        {isForgot && sent ? (
-          <>
-            <div style={S.notice}>If an account exists for <strong>{email.trim()}</strong>, a reset link is on its way. The link expires in 1 hour.</div>
-            <button type="button" onClick={() => switchMode("login")} style={{ ...S.submit, marginTop: 4 }}>Back to sign in</button>
-          </>
-        ) : (
-          <>
-            {isRegister && (
-              <label style={S.field}>
-                <span style={S.label}>Name</span>
-                <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" style={S.input} autoFocus />
-              </label>
-            )}
-            <label style={S.field}>
-              <span style={S.label}>Email</span>
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" style={S.input} autoFocus={!isRegister} />
-            </label>
-            {!isForgot && (
-              <label style={S.field}>
-                <span style={S.label}>Password</span>
-                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" style={S.input} />
-              </label>
-            )}
-            {mode === "login" && (
-              <div style={{ textAlign: "right", marginTop: -6, marginBottom: 14 }}>
-                <button type="button" onClick={() => switchMode("forgot")} style={S.link}>Forgot password?</button>
-              </div>
-            )}
-
-            {error && <div style={S.error}>{error}</div>}
-
-            <button type="submit" disabled={busy} style={{ ...S.submit, ...(busy ? { opacity: 0.6 } : {}) }}>
-              {busy ? "Please wait…" : isForgot ? "Send reset link" : isRegister ? "Create account" : "Sign in"}
-            </button>
-
-            <div style={S.switch}>
-              {isForgot ? (
-                <>Remembered it?{" "}<button type="button" onClick={() => switchMode("login")} style={S.link}>Back to sign in</button></>
-              ) : (
-                <>
-                  {isRegister ? "Already have an account?" : "New here?"}{" "}
-                  <button type="button" onClick={() => switchMode(isRegister ? "login" : "register")} style={S.link}>
-                    {isRegister ? "Sign in" : "Create one"}
-                  </button>
-                </>
-              )}
-            </div>
-          </>
-        )}
-      </form>
+        <button onClick={() => api.signInWithGoogle()} style={S.googleBtn}>
+          <GoogleIcon />
+          Sign in with Google
+        </button>
+      </div>
     </div>
+  );
+}
+
+function GoogleIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84c-.21 1.13-.85 2.09-1.81 2.73v2.27h2.92c1.71-1.57 2.69-3.88 2.69-6.64z" />
+      <path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.27c-.81.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.71H.96v2.34C2.44 15.98 5.48 18 9 18z" />
+      <path fill="#FBBC05" d="M3.97 10.7c-.18-.54-.28-1.11-.28-1.7s.1-1.16.28-1.7V4.96H.96A8.997 8.997 0 0 0 0 9c0 1.45.35 2.83.96 4.04l3.01-2.34z" />
+      <path fill="#EA4335" d="M9 3.58c1.32 0 2.51.45 3.44 1.35l2.59-2.59C13.46.89 11.43 0 9 0 5.48 0 2.44 2.02.96 4.96l3.01 2.34C4.68 5.16 6.66 3.58 9 3.58z" />
+    </svg>
   );
 }
 
 const S = {
   page: { minHeight: "100vh", display: "grid", placeItems: "center", background: "var(--bg)", fontFamily: "'Inter',system-ui,sans-serif", padding: 20 },
-  card: { width: "100%", maxWidth: 380, background: "var(--surface)", borderRadius: 16, padding: "32px 28px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", display: "flex", flexDirection: "column" },
-  brand: { display: "flex", alignItems: "center", gap: 9, marginBottom: 20 },
+  card: { width: "100%", maxWidth: 380, background: "var(--surface)", borderRadius: 16, padding: "32px 28px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", display: "flex", flexDirection: "column", textAlign: "center" },
+  brand: { display: "flex", alignItems: "center", justifyContent: "center", gap: 9, marginBottom: 20 },
   logo: { width: 32, height: 32, borderRadius: 8, background: "var(--accent-strong)", color: "#fff", display: "grid", placeItems: "center", fontSize: 15, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif" },
   brandName: { fontSize: 18, fontWeight: 700, fontFamily: "'Fraunces',Georgia,serif", color: "var(--text)" },
   title: { fontSize: 22, fontWeight: 700, margin: "0 0 4px", fontFamily: "'Fraunces',Georgia,serif", color: "var(--text)" },
-  sub: { fontSize: 13.5, color: "var(--text-3)", margin: "0 0 22px" },
-  field: { display: "flex", flexDirection: "column", gap: 5, marginBottom: 14 },
-  label: { fontSize: 12, fontWeight: 600, color: "var(--text-2)" },
-  input: { border: "1px solid var(--border)", borderRadius: 9, padding: "11px 12px", fontSize: 14, fontFamily: "inherit", outline: "none", color: "var(--text)" },
-  error: { background: "rgba(194,83,107,0.10)", color: "#C2536B", fontSize: 13, padding: "9px 12px", borderRadius: 8, marginBottom: 14, fontWeight: 500 },
-  notice: { background: "rgba(76,154,107,0.10)", color: "#3B7A54", fontSize: 13, padding: "11px 13px", borderRadius: 8, marginBottom: 14, fontWeight: 500, lineHeight: 1.5 },
-  submit: { border: "none", background: "var(--accent-strong)", color: "#fff", padding: "12px", borderRadius: 10, fontSize: 14.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", marginTop: 4 },
-  switch: { fontSize: 13, color: "var(--text-2)", textAlign: "center", marginTop: 18 },
-  link: { border: "none", background: "none", color: "#3A7CA5", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", fontSize: 13, padding: 0 },
+  sub: { fontSize: 13.5, color: "var(--text-3)", margin: "0 0 24px" },
+  googleBtn: { display: "flex", alignItems: "center", justifyContent: "center", gap: 10, border: "1px solid var(--border)", background: "#fff", color: "#26241F", padding: "12px", borderRadius: 10, fontSize: 14.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" },
 };

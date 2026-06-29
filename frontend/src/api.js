@@ -31,16 +31,10 @@ const req = async (method, path, body) => {
 
 export const api = {
   // Auth
-  register: (data) => req("POST", "/auth/register", data),
-  login: (data) => req("POST", "/auth/login", data),
   me: () => req("GET", "/auth/me"),
-  forgotPassword: (email) => req("POST", "/auth/forgot", { email }),
-  resetPassword: (token, password) => req("POST", "/auth/reset", { token, password }),
 
-  // Google Calendar auth
-  getGcalStatus: () => req("GET", "/auth/google/status"),
-  connectGoogle: () => { window.location.href = `/api/auth/google?token=${encodeURIComponent(getToken() || "")}`; },
-  disconnectGoogle: () => req("DELETE", "/auth/google"),
+  // Google Sign-In
+  signInWithGoogle: () => { window.location.href = "/api/auth/google"; },
 
   // Pillars
   getPillars: () => req("GET", "/pillars"),
@@ -81,6 +75,10 @@ export const api = {
   upsertGoldenEntry: (id, data) => req("PUT", `/golden/goals/${id}/entry`, data),
   deleteGolden: (id) => req("DELETE", `/golden/goals/${id}`),
   restoreGolden: (id) => req("POST", `/golden/goals/${id}/restore`),
+
+  // Tesla 369 method (per dream)
+  logTesla369: (id) => req("POST", `/golden/goals/${id}/369/log`),
+  undoTesla369: (id) => req("DELETE", `/golden/goals/${id}/369/log`),
 
   // Kickstart (motivation videos)
   getKickstart: () => req("GET", "/kickstart/videos"),

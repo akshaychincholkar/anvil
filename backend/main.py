@@ -9,7 +9,6 @@ import os
 import hmac
 import hashlib
 import base64
-import secrets
 import time
 import calendar
 from contextvars import ContextVar
@@ -33,9 +32,6 @@ def _b64e(b: bytes) -> str:
 def _b64d(s: str) -> bytes:
     return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
 
-def hash_password(password: str, salt: str) -> str:
-    return hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 120_000).hex()
-
 def make_token(uid: int) -> str:
     payload = _b64e(json.dumps({"uid": uid, "exp": int(time.time()) + TOKEN_TTL}).encode())
     sig = _b64e(hmac.new(SECRET_KEY.encode(), payload.encode(), hashlib.sha256).digest())
@@ -54,39 +50,12 @@ def verify_token(token: str) -> Optional[int]:
     except Exception:
         return None
 
-# ── Password-reset tokens (signed, single-use, no DB needed) ────────────────────
-RESET_TTL = 60 * 60  # 1 hour
-
-def _cred_fingerprint(password_hash: str, salt: str) -> str:
-    """A short digest of the current credential. Baked into a reset token so the
-    link becomes single-use: once the password changes, the fingerprint no longer
-    matches and any outstanding link is rejected."""
-    return hashlib.sha256(f"{password_hash}:{salt}".encode()).hexdigest()[:16]
-
-def make_reset_token(uid: int, fp: str) -> str:
-    payload = _b64e(json.dumps({"uid": uid, "exp": int(time.time()) + RESET_TTL, "purpose": "reset", "fp": fp}).encode())
-    sig = _b64e(hmac.new(SECRET_KEY.encode(), payload.encode(), hashlib.sha256).digest())
-    return f"{payload}.{sig}"
-
-def verify_reset_token(token: str) -> Optional[dict]:
-    try:
-        payload, sig = token.split(".")
-        expected = _b64e(hmac.new(SECRET_KEY.encode(), payload.encode(), hashlib.sha256).digest())
-        if not hmac.compare_digest(sig, expected):
-            return None
-        data = json.loads(_b64d(payload))
-        if data.get("purpose") != "reset" or data.get("exp", 0) < int(time.time()):
-            return None
-        return data
-    except Exception:
-        return None
-
 def _bearer(request: Request) -> str:
     auth = request.headers.get("authorization", "")
     return auth[7:] if auth.lower().startswith("bearer ") else ""
 
 # Paths that do not require authentication.
-_PUBLIC_API = {"/api/auth/login", "/api/auth/register", "/api/auth/forgot", "/api/auth/reset"}
+_PUBLIC_API = set()
 
 async def auth_dependency(request: Request):
     """Global dependency: authenticate every /api route and stash the uid in a ContextVar."""
@@ -106,36 +75,11 @@ GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
 BASE_URL             = os.environ.get("BASE_URL", "http://localhost:8000")
 GCAL_REDIRECT        = f"{BASE_URL}/api/auth/google/callback"
 
-# ── Email (Resend) ────────────────────────────────────────────────────────────
-RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
-# Default sender works only to your own address in Resend test mode; set a verified
-# domain sender (e.g. "Anvil <noreply@yourdomain.com>") for real delivery.
-RESEND_FROM    = os.environ.get("RESEND_FROM", "Anvil <onboarding@resend.dev>")
-
-def send_email(to: str, subject: str, html: str) -> bool:
-    """Send a transactional email via the Resend HTTP API (no SMTP port needed)."""
-    if not RESEND_API_KEY:
-        print(f"[email] RESEND_API_KEY not set — skipping email to {to}: {subject}")
-        return False
-    import urllib.request, urllib.error
-    data = json.dumps({"from": RESEND_FROM, "to": [to], "subject": subject, "html": html}).encode()
-    req = urllib.request.Request(
-        "https://api.resend.com/emails", data=data, method="POST",
-        headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            return resp.status in (200, 201)
-    except urllib.error.HTTPError as e:
-        try: detail = e.read().decode()
-        except Exception: detail = ""
-        print(f"[email] send failed: HTTP {e.code} — {detail}", flush=True)
-        return False
-    except Exception as e:
-        print(f"[email] send failed: {e}", flush=True)
-        return False
-GCAL_SCOPES          = ["https://www.googleapis.com/auth/calendar.events"]
-QUAD_SYMBOL          = {"Q1": "™", "Q2": "©", "Q3": "®", "Q4": "•"}
+GCAL_SCOPES          = [
+    "openid",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.profile",
+]
 
 DIST = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
 
@@ -147,31 +91,6 @@ def _gcal_client_config():
         "auth_uri": "https://accounts.google.com/o/oauth2/auth",
         "token_uri": "https://oauth2.googleapis.com/token",
     }}
-
-def _get_gcal_service(uid: int):
-    if not GOOGLE_CLIENT_ID or not uid:
-        return None
-    try:
-        from google.oauth2.credentials import Credentials
-        from googleapiclient.discovery import build
-        from google.auth.transport.requests import Request
-    except ImportError:
-        return None
-    with db() as conn:
-        row = conn.execute(
-            "SELECT token_json FROM oauth_token WHERE user_id=? AND provider='google'", (uid,)
-        ).fetchone()
-    if not row:
-        return None
-    creds = Credentials.from_authorized_user_info(json.loads(row["token_json"]), GCAL_SCOPES)
-    if creds.expired and creds.refresh_token:
-        creds.refresh(Request())
-        with db() as conn:
-            conn.execute(
-                "UPDATE oauth_token SET token_json=? WHERE user_id=? AND provider='google'",
-                (creds.to_json(), uid)
-            )
-    return build("calendar", "v3", credentials=creds)
 
 app = FastAPI(title="Anvil API", dependencies=[Depends(auth_dependency)])
 
@@ -199,108 +118,8 @@ def _seed_pillars(conn, uid: int):
         conn.executemany("INSERT INTO pillar (user_id, name, color) VALUES (?, ?, ?)",
                          [(uid, n, c) for n, c in PILLAR_SEED])
 
-class RegisterBody(BaseModel):
-    name: str
-    email: str
-    password: str
-
-class LoginBody(BaseModel):
-    email: str
-    password: str
-
 def _user_public(row) -> dict:
     return {"id": row["id"], "name": row["name"], "email": row["email"]}
-
-@app.post("/api/auth/register", status_code=201)
-def register(body: RegisterBody):
-    email = body.email.strip().lower()
-    if not email or not body.password:
-        raise HTTPException(400, "Email and password are required")
-    with db() as conn:
-        if conn.execute("SELECT 1 FROM user WHERE lower(email)=?", (email,)).fetchone():
-            raise HTTPException(409, "An account with this email already exists")
-        salt = secrets.token_hex(16)
-        pwhash = hash_password(body.password, salt)
-        # First account claims the legacy single-user data (user 1 has no email yet).
-        legacy = conn.execute("SELECT id FROM user WHERE id=1 AND email IS NULL").fetchone()
-        if legacy:
-            conn.execute("UPDATE user SET name=?, email=?, password_hash=?, salt=? WHERE id=1",
-                         (body.name.strip() or "Anvil User", email, pwhash, salt))
-            uid = 1
-        else:
-            cur = conn.execute("INSERT INTO user (name, email, password_hash, salt) VALUES (?,?,?,?)",
-                               (body.name.strip() or "Anvil User", email, pwhash, salt))
-            uid = cur.lastrowid
-        _seed_pillars(conn, uid)
-        row = conn.execute("SELECT id, name, email FROM user WHERE id=?", (uid,)).fetchone()
-        return {"token": make_token(uid), "user": _user_public(row)}
-
-@app.post("/api/auth/login")
-def login(body: LoginBody):
-    email = body.email.strip().lower()
-    with db() as conn:
-        row = conn.execute("SELECT id, name, email, password_hash, salt FROM user WHERE lower(email)=?", (email,)).fetchone()
-        if not row or not row["password_hash"]:
-            raise HTTPException(401, "Invalid email or password")
-        if not hmac.compare_digest(hash_password(body.password, row["salt"]), row["password_hash"]):
-            raise HTTPException(401, "Invalid email or password")
-        return {"token": make_token(row["id"]), "user": _user_public(row)}
-
-class ForgotBody(BaseModel):
-    email: str
-
-class ResetBody(BaseModel):
-    token: str
-    password: str
-
-@app.post("/api/auth/forgot")
-def forgot_password(body: ForgotBody):
-    """Email a password-reset link. Always returns ok so it can't be used to probe
-    which addresses have accounts."""
-    email = (body.email or "").strip().lower()
-    if email:
-        with db() as conn:
-            row = conn.execute(
-                "SELECT id, name, email, password_hash, salt FROM user WHERE lower(email)=?", (email,)
-            ).fetchone()
-        if row and row["password_hash"]:
-            token = make_reset_token(row["id"], _cred_fingerprint(row["password_hash"], row["salt"]))
-            link = f"{BASE_URL}/?reset={token}"
-            name = row["name"] or "there"
-            html = f"""
-            <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;color:#26241f">
-              <h2 style="font-family:Georgia,serif">Reset your Anvil password</h2>
-              <p>Hi {name}, we got a request to reset your password.</p>
-              <p style="margin:24px 0">
-                <a href="{link}" style="background:#4C9A6B;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:700;display:inline-block">Reset password</a>
-              </p>
-              <p style="color:#777;font-size:13px">This link expires in 1 hour and can be used once. If you didn't request this, you can safely ignore this email.</p>
-            </div>"""
-            ok = send_email(row["email"], "Reset your Anvil password", html)
-            if not ok:
-                # Dev fallback: no email provider configured (or send failed) — log the
-                # link so the reset flow is still testable locally without Resend.
-                print(f"[reset] password-reset link for {row['email']}:\n{link}", flush=True)
-    return {"ok": True}
-
-@app.post("/api/auth/reset")
-def reset_password(body: ResetBody):
-    if not body.password or len(body.password) < 6:
-        raise HTTPException(400, "Password must be at least 6 characters")
-    data = verify_reset_token(body.token)
-    if not data:
-        raise HTTPException(400, "This reset link is invalid or has expired")
-    with db() as conn:
-        row = conn.execute("SELECT id, password_hash, salt FROM user WHERE id=?", (data["uid"],)).fetchone()
-        if not row or not row["password_hash"]:
-            raise HTTPException(400, "This reset link is invalid or has expired")
-        # Single-use: token is bound to the credential it was minted for.
-        if data.get("fp") != _cred_fingerprint(row["password_hash"], row["salt"]):
-            raise HTTPException(400, "This reset link has already been used")
-        salt = secrets.token_hex(16)
-        conn.execute("UPDATE user SET password_hash=?, salt=? WHERE id=?",
-                     (hash_password(body.password, salt), salt, row["id"]))
-    return {"ok": True}
 
 @app.get("/api/auth/me")
 def auth_me():
@@ -357,52 +176,61 @@ def get_pillars():
         return [row_dict(r) for r in rows]
 
 
-# ── Google Calendar Auth ──────────────────────────────────────────────────────
-
-@app.get("/api/auth/google/status")
-def google_status():
-    with db() as conn:
-        row = conn.execute(
-            "SELECT id FROM oauth_token WHERE user_id=? AND provider='google'", (cu(),)
-        ).fetchone()
-    return {"connected": row is not None, "configured": bool(GOOGLE_CLIENT_ID)}
+# ── Google Sign-In ───────────────────────────────────────────────────────────
 
 @app.get("/api/auth/google")
-def google_auth(token: str = ""):
-    # Browser navigation (no Authorization header) → carry the app token in the query,
-    # then embed the verified uid in the OAuth `state` so the callback knows the user.
-    uid = verify_token(token)
-    if not uid:
-        raise HTTPException(401, "Not authenticated")
+def google_auth():
+    # No app token needed — this is the sign-in entry point itself.
     from google_auth_oauthlib.flow import Flow
     flow = Flow.from_client_config(_gcal_client_config(), scopes=GCAL_SCOPES)
     flow.redirect_uri = GCAL_REDIRECT
-    auth_url, _ = flow.authorization_url(access_type="offline", prompt="consent", state=make_token(uid))
+    auth_url, _ = flow.authorization_url(access_type="offline", prompt="consent")
     return RedirectResponse(auth_url)
 
 @app.get("/api/auth/google/callback")
-def google_callback(code: str, state: Optional[str] = None, error: Optional[str] = None):
-    if error:
-        return RedirectResponse("/?gcal=error")
-    uid = verify_token(state or "")
-    if not uid:
-        return RedirectResponse("/?gcal=error")
+def google_callback(code: str = "", error: Optional[str] = None):
+    if error or not code:
+        return RedirectResponse("/?auth=error")
     from google_auth_oauthlib.flow import Flow
+    from google.oauth2 import id_token as g_id_token
+    from google.auth.transport import requests as g_requests
     flow = Flow.from_client_config(_gcal_client_config(), scopes=GCAL_SCOPES)
     flow.redirect_uri = GCAL_REDIRECT
-    flow.fetch_token(code=code)
+    try:
+        flow.fetch_token(code=code)
+    except Exception:
+        return RedirectResponse("/?auth=error")
     creds = flow.credentials
+    info = g_id_token.verify_oauth2_token(creds.id_token, g_requests.Request(), GOOGLE_CLIENT_ID)
+    sub = info["sub"]
+    email = (info.get("email") or "").strip().lower()
+    name = info.get("name") or "Anvil User"
     with db() as conn:
+        row = conn.execute("SELECT id FROM user WHERE google_sub=?", (sub,)).fetchone()
+        if not row:
+            # First sign-in for this Google account — link to an existing account by
+            # email if one exists (covers the pre-Google-SSO password-based users),
+            # otherwise claim the legacy single-user row, otherwise create a new user.
+            row = conn.execute("SELECT id FROM user WHERE lower(email)=?", (email,)).fetchone() if email else None
+            if row:
+                conn.execute("UPDATE user SET google_sub=?, name=? WHERE id=?", (sub, name, row["id"]))
+                uid = row["id"]
+            else:
+                legacy = conn.execute("SELECT id FROM user WHERE id=1 AND email IS NULL").fetchone()
+                if legacy:
+                    conn.execute("UPDATE user SET google_sub=?, name=?, email=? WHERE id=1", (sub, name, email))
+                    uid = 1
+                else:
+                    cur = conn.execute("INSERT INTO user (name, email, google_sub) VALUES (?,?,?)", (name, email, sub))
+                    uid = cur.lastrowid
+                _seed_pillars(conn, uid)
+        else:
+            uid = row["id"]
         conn.execute(
             "INSERT OR REPLACE INTO oauth_token (user_id, provider, token_json) VALUES (?, 'google', ?)",
             (uid, creds.to_json())
         )
-    return RedirectResponse("/?gcal=connected")
-
-@app.delete("/api/auth/google", status_code=204)
-def google_disconnect():
-    with db() as conn:
-        conn.execute("DELETE FROM oauth_token WHERE user_id=? AND provider='google'", (cu(),))
+    return RedirectResponse(f"/?login={make_token(uid)}")
 
 
 # ── Tasks (Screen 1) ─────────────────────────────────────────────────────────
@@ -454,22 +282,6 @@ def get_tasks():
 @app.post("/api/tasks", status_code=201)
 def create_task(body: TaskCreate):
     gcal_event_id = None
-    if body.start_datetime:
-        service = _get_gcal_service(cu())
-        if service:
-            try:
-                symbol = QUAD_SYMBOL.get(body.quadrant, "")
-                start_dt = datetime.fromisoformat(body.start_datetime)
-                end_dt = start_dt + timedelta(minutes=body.time_estimate_min)
-                event = {
-                    "summary": f"{symbol} {body.title}",
-                    "start": {"dateTime": start_dt.isoformat(), "timeZone": "Asia/Kolkata"},
-                    "end":   {"dateTime": end_dt.isoformat(),   "timeZone": "Asia/Kolkata"},
-                }
-                created = service.events().insert(calendarId="primary", body=event).execute()
-                gcal_event_id = created["id"]
-            except Exception:
-                pass
     with db() as conn:
         pid = pillar_id(conn, body.pillar)
         cur = conn.execute(
@@ -1985,6 +1797,8 @@ class GoldenCreate(BaseModel):
 class GoldenUpdate(BaseModel):
     title: Optional[str] = None
     image: Optional[str] = None
+    t369_enabled: Optional[bool] = None
+    t369_affirmation: Optional[str] = None
 
 class GoldenEntryBody(BaseModel):
     date: Optional[str] = None
@@ -2019,16 +1833,21 @@ def _golden_summary(conn, r) -> dict:
             days_to = (date.fromisoformat(r["achieved_date"]) - date.fromisoformat(r["created_date"])).days
         except Exception:
             days_to = None
-    return {
+    t369_on = bool(r["t369_enabled"])
+    out = {
         "id": gid, "title": r["title"], "image": r["image"], "created_date": r["created_date"],
         "achieved": bool(r["achieved"]), "achieved_date": r["achieved_date"],
         "streak": _golden_streak(conn, gid), "total_days": total, "days_to_manifest": days_to,
+        "t369_enabled": t369_on, "t369_affirmation": r["t369_affirmation"] or "",
     }
+    if t369_on:
+        out["t369"] = _t369_summary(conn, gid)
+    return out
 
 def _golden_get(conn, gid):
     return conn.execute(
-        f"SELECT id, title, image, created_date, achieved, achieved_date FROM golden_goal "
-        f"WHERE id=? AND user_id={cu()} AND deleted_at IS NULL", (gid,)
+        f"SELECT id, title, image, created_date, achieved, achieved_date, t369_enabled, t369_affirmation "
+        f"FROM golden_goal WHERE id=? AND user_id={cu()} AND deleted_at IS NULL", (gid,)
     ).fetchone()
 
 def _golden_detail(conn, gid):
@@ -2046,8 +1865,8 @@ def _golden_detail(conn, gid):
 def get_golden_goals():
     with db() as conn:
         rows = conn.execute(
-            f"SELECT id, title, image, created_date, achieved, achieved_date FROM golden_goal "
-            f"WHERE user_id={cu()} AND deleted_at IS NULL ORDER BY achieved ASC, id DESC"
+            f"SELECT id, title, image, created_date, achieved, achieved_date, t369_enabled, t369_affirmation "
+            f"FROM golden_goal WHERE user_id={cu()} AND deleted_at IS NULL ORDER BY achieved ASC, id DESC"
         ).fetchall()
         return [_golden_summary(conn, r) for r in rows]
 
@@ -2079,6 +1898,10 @@ def update_golden(gid: int, body: GoldenUpdate):
             sets.append("title=?"); vals.append(data["title"].strip())
         if "image" in data and data["image"] is not None:
             sets.append("image=?"); vals.append(data["image"])
+        if "t369_enabled" in data and data["t369_enabled"] is not None:
+            sets.append("t369_enabled=?"); vals.append(1 if data["t369_enabled"] else 0)
+        if "t369_affirmation" in data and data["t369_affirmation"] is not None:
+            sets.append("t369_affirmation=?"); vals.append(data["t369_affirmation"].strip())
         if sets:
             conn.execute(f"UPDATE golden_goal SET {', '.join(sets)} WHERE id=? AND user_id={cu()}", (*vals, gid))
         return _golden_summary(conn, _golden_get(conn, gid))
@@ -2126,6 +1949,150 @@ def restore_golden(gid: int):
         _restore(conn, "golden_goal", gid)
         r = _golden_get(conn, gid)
         return _golden_summary(conn, r) if r else {}
+
+
+# ── Tesla 369 method (per-dream mode) ────────────────────────────────────────
+# When a dream has t369_enabled, you write its 369 affirmation 3x in the morning
+# (06:00–12:00), 6x at noon (12:00–18:00), and 9x at night (18:00–02:00). A day
+# counts toward the streak only when all 18 writes are logged. Minimum mandatory
+# streak is 21 days; it keeps extending until the dream manifests.
+
+TESLA_TARGETS = {"morning": 3, "noon": 6, "night": 9}
+TESLA_TOTAL = sum(TESLA_TARGETS.values())  # 18
+TESLA_MIN_STREAK = 21
+
+def _tesla_window(now: Optional[datetime] = None) -> Optional[str]:
+    """Map a wall-clock time to its 369 window, or None if outside all windows.
+    Night spans 18:00–02:00, so 00:00–02:00 belongs to the *previous* day's night."""
+    h = (now or datetime.now()).hour
+    if 6 <= h < 12:
+        return "morning"
+    if 12 <= h < 18:
+        return "noon"
+    if h >= 18 or h < 2:
+        return "night"
+    return None  # 02:00–06:00 dead zone
+
+def _tesla_log_date(now: Optional[datetime] = None) -> str:
+    """The date a write belongs to. 00:00–02:00 counts toward the night that
+    began the previous evening, so it rolls back a day."""
+    now = now or datetime.now()
+    if now.hour < 2:
+        return (now.date() - timedelta(days=1)).isoformat()
+    return now.date().isoformat()
+
+def _tesla_day_counts(conn, gid: int, d: str) -> dict:
+    rows = conn.execute(
+        "SELECT window, COUNT(*) AS n FROM tesla369_log WHERE goal_id=? AND log_date=? GROUP BY window",
+        (gid, d),
+    ).fetchall()
+    counts = {"morning": 0, "noon": 0, "night": 0}
+    for r in rows:
+        if r["window"] in counts:
+            counts[r["window"]] = r["n"]
+    return counts
+
+def _tesla_day_complete(counts: dict) -> bool:
+    return all(counts.get(w, 0) >= t for w, t in TESLA_TARGETS.items())
+
+def _tesla_complete_dates(conn, gid: int) -> set:
+    """All log_dates for this dream where the full 3/6/9 was met."""
+    rows = conn.execute(
+        "SELECT log_date, window, COUNT(*) AS n FROM tesla369_log WHERE goal_id=? GROUP BY log_date, window",
+        (gid,),
+    ).fetchall()
+    by_date = {}
+    for r in rows:
+        by_date.setdefault(r["log_date"], {})[r["window"]] = r["n"]
+    return {d for d, c in by_date.items() if _tesla_day_complete(c)}
+
+def _tesla_current_streak(complete: set, today_str: str) -> int:
+    if not complete:
+        return 0
+    today = date.fromisoformat(today_str)
+    if today_str in complete:
+        cur = today
+    elif (today - timedelta(days=1)).isoformat() in complete:
+        cur = today - timedelta(days=1)  # today still in progress; count from yesterday
+    else:
+        return 0
+    streak = 0
+    while cur.isoformat() in complete:
+        streak += 1
+        cur -= timedelta(days=1)
+    return streak
+
+def _tesla_best_streak(complete: set) -> int:
+    if not complete:
+        return 0
+    best = run = 1
+    prev = None
+    for d in sorted(date.fromisoformat(x) for x in complete):
+        if prev is not None and (d - prev).days == 1:
+            run += 1
+        else:
+            run = 1
+        best = max(best, run)
+        prev = d
+    return best
+
+def _t369_summary(conn, gid: int) -> dict:
+    """369 tracking payload for one dream (called from _golden_summary when on)."""
+    today = _tesla_log_date()
+    counts = _tesla_day_counts(conn, gid, today)
+    complete = _tesla_complete_dates(conn, gid)
+    current = _tesla_current_streak(complete, today)
+    return {
+        "today": today,
+        "window": _tesla_window(),
+        "targets": TESLA_TARGETS,
+        "counts": counts,
+        "day_complete": _tesla_day_complete(counts),
+        "current_streak": current,
+        "best_streak": _tesla_best_streak(complete),
+        "min_streak": TESLA_MIN_STREAK,
+        "min_reached": current >= TESLA_MIN_STREAK,
+    }
+
+@app.post("/api/golden/goals/{gid}/369/log")
+def log_tesla369(gid: int):
+    """Record one 369 write for this dream into the current time window."""
+    window = _tesla_window()
+    if window is None:
+        raise HTTPException(400, "Outside the 369 writing windows (02:00–06:00).")
+    d = _tesla_log_date()
+    with db() as conn:
+        g = _golden_get(conn, gid)
+        if not g:
+            raise HTTPException(404)
+        if not g["t369_enabled"]:
+            raise HTTPException(400, "369 mode is off for this dream.")
+        counts = _tesla_day_counts(conn, gid, d)
+        if counts.get(window, 0) >= TESLA_TARGETS[window]:
+            raise HTTPException(400, f"{window.capitalize()} target already complete.")
+        conn.execute(
+            "INSERT INTO tesla369_log (user_id, goal_id, log_date, window) VALUES (?, ?, ?, ?)",
+            (cu(), gid, d, window),
+        )
+        return _golden_detail(conn, gid)
+
+@app.delete("/api/golden/goals/{gid}/369/log")
+def undo_tesla369(gid: int):
+    """Undo the most recent 369 write in the current window (mis-tap correction)."""
+    window = _tesla_window()
+    if window is None:
+        raise HTTPException(400, "Outside the 369 writing windows.")
+    d = _tesla_log_date()
+    with db() as conn:
+        if not _golden_get(conn, gid):
+            raise HTTPException(404)
+        row = conn.execute(
+            "SELECT id FROM tesla369_log WHERE goal_id=? AND log_date=? AND window=? "
+            "ORDER BY id DESC LIMIT 1", (gid, d, window),
+        ).fetchone()
+        if row:
+            conn.execute("DELETE FROM tesla369_log WHERE id=?", (row["id"],))
+        return _golden_detail(conn, gid)
 
 
 # ── Rewards (screen-time tracking + payout ledger) ───────────────────────────
