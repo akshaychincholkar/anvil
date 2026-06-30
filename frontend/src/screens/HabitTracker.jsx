@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, Fragment } from "react";
 import { Pencil, Plus, Bell, Check, Flame, LayoutGrid, Menu, X, MoreHorizontal, FileText, Link2, ChevronLeft, ChevronRight, Power } from "lucide-react";
 import { api } from "../api.js";
 import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
@@ -50,6 +50,20 @@ const getMonthInfo = (monthOffset = 0) => {
 
 const fmtShort = (iso) => new Date(iso + "T00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
+// Remaining cooldown (ms) before the next interval-gated entry on `date`.
+// > 0 means the habit is currently waiting between entries on that day.
+const cooldownMs = (habit, date) => {
+  const interval = Number(habit?.min_interval_min) || 0;
+  if (interval <= 0 || date !== todayISO()) return 0;
+  const lastAt = habit.log_count_times?.[date];
+  if (!lastAt) return 0;
+  return Math.max(0, new Date(lastAt).getTime() + interval * 60000 - Date.now());
+};
+const fmtWait = (ms) => {
+  const s = Math.ceil(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+};
+
 const TODAY = todayISO();
 const THIS_YEAR = new Date().getFullYear();
 
@@ -61,6 +75,7 @@ export default function HabitTracker() {
   const [adding, setAdding] = useState(false);
   const [editingHabit, setEditingHabit] = useState(null);
   const [countPopup, setCountPopup] = useState(null); // { habit, date }
+  const [inlineCounter, setInlineCounter] = useState(null); // { habitId, date } — shown when in interval cooldown
   const [newHabit, setNewHabit] = useState({ name: "", pillar: "Health", target_per_week: 7, type: "regular", target_count: null, period: "week", days: [], min_interval_min: 0 });
   const [reordering, setReordering] = useState(false);
   const [habitOrder, setHabitOrder] = useState([]);
@@ -122,22 +137,43 @@ export default function HabitTracker() {
   const pick = (id) => { setSelected(id); if (isMobile) setSidebarOpen(false); };
 
   // Per-day count habits open the counter popup; everything else toggles done/undone.
+  // While a habit is inside its interval cooldown, show the counter inline (below
+  // the row) instead of the popup, so the countdown is visible without a modal.
   const dayAction = (habit, dateStr) => {
     if ((habit.type === "minimum" || habit.type === "maximum") && habit.period === "day") {
-      setCountPopup({ habit, date: dateStr });
+      if (cooldownMs(habit, dateStr) > 0) {
+        setInlineCounter((c) => (c && c.habitId === habit.id && c.date === dateStr ? null : { habitId: habit.id, date: dateStr }));
+      } else {
+        setCountPopup({ habit, date: dateStr });
+      }
     } else {
       toggleDay(habit.id, dateStr);
     }
   };
   const toggleDay = async (habitId, dateStr) => { mergeHabit(await api.toggleHabitLog(habitId, dateStr)); };
-  const saveCount = async (habitId, dateStr, count, note) => { mergeHabit(await api.setHabitLogCount(habitId, dateStr, count, note)); setCountPopup(null); };
+  const saveCount = async (habitId, dateStr, count, note) => {
+    try { mergeHabit(await api.setHabitLogCount(habitId, dateStr, count, note)); setCountPopup(null); }
+    catch (e) { alert(e.message || "Could not save."); }
+  };
   const clearLog = async (habitId, dateStr) => { mergeHabit(await api.clearHabitLog(habitId, dateStr)); setCountPopup(null); };
-  const incrementCount = async (habitId, dateStr) => {
-    const updated = await api.incrementHabitLog(habitId, dateStr);
-    mergeHabit(updated);
-    // Keep the open popup's habit reference fresh so its countdown re-arms.
-    setCountPopup((p) => (p && p.habit.id === habitId ? { ...p, habit: updated } : p));
-    return updated;
+
+  // Render the inline cooldown counter under a habit's row, if it's the active one.
+  // `habit` is the live habit object (from state) so the countdown stays fresh.
+  const renderInline = (habit) => {
+    if (!inlineCounter || inlineCounter.habitId !== habit.id) return null;
+    return (
+      <InlineCounter
+        key={inlineCounter.date + ":" + (habit.log_count_times?.[inlineCounter.date] || "")}
+        habit={habit}
+        date={inlineCounter.date}
+        onSave={async (count) => {
+          try { await api.setHabitLogCount(habit.id, inlineCounter.date, count, habit.log_notes?.[inlineCounter.date] ?? "").then(mergeHabit); }
+          catch (e) { alert(e.message || "Could not save."); }
+        }}
+        onOpen={() => { setInlineCounter(null); setCountPopup({ habit, date: inlineCounter.date }); }}
+        onClose={() => setInlineCounter(null)}
+      />
+    );
   };
 
   const createHabit = async () => {
@@ -153,7 +189,8 @@ export default function HabitTracker() {
       target_count: needsCount ? Number(newHabit.target_count) || 1 : null,
       period: needsCount ? newHabit.period : null,
       days: isWeekly ? newHabit.days : null,
-      min_interval_min: needsCount ? Number(newHabit.min_interval_min) || 0 : 0,
+      // Interval only applies to per-day counts (multiple entries in one day).
+      min_interval_min: (needsCount && newHabit.period === "day") ? Number(newHabit.min_interval_min) || 0 : 0,
     };
     await api.createHabit(body);
     setNewHabit({ name: "", pillar: "Health", target_per_week: 7, type: "regular", target_count: null, period: "week", days: [], min_interval_min: 0 });
@@ -231,11 +268,13 @@ export default function HabitTracker() {
         {selected === "ALL"
           ? <AllHabitsWeekly habits={activeHabits} dayAction={dayAction} logSet={logSet}
               onDelete={deleteHabit}
-              onEdit={(h) => setEditingHabit(h)} />
+              onEdit={(h) => setEditingHabit(h)}
+              renderInline={renderInline} />
           : <SingleHabitMonthly habit={current} dayAction={dayAction} logSet={logSet}
               onDelete={() => deleteHabit(current.id, current.name)}
               onEdit={() => setEditingHabit(current)}
               onToggleActive={toggleActive}
+              renderInline={renderInline}
               setNote={(date, note) => api.setHabitLogNote(current.id, date, note).then(mergeHabit)} />}
 
         {/* Yearly bar chart always shown in All view */}
@@ -267,7 +306,6 @@ export default function HabitTracker() {
           initialNote={countPopup.habit.log_notes?.[countPopup.date] ?? ""}
           onSave={(count, note) => saveCount(countPopup.habit.id, countPopup.date, count, note)}
           onClear={() => clearLog(countPopup.habit.id, countPopup.date)}
-          onIncrement={() => incrementCount(countPopup.habit.id, countPopup.date)}
           onClose={() => setCountPopup(null)}
         />
       )}
@@ -323,10 +361,14 @@ function AddHabitForm({ habit, onChange, onSave, onCancel }) {
               {["day","week","month","year"].map((p) => <option key={p}>{p}</option>)}
             </select>
           </div>
-          <div style={S.pickHint}>Min gap between entries (minutes)</div>
-          <input type="number" min={0} placeholder="0" value={habit.min_interval_min ?? 0}
-            onChange={(e) => onChange((n) => ({ ...n, min_interval_min: e.target.value }))}
-            style={S.sideInput} />
+          {habit.period === "day" && (
+            <>
+              <div style={S.pickHint}>Min gap between entries (minutes)</div>
+              <input type="number" min={0} placeholder="0" value={habit.min_interval_min ?? 0}
+                onChange={(e) => onChange((n) => ({ ...n, min_interval_min: e.target.value }))}
+                style={S.sideInput} />
+            </>
+          )}
         </>
       )}
       <div style={{ display: "flex", gap: 6 }}>
@@ -358,7 +400,8 @@ function EditHabitModal({ habit, onSave, onClose }) {
       period: needsCount ? period : null,
       days: isWeekly ? days : [],
       reminder_time: reminder || null,
-      min_interval_min: needsCount ? Number(interval) || 0 : 0,
+      // Interval only applies to per-day counts (multiple entries in one day).
+      min_interval_min: (needsCount && period === "day") ? Number(interval) || 0 : 0,
     });
   };
 
@@ -389,8 +432,12 @@ function EditHabitModal({ habit, onSave, onClose }) {
                 {["day","week","month","year"].map((p) => <option key={p}>{p}</option>)}
               </select>
             </div>
-            <label style={S.modalLabel}>Min gap between entries (minutes)</label>
-            <input type="number" min={0} value={interval} onChange={(e) => setInterval_(e.target.value)} style={S.sideInput} />
+            {period === "day" && (
+              <>
+                <label style={S.modalLabel}>Min gap between entries (minutes)</label>
+                <input type="number" min={0} value={interval} onChange={(e) => setInterval_(e.target.value)} style={S.sideInput} />
+              </>
+            )}
           </>
         )}
         <label style={S.modalLabel}>Reminder time</label>
@@ -401,11 +448,54 @@ function EditHabitModal({ habit, onSave, onClose }) {
   );
 }
 
-function CountPopup({ habit, date, initialCount, initialNote, onSave, onClear, onClose, onIncrement }) {
-  const [count, setCount] = useState(initialCount ?? 0);
+// Compact inline counter shown below a habit row while it's in interval cooldown.
+// Stage-then-confirm: + (one above saved) / − stage locally; Set commits.
+function InlineCounter({ habit, date, onSave, onOpen, onClose }) {
+  const [now, setNow] = useState(Date.now());
+  const saved = habit.log_counts?.[date] ?? 0;
+  const [count, setCount] = useState(saved);
+  const interval = Number(habit.min_interval_min) || 0;
+  const target = habit.target_count;
+  const lastAt = habit.log_count_times?.[date];
+  const nextAllowed = lastAt ? new Date(lastAt).getTime() + interval * 60000 : 0;
+  const waitMs = Math.max(0, nextAllowed - now);
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const plusLocked = count >= saved + 1 || waitMs > 0;
+  const minusLocked = count <= 0;
+  const dirty = count !== saved;
+
+  const c = PILLARS[habit.pillar]?.dot || "#9A968C";
+  const meets = habit.type === "minimum" ? count >= target : (count > 0 && count <= target);
+
+  return (
+    <div style={S.inlineCounter}>
+      <span style={{ ...S.inlineCount, color: meets ? "#4C9A6B" : c }}>{count}<span style={S.inlineTarget}>/{target}</span></span>
+      <button onClick={() => !minusLocked && setCount((n) => Math.max(0, n - 1))} disabled={minusLocked}
+        style={{ ...S.inlinePlus, ...(minusLocked ? { opacity: 0.45, cursor: "not-allowed" } : {}) }}>−</button>
+      <button onClick={() => !plusLocked && setCount((n) => n + 1)} disabled={plusLocked}
+        style={{ ...S.inlinePlus, ...(plusLocked ? { opacity: 0.45, cursor: "not-allowed" } : { background: c, borderColor: c, color: "#fff" }) }}
+        title={waitMs > 0 ? "Wait for the interval" : (count >= saved + 1 ? "Press Set to confirm" : "Stage an entry")}>+</button>
+      <button onClick={() => onSave(count)} disabled={!dirty}
+        style={{ ...S.inlineSet, ...(dirty ? { background: c, borderColor: c, color: "#fff" } : { opacity: 0.5, cursor: "not-allowed" }) }}>Set</button>
+      {waitMs > 0
+        ? <span style={S.inlineWait}>Wait {fmtWait(waitMs)}</span>
+        : <span style={S.inlineReady}>{dirty ? "Press Set to confirm" : "Tap + to add"}</span>}
+      <button onClick={onOpen} style={S.inlineMore} title="Open details">⋯</button>
+      <button onClick={onClose} style={S.inlineMore} title="Hide"><X size={13} /></button>
+    </div>
+  );
+}
+
+function CountPopup({ habit, date, initialCount, initialNote, onSave, onClear, onClose }) {
+  const saved = initialCount ?? 0;            // committed count on the server
+  const [count, setCount] = useState(saved);   // staged (local) count
   const [note, setNote] = useState(initialNote ?? "");
   const [now, setNow] = useState(Date.now());
-  const [busy, setBusy] = useState(false);
   const target = habit.target_count;
   const meets = habit.type === "minimum" ? count >= target : (count > 0 && count <= target);
   const over = habit.type === "maximum" && count > target;
@@ -413,7 +503,7 @@ function CountPopup({ habit, date, initialCount, initialNote, onSave, onClear, o
   const statusText = meets ? "✓ Goal met" : (over ? "Over the limit" : "Not met yet");
 
   // Min-interval gating: only for today's entry on a habit that defines a gap.
-  const interval = habit.min_interval_min || 0;
+  const interval = Number(habit.min_interval_min) || 0;
   const isToday = date === todayISO();
   const gated = interval > 0 && isToday;
   const lastAt = habit.log_count_times?.[date];
@@ -427,28 +517,15 @@ function CountPopup({ habit, date, initialCount, initialNote, onSave, onClear, o
     return () => window.clearInterval(id);
   }, [gated, waitMs]);
 
-  const fmtWait = (ms) => {
-    const s = Math.ceil(ms / 1000);
-    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-  };
-
-  const plus = async () => {
-    if (gated) {
-      if (waitMs > 0 || busy) return;
-      setBusy(true);
-      try {
-        const updated = await onIncrement(); // server-validated; returns fresh habit
-        if (updated) {
-          setCount(updated.log_counts?.[date] ?? count + 1);
-          setNow(Date.now());
-        }
-      } catch (e) {
-        alert(e.message || "Too soon — please wait.");
-      } finally { setBusy(false); }
-    } else {
-      setCount((n) => n + 1);
-    }
-  };
+  // Stage-then-confirm for gated habits: + raises the local count by at most one
+  // above the saved value (then disables), - lowers it; Set commits to the server,
+  // where the interval gap is enforced on an increase.
+  const staged = count - saved;               // +1 means an entry is staged
+  const plusLocked = gated && (count >= saved + 1 || waitMs > 0);
+  const minusLocked = count <= 0;
+  const inc = () => { if (!plusLocked) setCount((n) => n + 1); };
+  const dec = () => { if (!minusLocked) setCount((n) => Math.max(0, n - 1)); };
+  const dirty = count !== saved || note !== (initialNote ?? "");
 
   return (
     <div style={S.modalOverlay} onClick={onClose}>
@@ -459,16 +536,21 @@ function CountPopup({ habit, date, initialCount, initialNote, onSave, onClear, o
           {interval > 0 && <> · {interval}m between entries</>}
         </div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 20, margin: "14px 0 6px" }}>
-          <button onClick={() => setCount((n) => Math.max(0, n - 1))} disabled={gated}
-            style={{ ...S.counterBtn, ...(gated ? { opacity: 0.45, cursor: "not-allowed" } : {}) }}
-            title={gated ? "Manual changes are off for timed habits — use Delete to reset the day" : undefined}>−</button>
+          <button onClick={dec} disabled={minusLocked}
+            style={{ ...S.counterBtn, ...(minusLocked ? { opacity: 0.45, cursor: "not-allowed" } : {}) }}>−</button>
           <span style={{ fontSize: 38, fontWeight: 700, fontFamily: "'Fraunces',Georgia,serif", minWidth: 52, textAlign: "center", color: statusColor }}>{count}</span>
-          <button onClick={plus} disabled={gated && (waitMs > 0 || busy)}
-            style={{ ...S.counterBtn, ...(gated && waitMs > 0 ? { opacity: 0.45, cursor: "not-allowed" } : {}) }}>+</button>
+          <button onClick={inc} disabled={plusLocked}
+            style={{ ...S.counterBtn, ...(plusLocked ? { opacity: 0.45, cursor: "not-allowed" } : {}) }}
+            title={gated && waitMs > 0 ? "Wait for the interval before the next entry" : (gated && count >= saved + 1 ? "Press Set to confirm this entry" : undefined)}>+</button>
         </div>
         {gated && waitMs > 0 && (
           <div style={{ textAlign: "center", fontSize: 12, fontWeight: 700, color: "#C2773B", marginBottom: 8 }}>
             Wait {fmtWait(waitMs)} before the next entry
+          </div>
+        )}
+        {gated && waitMs <= 0 && (
+          <div style={{ textAlign: "center", fontSize: 11.5, color: "var(--text-3)", marginBottom: 8 }}>
+            {staged > 0 ? "Press Set to confirm this entry" : `Tap + to add an entry (each at least ${interval}m apart)`}
           </div>
         )}
         <div style={{ textAlign: "center", fontSize: 12.5, fontWeight: 700, color: statusColor, marginBottom: 12 }}>{statusText}</div>
@@ -476,7 +558,10 @@ function CountPopup({ habit, date, initialCount, initialNote, onSave, onClear, o
           style={{ ...S.sideInput, minHeight: 56, resize: "vertical" }} />
         <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
           <button onClick={onClear} style={{ ...S.actionBtn, color: "#C2536B", borderColor: "#C2536B" }}><X size={14} /> Delete</button>
-          <button onClick={() => onSave(count, note)} style={{ ...S.sideAddBtn, flex: 1, justifyContent: "center", height: 38 }}><Check size={14} /> Set</button>
+          <button onClick={() => onSave(count, note)} disabled={!dirty}
+            style={{ ...S.sideAddBtn, flex: 1, justifyContent: "center", height: 38, ...(dirty ? {} : { opacity: 0.5, cursor: "not-allowed" }) }}>
+            <Check size={14} /> Set
+          </button>
         </div>
       </div>
     </div>
@@ -504,7 +589,7 @@ function RingStat({ pct, label, sub, color }) {
   );
 }
 
-function AllHabitsWeekly({ habits, dayAction, logSet, onDelete, onEdit }) {
+function AllHabitsWeekly({ habits, dayAction, logSet, onDelete, onEdit, renderInline }) {
   const [weekOffset, setWeekOffset] = useState(0);
   const weekDates = getWeekDates(weekOffset);
   const weekLabel = `${fmtShort(weekDates[0])} – ${fmtShort(weekDates[6])}${weekOffset === 0 ? " · This week" : ""}`;
@@ -639,7 +724,8 @@ function AllHabitsWeekly({ habits, dayAction, logSet, onDelete, onEdit }) {
             : h.period === "month" ? monthCount(weekDates[0].slice(0, 7))
             : h.period === "year" ? yearCount(weekDates[0].slice(0, 4)) : 0;
           return (
-            <div key={h.id} style={S.weekRow}>
+            <Fragment key={h.id}>
+            <div style={S.weekRow}>
               <div style={{ ...S.weekNameCol, flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   <span style={{ ...S.sideDot, background: c }} />
@@ -698,6 +784,8 @@ function AllHabitsWeekly({ habits, dayAction, logSet, onDelete, onEdit }) {
                   : <span style={{ ...S.streakPill, background: soft, color: c }}><Flame size={12} /> {h.streak}</span>}
               </div>
             </div>
+            {renderInline && renderInline(h)}
+            </Fragment>
           );
         })}
 
@@ -721,7 +809,7 @@ function AllHabitsWeekly({ habits, dayAction, logSet, onDelete, onEdit }) {
   );
 }
 
-function SingleHabitMonthly({ habit, dayAction, logSet, onDelete, onEdit, setNote, onToggleActive }) {
+function SingleHabitMonthly({ habit, dayAction, logSet, onDelete, onEdit, setNote, onToggleActive, renderInline }) {
   const [menuDate, setMenuDate] = useState(null);
   const [noteInput, setNoteInput] = useState("");
   const [noteDate, setNoteDate] = useState(null);
@@ -818,6 +906,8 @@ function SingleHabitMonthly({ habit, dayAction, logSet, onDelete, onEdit, setNot
           ? <Stat label="Days" value={(habit.days || []).map((i) => DAYS[i]).join(", ") || "—"} c={c} soft={soft} />
           : <Stat label={habit.type === "minimum" ? "Min target" : "Max allowed"} value={`${habit.target_count}/${habit.period}`} c={c} soft={soft} />}
       </div>
+
+      {renderInline && renderInline(habit)}
 
       <div style={S.navBar}>
         <button onClick={() => setMonthOffset((o) => o - 1)} style={S.navBtn}><ChevronLeft size={16} /></button>
@@ -1113,6 +1203,14 @@ const S = {
   cellNoteBubble: { position: "absolute", top: 2, right: "calc(50% - 16px)", width: 5, height: 5, borderRadius: "50%", background: "#3A7CA5" },
   countBadge: { position: "absolute", bottom: 2, right: 2, minWidth: 13, height: 13, padding: "0 2px", borderRadius: 7, color: "#fff", fontSize: 9, fontWeight: 700, display: "grid", placeItems: "center", lineHeight: 1 },
   counterBtn: { width: 44, height: 44, borderRadius: "50%", border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: 24, fontWeight: 700, cursor: "pointer", display: "grid", placeItems: "center", fontFamily: "inherit", lineHeight: 1 },
+  inlineCounter: { display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", margin: "2px 0 8px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, flexWrap: "wrap" },
+  inlineCount: { fontSize: 20, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif", lineHeight: 1 },
+  inlineTarget: { fontSize: 12, fontWeight: 600, color: "var(--text-3)", marginLeft: 1 },
+  inlinePlus: { width: 30, height: 30, borderRadius: 8, border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: 18, fontWeight: 700, cursor: "pointer", display: "grid", placeItems: "center", fontFamily: "inherit", lineHeight: 1, flexShrink: 0 },
+  inlineSet: { height: 30, padding: "0 12px", borderRadius: 8, border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 },
+  inlineWait: { fontSize: 12, fontWeight: 700, color: "#C2773B" },
+  inlineReady: { fontSize: 12, fontWeight: 700, color: "#4C9A6B" },
+  inlineMore: { marginLeft: "auto", border: "none", background: "none", color: "var(--text-3)", cursor: "pointer", padding: 4, display: "grid", placeItems: "center", fontSize: 16, fontWeight: 700, lineHeight: 1 },
   activeToggle: { position: "relative", width: 38, height: 22, borderRadius: 11, border: "none", background: "var(--border)", cursor: "pointer", flexShrink: 0, transition: "background 0.2s", padding: 0 },
   activeToggleOn: { background: "#4C9A6B" },
   activeKnob: { position: "absolute", top: 3, left: 3, width: 16, height: 16, borderRadius: "50%", background: "#fff", transition: "left 0.2s", boxShadow: "0 1px 2px rgba(0,0,0,0.3)" },

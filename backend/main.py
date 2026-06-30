@@ -680,33 +680,62 @@ def set_habit_log_note(habit_id: int, log_date: str, body: HabitLogNote):
 @app.put("/api/habits/{habit_id}/log/{log_date}/count")
 def set_habit_log_count(habit_id: int, log_date: str, body: HabitLogCount):
     """Set a per-day count for minimum/maximum habits. `done` is derived from the rule:
-    minimum → done when count >= target; maximum → done when 0 < count <= target."""
+    minimum → done when count >= target; maximum → done when 0 < count <= target.
+
+    For interval-gated habits (min_interval_min > 0) the count is NOT settable here —
+    it can only change through /increment so the spacing rule can't be bypassed.
+    Note-only updates (count unchanged) are still allowed."""
     with db() as conn:
         h = conn.execute(
-            f"SELECT type, target_count FROM habit WHERE id=? AND user_id={cu()}", (habit_id,)
+            f"SELECT type, target_count, min_interval_min FROM habit WHERE id=? AND user_id={cu()}", (habit_id,)
         ).fetchone()
         if not h:
             raise HTTPException(404, "Habit not found")
+        existing = conn.execute(
+            "SELECT id, count, last_count_at FROM habit_log WHERE habit_id=? AND date=?", (habit_id, log_date)
+        ).fetchone()
+        interval = h["min_interval_min"] or 0
+        cur_count = (existing["count"] if existing and existing["count"] is not None else 0)
         target = h["target_count"] or 0
         count = body.count
+        # Interval gating applies only to TODAY's live logging. Past days are freely
+        # editable (to correct history). For a gated habit today:
+        #   • decreasing or keeping the count is always allowed (a correction);
+        #   • increasing is allowed at most by +1 and only when out of cooldown,
+        #     and it stamps last_count_at so the next gap is enforced.
+        is_today = log_date == date.today().isoformat()
+        stamp = None
+        if interval > 0 and is_today and count > cur_count:
+            if count - cur_count > 1:
+                raise HTTPException(409, "Timed habits add one entry at a time — wait for the gap, then add the next.")
+            now = datetime.now()
+            last_at = existing["last_count_at"] if existing else None
+            if last_at:
+                try:
+                    nxt = datetime.fromisoformat(last_at) + timedelta(minutes=interval)
+                    wait = (nxt - now).total_seconds()
+                    if wait > 0:
+                        raise HTTPException(429, f"Wait {int(wait // 60)}m {int(wait % 60)}s before the next entry.")
+                except ValueError:
+                    pass
+            stamp = now.isoformat(timespec="seconds")
         if h["type"] == "minimum":
             done = 1 if count >= target else 0
         elif h["type"] == "maximum":
             done = 1 if 0 < count <= target else 0
         else:
             done = 1 if count > 0 else 0
-        existing = conn.execute(
-            "SELECT id FROM habit_log WHERE habit_id=? AND date=?", (habit_id, log_date)
-        ).fetchone()
         if existing:
-            conn.execute(
-                "UPDATE habit_log SET count=?, done=?, note=? WHERE id=?",
-                (count, done, body.note, existing["id"])
-            )
+            if stamp:
+                conn.execute("UPDATE habit_log SET count=?, done=?, note=?, last_count_at=? WHERE id=?",
+                             (count, done, body.note, stamp, existing["id"]))
+            else:
+                conn.execute("UPDATE habit_log SET count=?, done=?, note=? WHERE id=?",
+                             (count, done, body.note, existing["id"]))
         else:
             conn.execute(
-                "INSERT INTO habit_log (habit_id,date,done,count,note) VALUES (?,?,?,?,?)",
-                (habit_id, log_date, done, count, body.note)
+                "INSERT INTO habit_log (habit_id,date,done,count,note,last_count_at) VALUES (?,?,?,?,?,?)",
+                (habit_id, log_date, done, count, body.note, stamp)
             )
         return _habit_full(conn, habit_id)
 
