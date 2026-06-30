@@ -1801,6 +1801,118 @@ def restore_expense_log(lid: int):
         return _exp_log_row(r) if r else {}
 
 
+# ── Trading Journal ──────────────────────────────────────────────────────────
+# Per-day learning + individual trades (swing | fno | intraday) each with its
+# own P/L and SL/TGT. A day with no trades can still hold a learning note.
+
+TRADE_KINDS = ("swing", "fno", "intraday")
+
+class TradeEntryCreate(BaseModel):
+    date: str
+    kind: str = "swing"
+    instrument: str = ""
+    pl: float = 0
+    sl: str = ""
+    tgt: str = ""
+    note: str = ""
+
+class TradeEntryUpdate(BaseModel):
+    kind: Optional[str] = None
+    instrument: Optional[str] = None
+    pl: Optional[float] = None
+    sl: Optional[str] = None
+    tgt: Optional[str] = None
+    note: Optional[str] = None
+
+class TradeLearningBody(BaseModel):
+    date: str
+    learning: str = ""
+
+def _trade_entry_row(r) -> dict:
+    return {
+        "id": r["id"], "date": r["trade_date"], "kind": r["kind"], "instrument": r["instrument"],
+        "pl": r["pl"], "sl": r["sl"], "tgt": r["tgt"], "note": r["note"],
+    }
+
+@app.get("/api/trades")
+def get_trades():
+    with db() as conn:
+        entries = conn.execute(
+            f"SELECT id, trade_date, kind, instrument, pl, sl, tgt, note FROM trade_entry "
+            f"WHERE user_id={cu()} AND deleted_at IS NULL ORDER BY trade_date DESC, id ASC"
+        ).fetchall()
+        days = conn.execute(
+            f"SELECT trade_date, learning FROM trade_day WHERE user_id={cu()} AND deleted_at IS NULL"
+        ).fetchall()
+        net = conn.execute(
+            f"SELECT COALESCE(SUM(pl),0) s FROM trade_entry WHERE user_id={cu()} AND deleted_at IS NULL"
+        ).fetchone()["s"]
+        cap_row = conn.execute(f"SELECT value FROM user_setting WHERE user_id={cu()} AND key='trading_capital'").fetchone()
+        capital = 0.0
+        if cap_row and cap_row["value"]:
+            try:
+                # user_setting stores values JSON-encoded (see put_setting).
+                capital = float(json.loads(cap_row["value"]))
+            except (ValueError, TypeError):
+                capital = 0.0
+        return {
+            "entries": [_trade_entry_row(e) for e in entries],
+            "learnings": {d["trade_date"]: d["learning"] for d in days},
+            "capital": capital,
+            "net_pl": net,
+            "current": capital + net,
+        }
+
+@app.post("/api/trades/entries", status_code=201)
+def create_trade_entry(body: TradeEntryCreate):
+    kind = body.kind if body.kind in TRADE_KINDS else "swing"
+    with db() as conn:
+        cur = conn.execute(
+            f"INSERT INTO trade_entry (user_id, trade_date, kind, instrument, pl, sl, tgt, note) "
+            f"VALUES ({cu()}, ?, ?, ?, ?, ?, ?, ?)",
+            (body.date, kind, body.instrument.strip(), body.pl or 0, body.sl.strip(), body.tgt.strip(), body.note.strip())
+        )
+        r = conn.execute("SELECT id, trade_date, kind, instrument, pl, sl, tgt, note FROM trade_entry WHERE id=?", (cur.lastrowid,)).fetchone()
+        return _trade_entry_row(r)
+
+@app.put("/api/trades/entries/{eid}")
+def update_trade_entry(eid: int, body: TradeEntryUpdate):
+    with db() as conn:
+        own = conn.execute(f"SELECT id FROM trade_entry WHERE id=? AND user_id={cu()} AND deleted_at IS NULL", (eid,)).fetchone()
+        if not own:
+            raise HTTPException(404, "Trade not found")
+        data = {k: v for k, v in body.dict().items() if v is not None}
+        if "kind" in data and data["kind"] not in TRADE_KINDS:
+            data["kind"] = "swing"
+        for s in ("instrument", "sl", "tgt", "note"):
+            if s in data and isinstance(data[s], str):
+                data[s] = data[s].strip()
+        if data:
+            sets = ", ".join(f"{k}=?" for k in data)
+            conn.execute(f"UPDATE trade_entry SET {sets} WHERE id=?", (*data.values(), eid))
+        r = conn.execute("SELECT id, trade_date, kind, instrument, pl, sl, tgt, note FROM trade_entry WHERE id=?", (eid,)).fetchone()
+        return _trade_entry_row(r)
+
+@app.delete("/api/trades/entries/{eid}", status_code=204)
+def delete_trade_entry(eid: int):
+    with db() as conn:
+        own = conn.execute(f"SELECT id FROM trade_entry WHERE id=? AND user_id={cu()} AND deleted_at IS NULL", (eid,)).fetchone()
+        if not own:
+            raise HTTPException(404, "Trade not found")
+        _soft_delete(conn, "trade_entry", eid)
+
+@app.put("/api/trades/learning")
+def set_trade_learning(body: TradeLearningBody):
+    """Upsert the learning note for a day (created even if there are no trades)."""
+    with db() as conn:
+        conn.execute(
+            f"INSERT INTO trade_day (user_id, trade_date, learning) VALUES ({cu()}, ?, ?) "
+            f"ON CONFLICT(user_id, trade_date) DO UPDATE SET learning=excluded.learning, deleted_at=NULL",
+            (body.date, body.learning.strip())
+        )
+        return {"date": body.date, "learning": body.learning.strip()}
+
+
 # ── Kickstart (motivation video hub) ─────────────────────────────────────────
 
 class KickstartCreate(BaseModel):

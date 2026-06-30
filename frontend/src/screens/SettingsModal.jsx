@@ -22,6 +22,8 @@ export default function SettingsModal({ screens, order, hidden, themeId, currenc
   const [pendingTheme, setPendingTheme] = useState(themeId);
   const [musicUrl, setMusicUrl] = useState("");
   const [musicSaved, setMusicSaved] = useState(false);
+  const [capital, setCapital] = useState("");
+  const [capitalSaved, setCapitalSaved] = useState(false);
   const isMobile = useIsMobile();
 
   // Reminder ticker editor state
@@ -47,6 +49,13 @@ export default function SettingsModal({ screens, order, hidden, themeId, currenc
   const saveMusic = () => {
     api.setSetting("golden_music", musicUrl.trim())
       .then(() => { setMusicSaved(true); setTimeout(() => setMusicSaved(false), 1500); })
+      .catch(() => {});
+  };
+
+  useEffect(() => { api.getSetting("trading_capital").then((r) => setCapital(r?.value || "")).catch(() => {}); }, []);
+  const saveCapital = () => {
+    api.setSetting("trading_capital", String(parseFloat(capital) || 0))
+      .then(() => { setCapitalSaved(true); setTimeout(() => setCapitalSaved(false), 1500); })
       .catch(() => {});
   };
 
@@ -159,6 +168,13 @@ export default function SettingsModal({ screens, order, hidden, themeId, currenc
                   <option key={d} value={d}>{d === 1 ? "1st (calendar month)" : `${d}${ordinal(d)}`}</option>
                 ))}
               </select>
+
+              <div style={S.subDivider} />
+              <div style={S.fieldLbl}>Trading capital</div>
+              <p style={S.hint}>Your starting capital for the <b>Trading Journal</b>. The page shows this plus your all-time net P/L — green when in profit, red when below.</p>
+              <input type="number" value={capital} onChange={(e) => setCapital(e.target.value)}
+                placeholder="e.g. 100000" style={S.musicInput} />
+              <button onClick={saveCapital} style={S.saveBtn}><Check size={15} /> {capitalSaved ? "Saved" : "Save capital"}</button>
             </>
           ) : tab === "music" ? (
             <>

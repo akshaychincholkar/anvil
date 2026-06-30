@@ -469,6 +469,33 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
+        -- Trading Journal: per-day learning + reflection (one row per date).
+        CREATE TABLE IF NOT EXISTS trade_day (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            trade_date TEXT NOT NULL,
+            learning TEXT NOT NULL DEFAULT '',
+            deleted_at TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, trade_date)
+        );
+
+        -- Individual trades within a day: kind = swing | fno | intraday.
+        CREATE TABLE IF NOT EXISTS trade_entry (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            trade_date TEXT NOT NULL,
+            kind TEXT NOT NULL DEFAULT 'swing',
+            instrument TEXT NOT NULL DEFAULT '',   -- what was traded
+            pl REAL NOT NULL DEFAULT 0,            -- profit (+) or loss (-) for this trade
+            sl TEXT NOT NULL DEFAULT '',           -- stop loss
+            tgt TEXT NOT NULL DEFAULT '',          -- target
+            note TEXT NOT NULL DEFAULT '',
+            deleted_at TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_trade_entry_user_date ON trade_entry (user_id, trade_date);
+
         -- Wallet: investment holdings (asset generation) — invested vs current value.
         CREATE TABLE IF NOT EXISTS investment (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

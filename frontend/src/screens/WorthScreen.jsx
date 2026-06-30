@@ -17,7 +17,7 @@ const SCREEN_LIST = [
   { id: "affirmations", label: "Affirmations" }, { id: "skills", label: "Skills" },
   { id: "spiritual", label: "Spiritual" }, { id: "mindscape", label: "Mindscape" },
   { id: "vault", label: "Wallet" }, { id: "expenses", label: "Expenses" },
-  { id: "delight", label: "Delights" },
+  { id: "trading", label: "Trading Journal" }, { id: "delight", label: "Delights" },
 ];
 // Screens that never earn a usage reward (Rewards itself + Achievements, which
 // has its own dedicated reward type set from the Achievements section).

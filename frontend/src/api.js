@@ -117,6 +117,13 @@ export const api = {
   deleteExpenseLog: (id) => req("DELETE", `/expenses/logs/${id}`),
   restoreExpenseLog: (id) => req("POST", `/expenses/logs/${id}/restore`),
 
+  // Trading Journal
+  getTrades: () => req("GET", "/trades"),
+  createTradeEntry: (data) => req("POST", "/trades/entries", data),
+  updateTradeEntry: (id, data) => req("PUT", `/trades/entries/${id}`, data),
+  deleteTradeEntry: (id) => req("DELETE", `/trades/entries/${id}`),
+  setTradeLearning: (date, learning) => req("PUT", "/trades/learning", { date, learning }),
+
   // Per-user settings (key/value)
   getSetting: (key) => req("GET", `/settings/${key}`),
   setSetting: (key, value) => req("PUT", `/settings/${key}`, { value }),
