@@ -60,6 +60,8 @@ def migrate_db():
         # JSON list of {id, label} on the skill; each grouped note carries the group id.
         add_col("skill", "data_groups", "TEXT NOT NULL DEFAULT '[]'")
         add_col("skill_note", "grp", "TEXT")
+        # optional source link (route to the video / article) for a skill
+        add_col("skill", "link", "TEXT NOT NULL DEFAULT ''")
 
         # multi-user auth columns
         add_col("user", "email", "TEXT")
@@ -100,6 +102,29 @@ def migrate_db():
                 )
             """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_tesla369_log_goal_date ON tesla369_log (goal_id, log_date)")
+
+        # Trading Journal: open→book model. A trade starts 'open' on its
+        # purchase_date, then is booked as profit/loss on an outcome date (which
+        # becomes trade_date). P/L is auto-computed from entry/SL/TGT × qty.
+        te_cols = [r[1] for r in conn.execute("PRAGMA table_info(trade_entry)").fetchall()]
+        if te_cols:
+            add_col("trade_entry", "status", "TEXT NOT NULL DEFAULT 'booked'")
+            add_col("trade_entry", "purchase_date", "TEXT")
+            add_col("trade_entry", "entry_price", "REAL")
+            add_col("trade_entry", "sl_price", "REAL")
+            add_col("trade_entry", "tgt_price", "REAL")
+            add_col("trade_entry", "qty", "REAL")
+            add_col("trade_entry", "outcome", "TEXT")  # 'profit' | 'loss' | NULL while open
+            # long vs short (short supported for FnO / Intraday). Older rows are long.
+            add_col("trade_entry", "direction", "TEXT NOT NULL DEFAULT 'long'")
+            # Backfill: pre-existing rows are already-closed trades. Anchor their
+            # purchase_date to trade_date so the open-trades box never shows them.
+            conn.execute("UPDATE trade_entry SET purchase_date=trade_date WHERE purchase_date IS NULL")
+
+        # Expenses: category ordering (drag-to-arrange). Older DBs may lack it.
+        ec_cols = [r[1] for r in conn.execute("PRAGMA table_info(expense_category)").fetchall()]
+        if ec_cols:
+            add_col("expense_category", "position", "INTEGER NOT NULL DEFAULT 0")
 
 def init_db():
     with db() as conn:
@@ -222,6 +247,7 @@ def init_db():
             note_k TEXT NOT NULL DEFAULT '',
             note_w TEXT NOT NULL DEFAULT '',
             completed_stages TEXT NOT NULL DEFAULT '{}',
+            link TEXT NOT NULL DEFAULT '',
             deleted_at TEXT
         );
 
@@ -536,6 +562,43 @@ def init_db():
             investment_id INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(fixed_item_id, cycle_start)
+        );
+
+        -- Challenges: small money-goal steps toward success. Completing one
+        -- (completed >= target, before end_date) banks its reward_cost into the
+        -- "Challenge Rewards" reward type. allow_negative lets progress go below
+        -- zero (e.g. a trading challenge showing a running loss in red).
+        CREATE TABLE IF NOT EXISTS challenge (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            name TEXT NOT NULL,
+            completed REAL NOT NULL DEFAULT 0,
+            target REAL NOT NULL DEFAULT 0,
+            end_date TEXT,                          -- YYYY-MM-DD; past & incomplete => failed
+            reward TEXT NOT NULL DEFAULT '',        -- label of the treat
+            reward_cost REAL NOT NULL DEFAULT 0,    -- money credited on completion
+            comment TEXT NOT NULL DEFAULT '',
+            allow_negative INTEGER NOT NULL DEFAULT 0,
+            position INTEGER NOT NULL DEFAULT 0,
+            deleted_at TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        -- Bucket list: materialistic wishes, ordered by priority (position).
+        -- A wish can be fulfilled from the Rewards "Take" flow, which deducts its
+        -- cost as a payout and stamps fulfilled_date.
+        CREATE TABLE IF NOT EXISTS bucket_wish (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            wish TEXT NOT NULL,
+            cost REAL NOT NULL DEFAULT 0,
+            note TEXT NOT NULL DEFAULT '',
+            link TEXT NOT NULL DEFAULT '',
+            fulfilled INTEGER NOT NULL DEFAULT 0,
+            fulfilled_date TEXT,
+            position INTEGER NOT NULL DEFAULT 0,
+            deleted_at TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         """)
 

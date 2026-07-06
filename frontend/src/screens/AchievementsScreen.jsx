@@ -34,27 +34,119 @@ const prettyDate = (s) => {
 };
 const yearOf = (s) => (s || "").slice(0, 4);
 
-// Downscale a picked image to a compact JPEG data URL.
-const fileToDataUrl = (file) => new Promise((resolve, reject) => {
+// Read a picked file into a data URL (no resizing — the cropper handles output).
+const fileToRawUrl = (file) => new Promise((resolve, reject) => {
   const reader = new FileReader();
-  reader.onload = () => {
-    const img = new Image();
-    img.onload = () => {
-      const max = 1000;
-      let { width, height } = img;
-      if (width > height && width > max) { height = (height * max) / width; width = max; }
-      else if (height > max) { width = (width * max) / height; height = max; }
-      const canvas = document.createElement("canvas");
-      canvas.width = width; canvas.height = height;
-      canvas.getContext("2d").drawImage(img, 0, 0, width, height);
-      resolve(canvas.toDataURL("image/jpeg", 0.82));
-    };
-    img.onerror = reject;
-    img.src = reader.result;
-  };
+  reader.onload = () => resolve(reader.result);
   reader.onerror = reject;
   reader.readAsDataURL(file);
 });
+
+// Downscale a data URL (preserving aspect ratio) to a compact JPEG data URL.
+const downscaleDataUrl = (dataUrl, max = 1000) => new Promise((resolve, reject) => {
+  const img = new Image();
+  img.onload = () => {
+    let { width, height } = img;
+    if (width > height && width > max) { height = (height * max) / width; width = max; }
+    else if (height > max) { width = (width * max) / height; height = max; }
+    const canvas = document.createElement("canvas");
+    canvas.width = width; canvas.height = height;
+    canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+    resolve(canvas.toDataURL("image/jpeg", 0.82));
+  };
+  img.onerror = reject;
+  img.src = dataUrl;
+});
+
+// Square-crop dialog: pan (drag) + zoom (slider) inside a 1:1 frame, then export
+// a centered square JPEG data URL. Works with mouse and touch.
+function SquareCropper({ src, onCancel, onCrop, onKeepOriginal }) {
+  const FRAME = 300;            // on-screen square viewport size
+  const OUT = 700;             // exported square size (px)
+  const [img, setImg] = useState(null);
+  const [zoom, setZoom] = useState(1);
+  const [pos, setPos] = useState({ x: 0, y: 0 }); // top-left offset of the image within the frame
+  const drag = useRef(null);
+
+  // Load the image and fit it to cover the frame initially (centered).
+  useEffect(() => {
+    const i = new Image();
+    i.onload = () => {
+      setImg(i);
+      const base = Math.max(FRAME / i.width, FRAME / i.height); // cover
+      setZoom(1);
+      i._base = base;
+      const w = i.width * base, h = i.height * base;
+      setPos({ x: (FRAME - w) / 2, y: (FRAME - h) / 2 });
+    };
+    i.src = src;
+  }, [src]);
+
+  const scale = img ? img._base * zoom : 1;
+  const drawW = img ? img.width * scale : 0;
+  const drawH = img ? img.height * scale : 0;
+
+  // Keep the image covering the frame (no gaps) after pan/zoom.
+  const clamp = (p, w, h) => ({
+    x: Math.min(0, Math.max(FRAME - w, p.x)),
+    y: Math.min(0, Math.max(FRAME - h, p.y)),
+  });
+
+  useEffect(() => { if (img) setPos((p) => clamp(p, drawW, drawH)); /* eslint-disable-next-line */ }, [zoom, img]);
+
+  const onDown = (e) => {
+    const pt = e.touches ? e.touches[0] : e;
+    drag.current = { sx: pt.clientX, sy: pt.clientY, ox: pos.x, oy: pos.y };
+  };
+  const onMove = (e) => {
+    if (!drag.current) return;
+    const pt = e.touches ? e.touches[0] : e;
+    const nx = drag.current.ox + (pt.clientX - drag.current.sx);
+    const ny = drag.current.oy + (pt.clientY - drag.current.sy);
+    setPos(clamp({ x: nx, y: ny }, drawW, drawH));
+  };
+  const onUp = () => { drag.current = null; };
+
+  const doCrop = () => {
+    if (!img) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = OUT; canvas.height = OUT;
+    const ctx = canvas.getContext("2d");
+    const k = OUT / FRAME; // map on-screen frame → output canvas
+    ctx.drawImage(img, pos.x * k, pos.y * k, drawW * k, drawH * k);
+    onCrop(canvas.toDataURL("image/jpeg", 0.85));
+  };
+
+  return (
+    <div style={CS.overlay} onClick={onCancel}>
+      <div style={CS.box} onClick={(e) => e.stopPropagation()}>
+        <div style={CS.head}>Crop to square<button onClick={onCancel} style={CS.close}><X size={16} /></button></div>
+        <div
+          style={{ ...CS.frame, width: FRAME, height: FRAME }}
+          onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp}
+          onTouchStart={onDown} onTouchMove={onMove} onTouchEnd={onUp}
+        >
+          {img && (
+            <img src={src} alt="" draggable={false}
+              style={{ position: "absolute", left: pos.x, top: pos.y, width: drawW, height: drawH, userSelect: "none", pointerEvents: "none" }} />
+          )}
+          <div style={CS.grid} />
+        </div>
+        <div style={CS.zoomRow}>
+          <span style={CS.zoomLbl}>Zoom</span>
+          <input type="range" min="1" max="3" step="0.01" value={zoom}
+            onChange={(e) => setZoom(parseFloat(e.target.value))} style={{ flex: 1 }} />
+        </div>
+        <div style={CS.hint}>Drag to reposition · slide to zoom</div>
+        <div style={CS.actions}>
+          <button onClick={onCancel} style={CS.cancel}>Cancel</button>
+          <button onClick={onKeepOriginal} style={CS.keep}>Keep original</button>
+          <button onClick={doCrop} style={CS.apply}><Check size={15} /> Square crop</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 const EMPTY = { id: null, title: "", date: todayLocal(), pillar: "", reward: "", image: "", note: "" };
 
@@ -66,6 +158,7 @@ export default function AchievementsScreen() {
   const [items, setItems] = useState([]);
   const [form, setForm] = useState(null); // null = closed; object = add/edit
   const [saving, setSaving] = useState(false);
+  const [cropSrc, setCropSrc] = useState(null); // raw image awaiting optional square crop
   const fileRef = useRef(null);
 
   const load = useCallback(() => { api.getAchievements().then(setItems).catch(() => {}); }, []);
@@ -84,9 +177,18 @@ export default function AchievementsScreen() {
   const pickImage = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    try { const url = await fileToDataUrl(file); setForm((f) => ({ ...f, image: url })); }
+    // Open the square-crop dialog on the raw image; the user can crop or keep original.
+    try { const raw = await fileToRawUrl(file); setCropSrc(raw); }
     catch { /* ignore */ }
     if (fileRef.current) fileRef.current.value = "";
+  };
+
+  // Keep the original (just downscale it, preserving aspect ratio).
+  const keepOriginal = async () => {
+    let url = cropSrc;
+    try { if (cropSrc) url = await downscaleDataUrl(cropSrc); } catch { /* use raw */ }
+    setForm((f) => ({ ...f, image: url }));
+    setCropSrc(null);
   };
 
   const canSave = form && form.title.trim() && form.date;
@@ -234,6 +336,15 @@ export default function AchievementsScreen() {
         </div>
       )}
 
+      {cropSrc && (
+        <SquareCropper
+          src={cropSrc}
+          onCancel={() => setCropSrc(null)}
+          onKeepOriginal={keepOriginal}
+          onCrop={(url) => { setForm((f) => ({ ...f, image: url })); setCropSrc(null); }}
+        />
+      )}
+
       <UndoToast toasts={toasts} onUndo={handleUndo} onDismiss={handleDismiss} />
     </div>
   );
@@ -309,4 +420,20 @@ const S = {
   modalActions: { display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 },
   cancelBtn: { border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-2)", padding: "9px 16px", borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
   saveBtn: { display: "flex", alignItems: "center", gap: 6, border: "none", background: "#4C9A6B", color: "#fff", padding: "9px 18px", borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" },
+};
+
+const CS = {
+  overlay: { position: "fixed", inset: 0, background: "rgba(38,36,31,0.62)", zIndex: 300, display: "grid", placeItems: "center", padding: 16 },
+  box: { background: "var(--surface)", borderRadius: 16, padding: "18px", boxShadow: "0 12px 48px rgba(0,0,0,0.3)", maxWidth: "92vw" },
+  head: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 15, fontWeight: 700, fontFamily: "'Fraunces',Georgia,serif", marginBottom: 12 },
+  close: { border: "none", background: "var(--hover)", color: "var(--text-2)", width: 28, height: 28, borderRadius: 8, cursor: "pointer", display: "grid", placeItems: "center" },
+  frame: { position: "relative", overflow: "hidden", borderRadius: 12, background: "#000", cursor: "grab", touchAction: "none", margin: "0 auto", maxWidth: "84vw" },
+  grid: { position: "absolute", inset: 0, pointerEvents: "none", boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.5)", backgroundImage: "linear-gradient(rgba(255,255,255,0.25) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.25) 1px, transparent 1px)", backgroundSize: "33.33% 33.33%" },
+  zoomRow: { display: "flex", alignItems: "center", gap: 10, marginTop: 14 },
+  zoomLbl: { fontSize: 12, fontWeight: 700, color: "var(--text-2)" },
+  hint: { fontSize: 11, color: "var(--text-3)", textAlign: "center", marginTop: 8 },
+  actions: { display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14, flexWrap: "wrap" },
+  cancel: { border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-2)", padding: "9px 14px", borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
+  keep: { border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-2)", padding: "9px 14px", borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
+  apply: { display: "flex", alignItems: "center", gap: 6, border: "none", background: "var(--accent-strong)", color: "#fff", padding: "9px 16px", borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" },
 };

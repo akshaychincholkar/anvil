@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { BookOpen, Youtube, FileText, Plus, X, Check, Trophy, ArrowRight, Sparkles, Lock, Pencil, ChevronLeft, ChevronDown, ChevronRight, Lightbulb } from "lucide-react";
+import { BookOpen, Youtube, FileText, Plus, X, Check, Trophy, ArrowRight, Sparkles, Lock, Pencil, ChevronLeft, ChevronDown, ChevronRight, Lightbulb, ExternalLink, Link2 } from "lucide-react";
 import { api } from "../api.js";
 import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
 import UndoToast from "../components/UndoToast.jsx";
@@ -37,7 +37,8 @@ export default function SkillsScreen() {
   const [filter, setFilter] = useState("ALL");
   const [adding, setAdding] = useState(false);
   const [celebrated, setCelebrated] = useState(null);
-  const [newSkill, setNewSkill] = useState({ title: "", type: "book", pillar: "Academic", note: "" });
+  const [newSkill, setNewSkill] = useState({ title: "", type: "book", pillar: "Academic", note: "", link: "" });
+  const [editingLink, setEditingLink] = useState(null); // draft string or null
   const [noteDrafts, setNoteDrafts] = useState({});
   const [editingNote, setEditingNote] = useState(null); // { id, text }
   const [editingTitle, setEditingTitle] = useState(null); // draft string or null
@@ -146,11 +147,19 @@ export default function SkillsScreen() {
       pillar: newSkill.pillar,
       title: newSkill.title.trim(),
       source_type: newSkill.type,
+      link: newSkill.link.trim(),
       note_d: newSkill.note.trim(),
     });
     setAdding(false);
-    setNewSkill({ title: "", type: "book", pillar: "Academic", note: "" });
+    setNewSkill({ title: "", type: "book", pillar: "Academic", note: "", link: "" });
     setSelected(s.id);
+    load();
+  };
+
+  const saveLinkEdit = async () => {
+    if (!skill) return;
+    await api.updateSkill(skill.id, { link: (editingLink || "").trim() });
+    setEditingLink(null);
     load();
   };
 
@@ -222,6 +231,11 @@ export default function SkillsScreen() {
                   {Object.keys(PILLARS).map((p) => <option key={p}>{p}</option>)}
                 </select>
               </div>
+              <input placeholder={newSkill.type === "book" ? "Link (optional)" : `${srcInfo(newSkill.type).label} link (optional) — paste URL to route here`}
+                value={newSkill.link}
+                onChange={(e) => setNewSkill((n) => ({ ...n, link: e.target.value }))}
+                onKeyDown={(e) => e.key === "Enter" && createSkill()}
+                style={S.input} />
               <div style={S.addRow}>
                 <button onClick={createSkill} style={S.saveBtn}><Check size={14} /> Save</button>
                 <button onClick={() => setAdding(false)} style={S.cancelBtn}><X size={14} /> Cancel</button>
@@ -246,6 +260,12 @@ export default function SkillsScreen() {
                   </div>
                   <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
                     {isWisdom && <Sparkles size={14} color="#4C9A6B" />}
+                    {sk.link && (
+                      <a href={sk.link} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
+                        style={S.ghostBtn} title="Open source">
+                        <ExternalLink size={13} />
+                      </a>
+                    )}
                     <button onClick={(e) => { e.stopPropagation(); deleteSkill(sk.id, sk.title); }} style={S.ghostBtn}><X size={13} /></button>
                   </div>
                 </div>
@@ -302,6 +322,31 @@ export default function SkillsScreen() {
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <div style={S.detailTitle}>{skill.title}</div>
                     <button onClick={() => setEditingTitle(skill.title)} style={S.ghostBtn} title="Edit name"><Pencil size={13} /></button>
+                  </div>
+                )}
+
+                {/* Source link — open / add / edit */}
+                {editingLink !== null ? (
+                  <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 6 }}>
+                    <input autoFocus value={editingLink} placeholder="Paste the video / article URL"
+                      onChange={(e) => setEditingLink(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") saveLinkEdit(); if (e.key === "Escape") setEditingLink(null); }}
+                      style={{ ...S.input, marginBottom: 0, flex: 1 }} />
+                    <button onClick={saveLinkEdit} style={{ ...S.noteAddBtn, background: "#4C9A6B", width: 30, height: 30 }}><Check size={13} /></button>
+                    <button onClick={() => setEditingLink(null)} style={{ ...S.noteAddBtn, background: "var(--border)", color: "var(--text-2)", width: 30, height: 30 }}><X size={13} /></button>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+                    {skill.link ? (
+                      <>
+                        <a href={skill.link} target="_blank" rel="noreferrer" style={S.openLinkBtn}>
+                          <ExternalLink size={13} /> Open {srcInfo(skill.source_type).label.toLowerCase()}
+                        </a>
+                        <button onClick={() => setEditingLink(skill.link)} style={S.ghostBtn} title="Edit link"><Pencil size={12} /></button>
+                      </>
+                    ) : (
+                      <button onClick={() => setEditingLink("")} style={S.addLinkBtn}><Link2 size={12} /> Add link</button>
+                    )}
                   </div>
                 )}
               </div>
@@ -559,6 +604,8 @@ const S = {
   advanceBtn: { display: "flex", alignItems: "center", gap: 8, border: "none", color: "#fff", padding: "10px 16px", borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", width: "100%", justifyContent: "center" },
   wisdomDone: { display: "flex", alignItems: "center", gap: 8, justifyContent: "center", fontSize: 13.5, fontWeight: 700, color: "#4C9A6B", padding: 12, background: "rgba(76,154,107,0.08)", borderRadius: 10, marginTop: 4 },
   ghostBtn: { border: "none", background: "none", color: "var(--text-3)", cursor: "pointer", padding: 2, display: "grid", placeItems: "center" },
+  openLinkBtn: { display: "inline-flex", alignItems: "center", gap: 5, textDecoration: "none", border: "1px solid #3A7CA5", background: "rgba(58,124,165,0.10)", color: "#3A7CA5", fontSize: 12, fontWeight: 700, padding: "5px 11px", borderRadius: 8, fontFamily: "inherit", cursor: "pointer" },
+  addLinkBtn: { display: "inline-flex", alignItems: "center", gap: 5, border: "1px dashed var(--border)", background: "none", color: "var(--text-3)", fontSize: 12, fontWeight: 600, padding: "5px 11px", borderRadius: 8, fontFamily: "inherit", cursor: "pointer" },
   input: { border: "1px solid var(--border)", borderRadius: 8, padding: "9px 11px", fontSize: 13.5, fontFamily: "inherit", outline: "none", width: "100%", boxSizing: "border-box", marginBottom: 8 },
   select: { border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px", fontSize: 12.5, fontFamily: "inherit", flex: 1 },
   addRow: { display: "flex", gap: 8, marginBottom: 8 },

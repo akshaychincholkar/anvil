@@ -24,6 +24,10 @@ export default function SettingsModal({ screens, order, hidden, themeId, currenc
   const [musicSaved, setMusicSaved] = useState(false);
   const [capital, setCapital] = useState("");
   const [capitalSaved, setCapitalSaved] = useState(false);
+  const [riskPct, setRiskPct] = useState("");
+  const [rr, setRr] = useState("");
+  const [div, setDiv] = useState({ swing: "", fno: "", intraday: "" });
+  const [riskSaved, setRiskSaved] = useState(false);
   const isMobile = useIsMobile();
 
   // Reminder ticker editor state
@@ -57,6 +61,27 @@ export default function SettingsModal({ screens, order, hidden, themeId, currenc
     api.setSetting("trading_capital", String(parseFloat(capital) || 0))
       .then(() => { setCapitalSaved(true); setTimeout(() => setCapitalSaved(false), 1500); })
       .catch(() => {});
+  };
+
+  useEffect(() => {
+    api.getSetting("trading_risk_pct").then((r) => setRiskPct(r?.value ?? "")).catch(() => {});
+    api.getSetting("trading_rr").then((r) => setRr(r?.value ?? "")).catch(() => {});
+    api.getSetting("trading_diversification").then((r) => {
+      const v = r?.value || {};
+      setDiv({ swing: v.swing ?? "", fno: v.fno ?? "", intraday: v.intraday ?? "" });
+    }).catch(() => {});
+  }, []);
+  const saveRiskRules = () => {
+    const divPayload = {
+      swing: parseInt(div.swing, 10) || 0,
+      fno: parseInt(div.fno, 10) || 0,
+      intraday: parseInt(div.intraday, 10) || 0,
+    };
+    Promise.all([
+      api.setSetting("trading_risk_pct", parseFloat(riskPct) || 0),
+      api.setSetting("trading_rr", parseFloat(rr) || 0),
+      api.setSetting("trading_diversification", divPayload),
+    ]).then(() => { setRiskSaved(true); setTimeout(() => setRiskSaved(false), 1500); }).catch(() => {});
   };
 
   const pickTheme = (id) => { setPendingTheme(id); onPreviewTheme(id); };
@@ -103,7 +128,7 @@ export default function SettingsModal({ screens, order, hidden, themeId, currenc
             <Palette size={15} /> Themes
           </button>
           <button onClick={() => setTab("currency")} style={{ ...S.tab, ...(tab === "currency" ? S.tabOn : {}) }}>
-            <Coins size={15} /> Currency
+            <Coins size={15} /> Monetary
           </button>
           <button onClick={() => setTab("music")} style={{ ...S.tab, ...(tab === "music" ? S.tabOn : {}) }}>
             <Music size={15} /> Music
@@ -175,6 +200,35 @@ export default function SettingsModal({ screens, order, hidden, themeId, currenc
               <input type="number" value={capital} onChange={(e) => setCapital(e.target.value)}
                 placeholder="e.g. 100000" style={S.musicInput} />
               <button onClick={saveCapital} style={S.saveBtn}><Check size={15} /> {capitalSaved ? "Saved" : "Save capital"}</button>
+
+              <div style={S.subDivider} />
+              <div style={S.fieldLbl}>Trading discipline rules</div>
+              <p style={S.hint}>Guardrails enforced when opening a trade. A trade that breaks any rule can't be saved. Leave a field at 0 (or blank) to disable that rule.</p>
+
+              <label style={S.miniLbl}>Risk per trade (%)</label>
+              <p style={S.hint}>Max loss on any single trade as a percent of capital. e.g. 2% of 100000 caps loss at 2000 — quantity or SL that risks more is blocked.</p>
+              <input type="number" step="0.1" min="0" value={riskPct} onChange={(e) => setRiskPct(e.target.value)}
+                placeholder="e.g. 2" style={S.musicInput} />
+
+              <label style={S.miniLbl}>Risk : Reward (1 : R)</label>
+              <p style={S.hint}>Minimum reward multiple of risk. Enter 3 for 1:3 — if SL is 5 below entry, target must be at least 15 above entry.</p>
+              <input type="number" step="0.5" min="0" value={rr} onChange={(e) => setRr(e.target.value)}
+                placeholder="e.g. 3" style={S.musicInput} />
+
+              <label style={S.miniLbl}>Diversification (max open trades per section)</label>
+              <p style={S.hint}>Limits how many open trades you may hold per section, and caps each position's value at capital ÷ this number (e.g. 5 → max 20000 per trade on 100000 capital).</p>
+              <div style={S.divGrid}>
+                {[["swing", "Swing"], ["fno", "FnO"], ["intraday", "Intraday"]].map(([k, lbl]) => (
+                  <div key={k} style={S.divCell}>
+                    <span style={S.divLbl}>{lbl}</span>
+                    <input type="number" min="0" step="1" value={div[k]}
+                      onChange={(e) => setDiv((d) => ({ ...d, [k]: e.target.value }))}
+                      placeholder="0" style={S.divInput} />
+                  </div>
+                ))}
+              </div>
+
+              <button onClick={saveRiskRules} style={S.saveBtn}><Check size={15} /> {riskSaved ? "Saved" : "Save rules"}</button>
             </>
           ) : tab === "music" ? (
             <>
@@ -274,7 +328,12 @@ const S = {
   switch: { fontSize: 12, fontWeight: 700, color: "var(--text-3)", background: "var(--hover)", borderRadius: 20, padding: "3px 12px", minWidth: 44, textAlign: "center" },
   switchOn: { background: "var(--accent)", color: "#fff" },
   fieldLbl: { fontSize: 12, fontWeight: 700, color: "var(--text-2)", marginBottom: 7 },
+  miniLbl: { display: "block", fontSize: 11.5, fontWeight: 700, color: "var(--text)", margin: "12px 0 2px" },
   subDivider: { height: 1, background: "var(--border)", margin: "18px 0 14px" },
+  divGrid: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginBottom: 12 },
+  divCell: { display: "flex", flexDirection: "column", gap: 4 },
+  divLbl: { fontSize: 11, fontWeight: 700, color: "var(--text-3)" },
+  divInput: { width: "100%", boxSizing: "border-box", border: "1px solid var(--border)", borderRadius: 9, padding: "8px 10px", fontSize: 13.5, fontFamily: "inherit", color: "var(--text)", background: "var(--surface)", outline: "none" },
   addRowBtn: { display: "flex", alignItems: "center", justifyContent: "center", gap: 6, width: "100%", border: "1px dashed var(--border)", background: "none", color: "var(--text-2)", padding: "9px", borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
   sliderHead: { display: "flex", justifyContent: "space-between", alignItems: "baseline" },
   sliderVal: { fontSize: 12, fontWeight: 700, color: "var(--accent)" },

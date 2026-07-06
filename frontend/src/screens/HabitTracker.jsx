@@ -269,6 +269,8 @@ export default function HabitTracker() {
           ? <AllHabitsWeekly habits={activeHabits} dayAction={dayAction} logSet={logSet}
               onDelete={deleteHabit}
               onEdit={(h) => setEditingHabit(h)}
+              isMobile={isMobile}
+              onOpenHabit={pick}
               renderInline={renderInline} />
           : <SingleHabitMonthly habit={current} dayAction={dayAction} logSet={logSet}
               onDelete={() => deleteHabit(current.id, current.name)}
@@ -589,8 +591,11 @@ function RingStat({ pct, label, sub, color }) {
   );
 }
 
-function AllHabitsWeekly({ habits, dayAction, logSet, onDelete, onEdit, renderInline }) {
+function AllHabitsWeekly({ habits, dayAction, logSet, onDelete, onEdit, renderInline, isMobile, onOpenHabit }) {
   const [weekOffset, setWeekOffset] = useState(0);
+  // On mobile the name column collapses to a round avatar so the whole week
+  // fits; tapping an avatar expands just that habit's name inline.
+  const [expanded, setExpanded] = useState(null); // habit id, or null
   const weekDates = getWeekDates(weekOffset);
   const weekLabel = `${fmtShort(weekDates[0])} – ${fmtShort(weekDates[6])}${weekOffset === 0 ? " · This week" : ""}`;
 
@@ -679,9 +684,9 @@ function AllHabitsWeekly({ habits, dayAction, logSet, onDelete, onEdit, renderIn
         <button onClick={() => setWeekOffset((o) => Math.min(0, o + 1))} disabled={weekOffset >= 0}
           style={{ ...S.navBtn, ...(weekOffset >= 0 ? S.navBtnDisabled : {}) }}><ChevronRight size={16} /></button>
       </div>
-      <div style={S.weekCard}>
-        <div style={S.weekHeadRow}>
-          <div style={S.weekNameCol} />
+      <div style={{ ...S.weekCard, ...(isMobile ? S.weekCardMobile : {}) }}>
+        <div style={{ ...S.weekHeadRow, ...(isMobile ? S.weekRowMobile : {}) }}>
+          <div style={{ ...S.weekNameCol, ...(isMobile ? S.weekNameColMobile : {}) }} />
           {DAYS.map((d, i) => (
             <div key={d} style={S.weekDayHead}>
               <span style={S.weekDayName}>{d}</span>
@@ -690,7 +695,7 @@ function AllHabitsWeekly({ habits, dayAction, logSet, onDelete, onEdit, renderIn
               </span>
             </div>
           ))}
-          <div style={S.weekStreakCol}>Streak</div>
+          <div style={{ ...S.weekStreakCol, ...(isMobile ? S.weekStreakColMobile : {}) }}>{isMobile ? <Flame size={12} /> : "Streak"}</div>
         </div>
 
         {habits.map((h) => {
@@ -723,20 +728,42 @@ function AllHabitsWeekly({ habits, dayAction, logSet, onDelete, onEdit, renderIn
           const periodCount = h.period === "week" ? weekDone
             : h.period === "month" ? monthCount(weekDates[0].slice(0, 7))
             : h.period === "year" ? yearCount(weekDates[0].slice(0, 4)) : 0;
+          const isExpanded = expanded === h.id;
           return (
             <Fragment key={h.id}>
-            <div style={S.weekRow}>
-              <div style={{ ...S.weekNameCol, flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <span style={{ ...S.sideDot, background: c }} />
-                  <span style={S.weekHabitName}>{h.name}</span>
+            {/* Mobile: expanded habit shows its full name in a slim banner above the row */}
+            {isMobile && isExpanded && (
+              <button onClick={() => onOpenHabit && onOpenHabit(h.id)} style={{ ...S.mobileNameBanner, color: c }}>
+                <span style={{ ...S.sideDot, background: c }} />
+                <span style={S.mobileNameText}>{h.name}</span>
+                {h.type === "weekly"
+                  ? <span style={S.typeBadge}>{(h.days || []).map((i) => DAYS[i]).join("·") || "—"}</span>
+                  : h.type !== "regular"
+                  ? <span style={S.typeBadge}>{h.type === "minimum" ? `≥${h.target_count}/${h.period}` : `≤${h.target_count}/${h.period}`}</span>
+                  : null}
+              </button>
+            )}
+            <div style={{ ...S.weekRow, ...(isMobile ? S.weekRowMobile : {}) }}>
+              {isMobile ? (
+                <div style={{ ...S.weekNameCol, ...S.weekNameColMobile }}>
+                  <button onClick={() => setExpanded(isExpanded ? null : h.id)}
+                    style={{ ...S.habitAvatar, background: c }} title={h.name}>
+                    {(h.name || "?").trim().charAt(0).toUpperCase()}
+                  </button>
                 </div>
-                {h.type === "weekly" ? (
-                  <span style={S.typeBadge}>{(h.days || []).map((i) => DAYS[i]).join("·") || "—"}</span>
-                ) : h.type !== "regular" ? (
-                  <span style={S.typeBadge}>{h.type === "minimum" ? `≥${h.target_count}/${h.period}` : `≤${h.target_count}/${h.period}`}</span>
-                ) : null}
-              </div>
+              ) : (
+                <div style={{ ...S.weekNameCol, flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ ...S.sideDot, background: c }} />
+                    <span style={S.weekHabitName}>{h.name}</span>
+                  </div>
+                  {h.type === "weekly" ? (
+                    <span style={S.typeBadge}>{(h.days || []).map((i) => DAYS[i]).join("·") || "—"}</span>
+                  ) : h.type !== "regular" ? (
+                    <span style={S.typeBadge}>{h.type === "minimum" ? `≥${h.target_count}/${h.period}` : `≤${h.target_count}/${h.period}`}</span>
+                  ) : null}
+                </div>
+              )}
 
               {weekDates.map((dateStr, di) => {
                 if (isWeekly && !sched.has(di)) {
@@ -776,12 +803,12 @@ function AllHabitsWeekly({ habits, dayAction, logSet, onDelete, onEdit, renderIn
                   </div>
                 );
               })}
-              <div style={S.weekStreakCol}>
+              <div style={{ ...S.weekStreakCol, ...(isMobile ? S.weekStreakColMobile : {}) }}>
                 {wkRowAchieved
-                  ? <span style={{ ...S.streakPill, background: soft, color: c }}><Link2 size={12} /> {schedIdx.length}/{schedIdx.length}</span>
+                  ? <span style={{ ...S.streakPill, ...(isMobile ? S.streakPillMobile : {}), background: soft, color: c }}><Link2 size={12} /> {isMobile ? schedIdx.length : `${schedIdx.length}/${schedIdx.length}`}</span>
                   : rowAchieved
-                  ? <span style={{ ...S.streakPill, background: soft, color: c }}><Link2 size={12} /> {periodCount}/{target}</span>
-                  : <span style={{ ...S.streakPill, background: soft, color: c }}><Flame size={12} /> {h.streak}</span>}
+                  ? <span style={{ ...S.streakPill, ...(isMobile ? S.streakPillMobile : {}), background: soft, color: c }}><Link2 size={12} /> {isMobile ? periodCount : `${periodCount}/${target}`}</span>
+                  : <span style={{ ...S.streakPill, ...(isMobile ? S.streakPillMobile : {}), background: soft, color: c }}><Flame size={12} /> {h.streak}</span>}
               </div>
             </div>
             {renderInline && renderInline(h)}
@@ -1167,8 +1194,17 @@ const S = {
   ringLabel: { fontSize: 14, fontWeight: 700, color: "var(--text)" },
   ringSub: { fontSize: 11.5, color: "var(--text-3)", fontWeight: 500, marginTop: 2 },
   weekCard: { background: "var(--surface)", borderRadius: 12, padding: "8px 14px 14px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", overflowX: "auto" },
+  weekCardMobile: { padding: "8px 8px 12px", overflowX: "hidden" },
   weekHeadRow: { display: "flex", alignItems: "flex-end", padding: "10px 0", borderBottom: "1px solid var(--border)", minWidth: 480, position: "relative", zIndex: 0 },
+  weekRowMobile: { minWidth: 0 }, // let the week fill the screen instead of scrolling
   weekNameCol: { width: 160, flexShrink: 0, alignSelf: "stretch", display: "flex", alignItems: "center", gap: 8, position: "sticky", left: 0, zIndex: 5, background: "var(--surface)", boxShadow: "6px 0 6px -6px rgba(0,0,0,0.15)" },
+  weekNameColMobile: { width: 34, gap: 0, boxShadow: "none", justifyContent: "center", position: "static" },
+  weekStreakColMobile: { width: 30 },
+  streakPillMobile: { padding: "3px 6px", gap: 2 },
+  // Round avatar standing in for the habit name on mobile (tap to expand).
+  habitAvatar: { width: 26, height: 26, borderRadius: "50%", border: "none", color: "#fff", fontSize: 12, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif", cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0, lineHeight: 1 },
+  mobileNameBanner: { display: "flex", alignItems: "center", gap: 7, width: "100%", border: "none", background: "var(--hover)", borderRadius: 8, padding: "6px 10px", margin: "4px 0 2px", cursor: "pointer", fontFamily: "inherit", textAlign: "left" },
+  mobileNameText: { fontSize: 13, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
   weekDayHead: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 },
   weekDayName: { fontSize: 10, fontWeight: 600, color: "var(--text-3)", textTransform: "uppercase" },
   weekDayNum: { fontSize: 12, fontWeight: 600, color: "var(--text-2)", width: 22, height: 22, display: "grid", placeItems: "center", borderRadius: "50%" },

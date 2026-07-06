@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import {
   LayoutGrid, Target, CheckSquare, BookOpen,
   GraduationCap, Star, RotateCcw, Menu, X,
-  Sparkles, LogOut, Trees, IndianRupee, Settings, Landmark, Rocket, Crown, Headphones, Trophy, PartyPopper, Wallet, ReceiptText, LayoutDashboard, CandlestickChart
+  Sparkles, LogOut, Trees, IndianRupee, Settings, Landmark, Rocket, Crown, Headphones, Trophy, PartyPopper, Wallet, ReceiptText, LayoutDashboard, CandlestickChart, Swords, ListChecks
 } from "lucide-react";
 import DashboardScreen from "./screens/DashboardScreen.jsx";
 import QuadrantView from "./screens/QuadrantView.jsx";
@@ -23,6 +23,8 @@ import MindscapeScreen from "./screens/MindscapeScreen.jsx";
 import AchievementsScreen from "./screens/AchievementsScreen.jsx";
 import DelightScreen from "./screens/DelightScreen.jsx";
 import ExpensesScreen from "./screens/ExpensesScreen.jsx";
+import ChallengesScreen from "./screens/ChallengesScreen.jsx";
+import BucketListScreen from "./screens/BucketListScreen.jsx";
 import TradingJournalScreen from "./screens/TradingJournalScreen.jsx";
 import SettingsModal from "./screens/SettingsModal.jsx";
 import Ticker from "./components/Ticker.jsx";
@@ -57,13 +59,15 @@ const SCREENS = {
   spiritual:    { label: "Spiritual",    icon: Star,          component: SpiritualScreen },
   mindscape:    { label: "Mindscape",    icon: Headphones,    component: MindscapeScreen },
   achievements: { label: "Achievements", icon: Trophy,        component: AchievementsScreen },
+  challenges:   { label: "Challenges",   icon: Swords,        component: ChallengesScreen },
+  bucket:       { label: "Bucket List",  icon: ListChecks,    component: BucketListScreen },
   delight:      { label: "Delights",     icon: PartyPopper,   component: DelightScreen },
 };
 
 // Default sidebar order (flat items). Users can reorder/hide via Settings.
 const DEFAULT_ORDER = [
   "dashboard", "kickstart", "golden", "habits", "quadrant", "goals", "grove", "journal",
-  "revision", "affirmations", "skills", "spiritual", "mindscape", "achievements", "delight", "worth", "vault", "expenses", "trading",
+  "revision", "affirmations", "skills", "spiritual", "mindscape", "achievements", "challenges", "bucket", "delight", "worth", "vault", "expenses", "trading",
 ];
 
 // Merge a saved order with the registry so newly-added screens always appear,

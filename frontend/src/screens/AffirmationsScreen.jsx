@@ -1,23 +1,55 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Star, Quote, ChevronLeft, ChevronRight } from "lucide-react";
 import { AFFIRMATION_TABS } from "./spiritual/affirmationsData.js";
+import { api } from "../api.js";
 
 // A calm rotating palette, one colour per category.
 const PALETTE = ["#3A7CA5", "#4C9A6B", "#C2773B", "#8268B0", "#C2536B", "#C9A227", "#3A7CA5", "#4C9A6B"];
 const catColor = (i) => PALETTE[i % PALETTE.length];
 const soft = (hex) => hex + "1A";
 
-const FAV_KEY = "anvil_affirmation_favs";
-const loadFavs = () => {
-  try { return new Set(JSON.parse(localStorage.getItem(FAV_KEY) || "[]")); } catch { return new Set(); }
+// Per-user setting key on the backend (syncs across devices). The same string
+// is reused for a localStorage cache so favorites appear instantly / offline.
+const FAV_KEY = "affirmation_favs";
+const LOCAL_KEY = "anvil_affirmation_favs"; // legacy local-only store to migrate from
+const loadLocalFavs = () => {
+  try { return JSON.parse(localStorage.getItem(FAV_KEY) || localStorage.getItem(LOCAL_KEY) || "[]"); }
+  catch { return []; }
 };
 
 export default function AffirmationsScreen() {
   const [tab, setTab] = useState(0);       // category index, or "FAV"
   const [index, setIndex] = useState(0);   // current card within the section
-  const [favs, setFavs] = useState(loadFavs);
+  const [favs, setFavs] = useState(() => new Set(loadLocalFavs()));
+  const hydrated = useRef(false); // guard so the initial server load doesn't re-push
 
-  useEffect(() => { localStorage.setItem(FAV_KEY, JSON.stringify([...favs])); }, [favs]);
+  // On mount, pull the authoritative favorites from the backend. The server is
+  // the source of truth so every device shows the same list. The only exception
+  // is the first-ever sync: if the server has nothing stored yet but this device
+  // has legacy local favorites, seed the server from them (one-time migration).
+  useEffect(() => {
+    let cancelled = false;
+    api.getSetting(FAV_KEY).then((r) => {
+      if (cancelled) return;
+      if (Array.isArray(r?.value)) {
+        setFavs(new Set(r.value));           // server is authoritative
+      } else {
+        const local = loadLocalFavs();       // nothing on the server yet
+        if (local.length) api.setSetting(FAV_KEY, local).catch(() => {});
+        setFavs(new Set(local));
+      }
+      hydrated.current = true;
+    }).catch(() => { hydrated.current = true; });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Persist every change to both the backend (cross-device) and localStorage
+  // (instant/offline). Skip the very first render before the server has loaded
+  // so we don't clobber the server with a stale local-only set.
+  useEffect(() => {
+    localStorage.setItem(FAV_KEY, JSON.stringify([...favs]));
+    if (hydrated.current) api.setSetting(FAV_KEY, [...favs]).catch(() => {});
+  }, [favs]);
 
   const keyOf = (title, card) => `${title}#${card.id}`;
 

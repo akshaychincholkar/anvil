@@ -12,7 +12,7 @@ import base64
 import time
 import calendar
 from contextvars import ContextVar
-from datetime import date, timedelta, datetime
+from datetime import date, timedelta, datetime, timezone
 
 from database import db, init_db
 
@@ -896,6 +896,7 @@ class SkillCreate(BaseModel):
     pillar: str
     title: str
     source_type: str
+    link: str = ""
 
 class SkillNoteCreate(BaseModel):
     text: str
@@ -910,7 +911,7 @@ class StageComplete(BaseModel):
 
 def _skill_full(conn, skill_id: int) -> dict:
     row = conn.execute(f"""
-        SELECT s.id, p.name AS pillar, s.title, s.source_type, s.stage, s.completed_stages, s.data_groups
+        SELECT s.id, p.name AS pillar, s.title, s.source_type, s.stage, s.completed_stages, s.data_groups, s.link
         FROM skill s JOIN pillar p ON s.pillar_id=p.id
         WHERE s.id=? AND s.user_id={cu()} AND s.deleted_at IS NULL
     """, (skill_id,)).fetchone()
@@ -948,8 +949,8 @@ def create_skill(body: SkillCreate):
     with db() as conn:
         pid = pillar_id(conn, body.pillar)
         cur = conn.execute(
-            f"INSERT INTO skill (user_id,pillar_id,title,source_type,stage,completed_stages) VALUES ({cu()},?,?,?,'D','{{}}')",
-            (pid, body.title, body.source_type)
+            f"INSERT INTO skill (user_id,pillar_id,title,source_type,stage,completed_stages,link) VALUES ({cu()},?,?,?,'D','{{}}',?)",
+            (pid, body.title, body.source_type, (body.link or "").strip())
         )
         return _skill_full(conn, cur.lastrowid)
 
@@ -962,6 +963,8 @@ def update_skill(skill_id: int, body: dict):
             title = (body["title"] or "").strip()
             if title:
                 conn.execute(f"UPDATE skill SET title=? WHERE id=? AND user_id={cu()}", (title, skill_id))
+        if "link" in body:
+            conn.execute(f"UPDATE skill SET link=? WHERE id=? AND user_id={cu()}", ((body["link"] or "").strip(), skill_id))
         return _skill_full(conn, skill_id)
 
 @app.delete("/api/skills/{skill_id}", status_code=204)
@@ -1699,6 +1702,30 @@ def get_expenses():
             "logs": [{"id": l["id"], "category_id": l["category_id"], "amount": l["amount"], "note": l["note"], "date": l["log_date"]} for l in logs],
         }
 
+class ExpenseCategoryArrange(BaseModel):
+    order: list  # ordered list of category ids
+
+# NOTE: declared before the `/{cid}` routes so "arrange" isn't captured as {cid}.
+@app.put("/api/expenses/categories/arrange")
+def arrange_expense_categories(body: ExpenseCategoryArrange):
+    """Persist a new left-to-right ordering of the user's expense categories."""
+    with db() as conn:
+        owned = {r["id"] for r in conn.execute(
+            f"SELECT id FROM expense_category WHERE user_id={cu()} AND deleted_at IS NULL"
+        ).fetchall()}
+        pos = 0
+        for cid in (body.order or []):
+            try:
+                cid = int(cid)
+            except (TypeError, ValueError):
+                continue
+            if cid in owned:
+                conn.execute(
+                    f"UPDATE expense_category SET position=? WHERE id=? AND user_id={cu()}", (pos, cid)
+                )
+                pos += 1
+        return {"ok": True}
+
 @app.post("/api/expenses/categories", status_code=201)
 def create_expense_category(body: ExpenseCategoryCreate):
     name = body.name.strip()
@@ -1806,46 +1833,190 @@ def restore_expense_log(lid: int):
 # own P/L and SL/TGT. A day with no trades can still hold a learning note.
 
 TRADE_KINDS = ("swing", "fno", "intraday")
+TRADE_DIRECTIONS = ("long", "short")
+# Short selling is only offered for FnO / Intraday; swing is always long.
+SHORTABLE_KINDS = ("fno", "intraday")
 
-class TradeEntryCreate(BaseModel):
-    date: str
+def _norm_direction(kind: str, direction: Optional[str]) -> str:
+    d = direction if direction in TRADE_DIRECTIONS else "long"
+    return d if kind in SHORTABLE_KINDS else "long"
+
+# Full column set (new price/qty model + legacy sl/tgt text kept for old rows).
+_TE_COLS = ("id, trade_date, kind, instrument, pl, sl, tgt, note, status, "
+            "purchase_date, entry_price, sl_price, tgt_price, qty, outcome, direction")
+
+class TradeOpenCreate(BaseModel):
+    """Open a new trade — no outcome yet. P/L is computed on booking."""
     kind: str = "swing"
+    direction: str = "long"
     instrument: str = ""
-    pl: float = 0
-    sl: str = ""
-    tgt: str = ""
+    purchase_date: str
+    entry_price: float = 0
+    sl_price: float = 0
+    tgt_price: float = 0
+    qty: float = 0
     note: str = ""
 
-class TradeEntryUpdate(BaseModel):
+class TradeOpenUpdate(BaseModel):
     kind: Optional[str] = None
+    direction: Optional[str] = None
     instrument: Optional[str] = None
-    pl: Optional[float] = None
-    sl: Optional[str] = None
-    tgt: Optional[str] = None
+    purchase_date: Optional[str] = None
+    entry_price: Optional[float] = None
+    sl_price: Optional[float] = None
+    tgt_price: Optional[float] = None
+    qty: Optional[float] = None
     note: Optional[str] = None
+
+class TradeBookBody(BaseModel):
+    outcome: str          # 'profit' | 'loss'
+    date: str             # outcome date (colours that calendar day)
 
 class TradeLearningBody(BaseModel):
     date: str
     learning: str = ""
 
+def _computed_pl(entry: float, sl: float, tgt: float, qty: float, outcome: str,
+                 direction: str = "long") -> float:
+    """Realized P/L from prices × qty.
+      • long:  target is above entry, SL below → profit=(TGT−entry)·qty,
+               loss=(SL−entry)·qty (negative).
+      • short: target is below entry, SL above → profit=(entry−TGT)·qty,
+               loss=(entry−SL)·qty (negative).
+    abs() keeps profit ≥0 / loss ≤0 regardless of how the prices were typed."""
+    q = qty or 0
+    if outcome == "profit":
+        return abs((tgt or 0) - (entry or 0)) * q
+    if outcome == "loss":
+        return -abs((sl or 0) - (entry or 0)) * q
+    return 0.0
+
+def _setting_float(conn, key: str, default: float = 0.0) -> float:
+    row = conn.execute(f"SELECT value FROM user_setting WHERE user_id={cu()} AND key=?", (key,)).fetchone()
+    if row and row["value"]:
+        try:
+            return float(json.loads(row["value"]))
+        except (ValueError, TypeError):
+            return default
+    return default
+
+def _trading_rules(conn) -> dict:
+    """Discipline rules from settings: capital, risk %, r:R, and per-section
+    diversification (max open trades / position-size divisor)."""
+    capital = _setting_float(conn, "trading_capital", 0.0)
+    risk_pct = _setting_float(conn, "trading_risk_pct", 0.0)
+    rr = _setting_float(conn, "trading_rr", 0.0)
+    div = {"swing": 0, "fno": 0, "intraday": 0}
+    row = conn.execute(f"SELECT value FROM user_setting WHERE user_id={cu()} AND key='trading_diversification'").fetchone()
+    if row and row["value"]:
+        try:
+            d = json.loads(row["value"]) or {}
+            for k in div:
+                div[k] = int(float(d.get(k) or 0))
+        except (ValueError, TypeError):
+            pass
+    return {"capital": capital, "risk_pct": risk_pct, "rr": rr, "diversification": div}
+
+def _validate_trade(conn, kind: str, entry: float, sl: float, tgt: float, qty: float,
+                    direction: str = "long", exclude_id: Optional[int] = None):
+    """Enforce trading discipline before opening/editing a trade. Raises 400 with
+    a human message on the first rule violated. Rules that need a setting are
+    skipped when that setting is unset (0)."""
+    entry = entry or 0
+    sl = sl or 0
+    tgt = tgt or 0
+    qty = qty or 0
+    if sl <= 0 or entry <= 0 or tgt <= 0 or qty <= 0:
+        raise HTTPException(400, "Entry, SL, target and quantity must all be greater than zero.")
+    # 1. SL / target position relative to entry (CMP) depends on the direction.
+    if direction == "short":
+        # Betting on a fall: SL sits above CMP, target below.
+        if sl <= entry:
+            raise HTTPException(400, "For a short, stop loss must be greater than the entry price (CMP).")
+        if tgt >= entry:
+            raise HTTPException(400, "For a short, target must be less than the entry price (CMP).")
+    else:
+        if sl >= entry:
+            raise HTTPException(400, "Stop loss must be less than the entry price (CMP).")
+        if tgt <= entry:
+            raise HTTPException(400, "Target must be greater than the entry price (CMP).")
+
+    rules = _trading_rules(conn)
+    capital = rules["capital"]
+    # Distances are magnitudes so the risk/reward maths is direction-agnostic.
+    risk_per_share = abs(entry - sl)
+    reward_per_share = abs(tgt - entry)
+
+    # 3. Risk : Reward ratio — reward per share ≥ RR × risk per share.
+    if rules["rr"] > 0 and reward_per_share < rules["rr"] * risk_per_share - 1e-9:
+        needed_reward = rules["rr"] * risk_per_share
+        need = round(entry - needed_reward if direction == "short" else entry + needed_reward, 2)
+        cmp_rel = "≤" if direction == "short" else "≥"
+        raise HTTPException(
+            400,
+            f"Risk:reward must be at least 1:{rules['rr']:g}. With SL {sl:g} "
+            f"(risk {risk_per_share:g}/share), target must be {cmp_rel} {need:g}."
+        )
+
+    # 5. Risk cap — max rupee loss ≤ capital × risk%.
+    if rules["risk_pct"] > 0 and capital > 0:
+        max_loss = capital * rules["risk_pct"] / 100.0
+        loss = risk_per_share * qty
+        if loss > max_loss + 1e-9:
+            raise HTTPException(
+                400,
+                f"This risks {loss:g} but your limit is {max_loss:g} "
+                f"({rules['risk_pct']:g}% of {capital:g}). Reduce quantity or tighten SL."
+            )
+
+    # 4 & 6. Diversification — position-size cap + max open trades per section.
+    n = rules["diversification"].get(kind, 0)
+    if n > 0:
+        if capital > 0:
+            max_value = capital / n
+            value = entry * qty
+            if value > max_value + 1e-9:
+                raise HTTPException(
+                    400,
+                    f"Position value {value:g} exceeds the diversification cap {max_value:g} "
+                    f"(capital {capital:g} ÷ {n}). Reduce quantity."
+                )
+        q = f"SELECT COUNT(*) c FROM trade_entry WHERE user_id={cu()} AND deleted_at IS NULL AND status='open' AND kind=?"
+        params = [kind]
+        if exclude_id is not None:
+            q += " AND id<>?"
+            params.append(exclude_id)
+        open_count = conn.execute(q, params).fetchone()["c"]
+        if open_count >= n:
+            raise HTTPException(
+                400,
+                f"You already have {open_count} open {kind} trade(s); diversification allows {n}. "
+                "Book or close one first."
+            )
+
 def _trade_entry_row(r) -> dict:
     return {
         "id": r["id"], "date": r["trade_date"], "kind": r["kind"], "instrument": r["instrument"],
         "pl": r["pl"], "sl": r["sl"], "tgt": r["tgt"], "note": r["note"],
+        "status": r["status"] or "booked",
+        "purchase_date": r["purchase_date"], "entry_price": r["entry_price"],
+        "sl_price": r["sl_price"], "tgt_price": r["tgt_price"], "qty": r["qty"],
+        "outcome": r["outcome"], "direction": r["direction"] or "long",
     }
 
 @app.get("/api/trades")
 def get_trades():
     with db() as conn:
         entries = conn.execute(
-            f"SELECT id, trade_date, kind, instrument, pl, sl, tgt, note FROM trade_entry "
+            f"SELECT {_TE_COLS} FROM trade_entry "
             f"WHERE user_id={cu()} AND deleted_at IS NULL ORDER BY trade_date DESC, id ASC"
         ).fetchall()
         days = conn.execute(
             f"SELECT trade_date, learning FROM trade_day WHERE user_id={cu()} AND deleted_at IS NULL"
         ).fetchall()
+        # Net P/L counts only booked trades; open trades carry no realized P/L.
         net = conn.execute(
-            f"SELECT COALESCE(SUM(pl),0) s FROM trade_entry WHERE user_id={cu()} AND deleted_at IS NULL"
+            f"SELECT COALESCE(SUM(pl),0) s FROM trade_entry WHERE user_id={cu()} AND deleted_at IS NULL AND status='booked'"
         ).fetchone()["s"]
         cap_row = conn.execute(f"SELECT value FROM user_setting WHERE user_id={cu()} AND key='trading_capital'").fetchone()
         capital = 0.0
@@ -1861,37 +2032,114 @@ def get_trades():
             "capital": capital,
             "net_pl": net,
             "current": capital + net,
+            "rules": _trading_rules(conn),
         }
 
 @app.post("/api/trades/entries", status_code=201)
-def create_trade_entry(body: TradeEntryCreate):
+def create_trade_entry(body: TradeOpenCreate):
+    """Create an OPEN trade. trade_date is initially the purchase date (so it
+    stays grouped sensibly); it moves to the outcome date when booked."""
     kind = body.kind if body.kind in TRADE_KINDS else "swing"
+    direction = _norm_direction(kind, body.direction)
     with db() as conn:
+        _validate_trade(conn, kind, body.entry_price, body.sl_price, body.tgt_price, body.qty, direction)
         cur = conn.execute(
-            f"INSERT INTO trade_entry (user_id, trade_date, kind, instrument, pl, sl, tgt, note) "
-            f"VALUES ({cu()}, ?, ?, ?, ?, ?, ?, ?)",
-            (body.date, kind, body.instrument.strip(), body.pl or 0, body.sl.strip(), body.tgt.strip(), body.note.strip())
+            f"INSERT INTO trade_entry (user_id, trade_date, kind, instrument, pl, sl, tgt, note, "
+            f"status, purchase_date, entry_price, sl_price, tgt_price, qty, outcome, direction) "
+            f"VALUES ({cu()}, ?, ?, ?, 0, '', '', ?, 'open', ?, ?, ?, ?, ?, NULL, ?)",
+            (body.purchase_date, kind, body.instrument.strip().upper(), body.note.strip(),
+             body.purchase_date, body.entry_price or 0, body.sl_price or 0, body.tgt_price or 0, body.qty or 0,
+             direction)
         )
-        r = conn.execute("SELECT id, trade_date, kind, instrument, pl, sl, tgt, note FROM trade_entry WHERE id=?", (cur.lastrowid,)).fetchone()
+        r = conn.execute(f"SELECT {_TE_COLS} FROM trade_entry WHERE id=?", (cur.lastrowid,)).fetchone()
         return _trade_entry_row(r)
 
 @app.put("/api/trades/entries/{eid}")
-def update_trade_entry(eid: int, body: TradeEntryUpdate):
+def update_trade_entry(eid: int, body: TradeOpenUpdate):
+    """Edit an open trade's details. If already booked, re-derives P/L from the
+    new prices/qty using its existing outcome."""
     with db() as conn:
-        own = conn.execute(f"SELECT id FROM trade_entry WHERE id=? AND user_id={cu()} AND deleted_at IS NULL", (eid,)).fetchone()
+        own = conn.execute(
+            f"SELECT {_TE_COLS} FROM trade_entry WHERE id=? AND user_id={cu()} AND deleted_at IS NULL", (eid,)
+        ).fetchone()
         if not own:
             raise HTTPException(404, "Trade not found")
         data = {k: v for k, v in body.dict().items() if v is not None}
         if "kind" in data and data["kind"] not in TRADE_KINDS:
             data["kind"] = "swing"
-        for s in ("instrument", "sl", "tgt", "note"):
-            if s in data and isinstance(data[s], str):
-                data[s] = data[s].strip()
+        if "instrument" in data:
+            data["instrument"] = data["instrument"].strip().upper()
+        if "note" in data:
+            data["note"] = data["note"].strip()
+        # Normalise direction against the (possibly new) kind — swing is long-only.
+        if "direction" in data or "kind" in data:
+            merged_kind = data.get("kind", own["kind"])
+            data["direction"] = _norm_direction(merged_kind, data.get("direction", own["direction"]))
+        # Re-validate discipline rules for OPEN trades using the merged values
+        # (booked trades are history — only their P/L is recomputed below).
+        if (own["status"] or "booked") == "open":
+            merged = {
+                "kind": data.get("kind", own["kind"]),
+                "direction": data.get("direction", own["direction"] or "long"),
+                "entry_price": data.get("entry_price", own["entry_price"]),
+                "sl_price": data.get("sl_price", own["sl_price"]),
+                "tgt_price": data.get("tgt_price", own["tgt_price"]),
+                "qty": data.get("qty", own["qty"]),
+            }
+            _validate_trade(conn, merged["kind"], merged["entry_price"], merged["sl_price"],
+                            merged["tgt_price"], merged["qty"], merged["direction"], exclude_id=eid)
         if data:
             sets = ", ".join(f"{k}=?" for k in data)
             conn.execute(f"UPDATE trade_entry SET {sets} WHERE id=?", (*data.values(), eid))
-        r = conn.execute("SELECT id, trade_date, kind, instrument, pl, sl, tgt, note FROM trade_entry WHERE id=?", (eid,)).fetchone()
-        return _trade_entry_row(r)
+        # Keep a booked trade's P/L consistent with any edited prices/qty.
+        cur = conn.execute(f"SELECT {_TE_COLS} FROM trade_entry WHERE id=?", (eid,)).fetchone()
+        if (cur["status"] or "booked") == "booked" and cur["outcome"] in ("profit", "loss"):
+            pl = _computed_pl(cur["entry_price"], cur["sl_price"], cur["tgt_price"], cur["qty"],
+                              cur["outcome"], cur["direction"] or "long")
+            conn.execute("UPDATE trade_entry SET pl=? WHERE id=?", (pl, eid))
+            cur = conn.execute(f"SELECT {_TE_COLS} FROM trade_entry WHERE id=?", (eid,)).fetchone()
+        return _trade_entry_row(cur)
+
+@app.post("/api/trades/entries/{eid}/book")
+def book_trade_entry(eid: int, body: TradeBookBody):
+    """Close an open trade as profit/loss on a chosen date. Auto-computes P/L
+    and moves the trade onto the outcome date (which is coloured green/red)."""
+    if body.outcome not in ("profit", "loss"):
+        raise HTTPException(400, "outcome must be 'profit' or 'loss'")
+    with db() as conn:
+        r = conn.execute(
+            f"SELECT {_TE_COLS} FROM trade_entry WHERE id=? AND user_id={cu()} AND deleted_at IS NULL", (eid,)
+        ).fetchone()
+        if not r:
+            raise HTTPException(404, "Trade not found")
+        # Intraday trades must be squared off the same day they were bought.
+        if r["kind"] == "intraday" and r["purchase_date"] and body.date != r["purchase_date"]:
+            raise HTTPException(400, "Intraday trades must be booked on their purchase day.")
+        pl = _computed_pl(r["entry_price"], r["sl_price"], r["tgt_price"], r["qty"],
+                          body.outcome, r["direction"] or "long")
+        conn.execute(
+            "UPDATE trade_entry SET status='booked', outcome=?, pl=?, trade_date=? WHERE id=?",
+            (body.outcome, pl, body.date, eid)
+        )
+        cur = conn.execute(f"SELECT {_TE_COLS} FROM trade_entry WHERE id=?", (eid,)).fetchone()
+        return _trade_entry_row(cur)
+
+@app.post("/api/trades/entries/{eid}/reopen")
+def reopen_trade_entry(eid: int):
+    """Undo a booking — return the trade to open (clears realized P/L, re-anchors
+    trade_date to the purchase date)."""
+    with db() as conn:
+        r = conn.execute(
+            f"SELECT purchase_date FROM trade_entry WHERE id=? AND user_id={cu()} AND deleted_at IS NULL", (eid,)
+        ).fetchone()
+        if not r:
+            raise HTTPException(404, "Trade not found")
+        conn.execute(
+            "UPDATE trade_entry SET status='open', outcome=NULL, pl=0, trade_date=COALESCE(purchase_date, trade_date) WHERE id=?",
+            (eid,)
+        )
+        cur = conn.execute(f"SELECT {_TE_COLS} FROM trade_entry WHERE id=?", (eid,)).fetchone()
+        return _trade_entry_row(cur)
 
 @app.delete("/api/trades/entries/{eid}", status_code=204)
 def delete_trade_entry(eid: int):
@@ -2176,10 +2424,25 @@ TESLA_TARGETS = {"morning": 3, "noon": 6, "night": 9}
 TESLA_TOTAL = sum(TESLA_TARGETS.values())  # 18
 TESLA_MIN_STREAK = 21
 
+# Default IST offset, used when the tz database isn't available (e.g. Windows
+# without `tzdata`). The 369 windows must follow the *user's* wall clock, not the
+# server's — production runs in UTC, so naive datetime.now() would misclassify.
+_DEFAULT_TZ = os.environ.get("ANVIL_TZ", "Asia/Kolkata")
+_FALLBACK_OFFSET = timedelta(hours=5, minutes=30)  # IST
+
+def _user_now() -> datetime:
+    """Current wall-clock time in the user's timezone (naive datetime)."""
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo(_DEFAULT_TZ)).replace(tzinfo=None)
+    except Exception:
+        # tz database unavailable — fall back to a fixed offset from UTC.
+        return (datetime.now(timezone.utc) + _FALLBACK_OFFSET).replace(tzinfo=None)
+
 def _tesla_window(now: Optional[datetime] = None) -> Optional[str]:
     """Map a wall-clock time to its 369 window, or None if outside all windows.
     Night spans 18:00–02:00, so 00:00–02:00 belongs to the *previous* day's night."""
-    h = (now or datetime.now()).hour
+    h = (now or _user_now()).hour
     if 6 <= h < 12:
         return "morning"
     if 12 <= h < 18:
@@ -2191,7 +2454,7 @@ def _tesla_window(now: Optional[datetime] = None) -> Optional[str]:
 def _tesla_log_date(now: Optional[datetime] = None) -> str:
     """The date a write belongs to. 00:00–02:00 counts toward the night that
     began the previous evening, so it rolls back a day."""
-    now = now or datetime.now()
+    now = now or _user_now()
     if now.hour < 2:
         return (now.date() - timedelta(days=1)).isoformat()
     return now.date().isoformat()
@@ -2429,7 +2692,7 @@ def get_achievements():
     with db() as conn:
         rows = conn.execute(
             f"SELECT {_ACH_COLS} FROM achievement WHERE user_id={cu()} AND deleted_at IS NULL "
-            "ORDER BY ach_date DESC, id DESC"
+            "ORDER BY ach_date ASC, id ASC"
         ).fetchall()
         return [_achievement_row(conn, r) for r in rows]
 
@@ -2934,6 +3197,270 @@ def delete_focus(session_id: int):
     with db() as conn:
         conn.execute(f"UPDATE focus_session SET deleted_at=? WHERE id=? AND user_id={cu()}",
                      (_now_iso(), session_id))
+
+
+# ── Challenges (small money-goal steps toward success) ───────────────────────
+# Each challenge tracks completed vs a target amount. Reaching the target on or
+# before its end_date completes it and banks reward_cost into the "Challenge
+# Rewards" reward type (see /api/challenges/rewards). allow_negative permits a
+# running loss (e.g. a trading challenge showing -35000 in red).
+
+class ChallengeCreate(BaseModel):
+    name: str
+    completed: float = 0
+    target: float = 0
+    end_date: Optional[str] = None
+    reward: str = ""
+    reward_cost: float = 0
+    comment: str = ""
+    allow_negative: bool = False
+
+class ChallengeUpdate(BaseModel):
+    name: Optional[str] = None
+    completed: Optional[float] = None
+    target: Optional[float] = None
+    end_date: Optional[str] = None
+    reward: Optional[str] = None
+    reward_cost: Optional[float] = None
+    comment: Optional[str] = None
+    allow_negative: Optional[bool] = None
+
+_CH_COLS = ("id, name, completed, target, end_date, reward, reward_cost, "
+            "comment, allow_negative, position")
+
+def _challenge_status(r) -> str:
+    """done → target reached; failed → past end_date without reaching target;
+    active → still in progress."""
+    if r["completed"] >= r["target"] and r["target"] > 0:
+        return "done"
+    if r["end_date"] and r["end_date"] < date.today().isoformat():
+        return "failed"
+    return "active"
+
+def _challenge_row(r) -> dict:
+    status = _challenge_status(r)
+    return {
+        "id": r["id"], "name": r["name"], "completed": r["completed"], "target": r["target"],
+        "remaining": max(0.0, (r["target"] or 0) - (r["completed"] or 0)),
+        "end_date": r["end_date"], "reward": r["reward"], "reward_cost": r["reward_cost"],
+        "comment": r["comment"], "allow_negative": bool(r["allow_negative"]),
+        "position": r["position"], "status": status,
+        # reward is banked only when the target is actually reached (not on failure)
+        "reward_earned": r["reward_cost"] if status == "done" else 0,
+    }
+
+@app.get("/api/challenges")
+def get_challenges():
+    with db() as conn:
+        rows = conn.execute(
+            f"SELECT {_CH_COLS} FROM challenge WHERE user_id={cu()} AND deleted_at IS NULL "
+            "ORDER BY position, id"
+        ).fetchall()
+        return [_challenge_row(r) for r in rows]
+
+@app.post("/api/challenges", status_code=201)
+def create_challenge(body: ChallengeCreate):
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(400, "name required")
+    with db() as conn:
+        pos = conn.execute(
+            f"SELECT COALESCE(MAX(position),-1)+1 p FROM challenge WHERE user_id={cu()}"
+        ).fetchone()["p"]
+        cur = conn.execute(
+            f"INSERT INTO challenge (user_id, name, completed, target, end_date, reward, "
+            f"reward_cost, comment, allow_negative, position) VALUES ({cu()},?,?,?,?,?,?,?,?,?)",
+            (name, body.completed or 0, body.target or 0, body.end_date,
+             (body.reward or "").strip(), max(0, body.reward_cost or 0), (body.comment or "").strip(),
+             1 if body.allow_negative else 0, pos)
+        )
+        r = conn.execute(f"SELECT {_CH_COLS} FROM challenge WHERE id=?", (cur.lastrowid,)).fetchone()
+        return _challenge_row(r)
+
+@app.put("/api/challenges/{cid}")
+def update_challenge(cid: int, body: ChallengeUpdate):
+    with db() as conn:
+        owned = conn.execute(
+            f"SELECT id FROM challenge WHERE id=? AND user_id={cu()} AND deleted_at IS NULL", (cid,)
+        ).fetchone()
+        if not owned:
+            raise HTTPException(404, "Challenge not found")
+        updates = {}
+        if body.name is not None and body.name.strip():
+            updates["name"] = body.name.strip()
+        if body.completed is not None:
+            updates["completed"] = body.completed
+        if body.target is not None:
+            updates["target"] = max(0, body.target)
+        if body.end_date is not None:
+            updates["end_date"] = body.end_date or None
+        if body.reward is not None:
+            updates["reward"] = body.reward.strip()
+        if body.reward_cost is not None:
+            updates["reward_cost"] = max(0, body.reward_cost)
+        if body.comment is not None:
+            updates["comment"] = body.comment.strip()
+        if body.allow_negative is not None:
+            updates["allow_negative"] = 1 if body.allow_negative else 0
+        # Progress can't dip below zero unless the challenge allows it.
+        allow_neg = updates.get("allow_negative",
+                                conn.execute("SELECT allow_negative FROM challenge WHERE id=?", (cid,)).fetchone()[0])
+        if "completed" in updates and not allow_neg and updates["completed"] < 0:
+            updates["completed"] = 0
+        if updates:
+            sets = ", ".join(f"{k}=?" for k in updates)
+            conn.execute(f"UPDATE challenge SET {sets} WHERE id=?", (*updates.values(), cid))
+        r = conn.execute(f"SELECT {_CH_COLS} FROM challenge WHERE id=?", (cid,)).fetchone()
+        return _challenge_row(r)
+
+@app.delete("/api/challenges/{cid}", status_code=204)
+def delete_challenge(cid: int):
+    with db() as conn:
+        _soft_delete(conn, "challenge", cid)
+
+@app.post("/api/challenges/{cid}/restore")
+def restore_challenge(cid: int):
+    with db() as conn:
+        _restore(conn, "challenge", cid)
+        r = conn.execute(f"SELECT {_CH_COLS} FROM challenge WHERE id=?", (cid,)).fetchone()
+        return _challenge_row(r) if r else {}
+
+
+# ── Bucket List (materialistic wishes, ordered by priority) ──────────────────
+# Wishes can be fulfilled from the Rewards "Take" flow, which deducts the wish's
+# cost as a payout and marks it fulfilled.
+
+class BucketWishCreate(BaseModel):
+    wish: str
+    cost: float = 0
+    note: str = ""
+    link: str = ""
+
+class BucketWishUpdate(BaseModel):
+    wish: Optional[str] = None
+    cost: Optional[float] = None
+    note: Optional[str] = None
+    link: Optional[str] = None
+    fulfilled: Optional[bool] = None
+
+class BucketArrange(BaseModel):
+    order: list  # ordered list of wish ids, top = highest priority
+
+_BW_COLS = "id, wish, cost, note, link, fulfilled, fulfilled_date, position"
+
+def _bucket_row(r) -> dict:
+    return {
+        "id": r["id"], "wish": r["wish"], "cost": r["cost"], "note": r["note"],
+        "link": r["link"], "fulfilled": bool(r["fulfilled"]),
+        "fulfilled_date": r["fulfilled_date"], "position": r["position"],
+    }
+
+@app.get("/api/bucket")
+def get_bucket():
+    with db() as conn:
+        rows = conn.execute(
+            f"SELECT {_BW_COLS} FROM bucket_wish WHERE user_id={cu()} AND deleted_at IS NULL "
+            "ORDER BY position, id"
+        ).fetchall()
+        return [_bucket_row(r) for r in rows]
+
+# NOTE: declared before the `/{wid}` routes so "arrange" isn't captured as {wid}.
+@app.put("/api/bucket/arrange")
+def arrange_bucket(body: BucketArrange):
+    """Persist a new priority ordering of the user's wishes (top = highest)."""
+    with db() as conn:
+        owned = {r["id"] for r in conn.execute(
+            f"SELECT id FROM bucket_wish WHERE user_id={cu()} AND deleted_at IS NULL"
+        ).fetchall()}
+        pos = 0
+        for wid in (body.order or []):
+            try:
+                wid = int(wid)
+            except (TypeError, ValueError):
+                continue
+            if wid in owned:
+                conn.execute(f"UPDATE bucket_wish SET position=? WHERE id=? AND user_id={cu()}", (pos, wid))
+                pos += 1
+        return {"ok": True}
+
+@app.post("/api/bucket", status_code=201)
+def create_bucket(body: BucketWishCreate):
+    wish = (body.wish or "").strip()
+    if not wish:
+        raise HTTPException(400, "wish required")
+    with db() as conn:
+        pos = conn.execute(
+            f"SELECT COALESCE(MAX(position),-1)+1 p FROM bucket_wish WHERE user_id={cu()}"
+        ).fetchone()["p"]
+        cur = conn.execute(
+            f"INSERT INTO bucket_wish (user_id, wish, cost, note, link, position) VALUES ({cu()},?,?,?,?,?)",
+            (wish, max(0, body.cost or 0), (body.note or "").strip(), (body.link or "").strip(), pos)
+        )
+        r = conn.execute(f"SELECT {_BW_COLS} FROM bucket_wish WHERE id=?", (cur.lastrowid,)).fetchone()
+        return _bucket_row(r)
+
+@app.put("/api/bucket/{wid}")
+def update_bucket(wid: int, body: BucketWishUpdate):
+    with db() as conn:
+        owned = conn.execute(
+            f"SELECT id FROM bucket_wish WHERE id=? AND user_id={cu()} AND deleted_at IS NULL", (wid,)
+        ).fetchone()
+        if not owned:
+            raise HTTPException(404, "Wish not found")
+        updates = {}
+        if body.wish is not None and body.wish.strip():
+            updates["wish"] = body.wish.strip()
+        if body.cost is not None:
+            updates["cost"] = max(0, body.cost)
+        if body.note is not None:
+            updates["note"] = body.note.strip()
+        if body.link is not None:
+            updates["link"] = body.link.strip()
+        if body.fulfilled is not None:
+            updates["fulfilled"] = 1 if body.fulfilled else 0
+            # Toggling fulfilled on/off stamps or clears the date accordingly.
+            updates["fulfilled_date"] = date.today().isoformat() if body.fulfilled else None
+        if updates:
+            sets = ", ".join(f"{k}=?" for k in updates)
+            conn.execute(f"UPDATE bucket_wish SET {sets} WHERE id=?", (*updates.values(), wid))
+        r = conn.execute(f"SELECT {_BW_COLS} FROM bucket_wish WHERE id=?", (wid,)).fetchone()
+        return _bucket_row(r)
+
+@app.post("/api/bucket/{wid}/fulfill")
+def fulfill_bucket(wid: int):
+    """Mark a wish fulfilled and record a reward payout equal to its cost. Returns
+    the created payout so the Rewards screen can refresh its ledger."""
+    with db() as conn:
+        r = conn.execute(
+            f"SELECT {_BW_COLS} FROM bucket_wish WHERE id=? AND user_id={cu()} AND deleted_at IS NULL", (wid,)
+        ).fetchone()
+        if not r:
+            raise HTTPException(404, "Wish not found")
+        if r["fulfilled"]:
+            raise HTTPException(400, "Wish already fulfilled")
+        today = str(date.today())
+        conn.execute(
+            "UPDATE bucket_wish SET fulfilled=1, fulfilled_date=? WHERE id=?", (today, wid)
+        )
+        pay = conn.execute(
+            f"INSERT INTO reward_payout (user_id, amount, note, pay_date) VALUES ({cu()}, ?, ?, ?)",
+            (max(0, r["cost"] or 0), r["wish"], today)
+        )
+        prow = conn.execute("SELECT id, amount, note, pay_date FROM reward_payout WHERE id=?", (pay.lastrowid,)).fetchone()
+        wrow = conn.execute(f"SELECT {_BW_COLS} FROM bucket_wish WHERE id=?", (wid,)).fetchone()
+        return {"wish": _bucket_row(wrow), "payout": _payout_row(prow)}
+
+@app.delete("/api/bucket/{wid}", status_code=204)
+def delete_bucket(wid: int):
+    with db() as conn:
+        _soft_delete(conn, "bucket_wish", wid)
+
+@app.post("/api/bucket/{wid}/restore")
+def restore_bucket(wid: int):
+    with db() as conn:
+        _restore(conn, "bucket_wish", wid)
+        r = conn.execute(f"SELECT {_BW_COLS} FROM bucket_wish WHERE id=?", (wid,)).fetchone()
+        return _bucket_row(r) if r else {}
 
 
 # ── Per-user settings (key/value JSON) ────────────────────────────────────────

@@ -111,16 +111,19 @@ export const api = {
   getExpenses: () => req("GET", "/expenses"),
   createExpenseCategory: (data) => req("POST", "/expenses/categories", data),
   updateExpenseCategory: (id, data) => req("PUT", `/expenses/categories/${id}`, data),
+  arrangeExpenseCategories: (order) => req("PUT", "/expenses/categories/arrange", { order }),
   deleteExpenseCategory: (id) => req("DELETE", `/expenses/categories/${id}`),
   createExpenseLog: (data) => req("POST", "/expenses/logs", data),
   updateExpenseLog: (id, data) => req("PUT", `/expenses/logs/${id}`, data),
   deleteExpenseLog: (id) => req("DELETE", `/expenses/logs/${id}`),
   restoreExpenseLog: (id) => req("POST", `/expenses/logs/${id}/restore`),
 
-  // Trading Journal
+  // Trading Journal (open → book flow; P/L auto-computed from prices × qty)
   getTrades: () => req("GET", "/trades"),
   createTradeEntry: (data) => req("POST", "/trades/entries", data),
   updateTradeEntry: (id, data) => req("PUT", `/trades/entries/${id}`, data),
+  bookTradeEntry: (id, outcome, date) => req("POST", `/trades/entries/${id}/book`, { outcome, date }),
+  reopenTradeEntry: (id) => req("POST", `/trades/entries/${id}/reopen`),
   deleteTradeEntry: (id) => req("DELETE", `/trades/entries/${id}`),
   setTradeLearning: (date, learning) => req("PUT", "/trades/learning", { date, learning }),
 
@@ -204,6 +207,22 @@ export const api = {
   updateAffirmation: (id, data) => req("PUT", `/affirmations/${id}`, data),
   deleteAffirmation: (id) => req("DELETE", `/affirmations/${id}`),
   restoreAffirmation: (id) => req("POST", `/affirmations/${id}/restore`),
+
+  // Bucket List (materialistic wishes, priority-ordered)
+  getBucket: () => req("GET", "/bucket"),
+  createBucketWish: (data) => req("POST", "/bucket", data),
+  updateBucketWish: (id, data) => req("PUT", `/bucket/${id}`, data),
+  fulfillBucketWish: (id) => req("POST", `/bucket/${id}/fulfill`),
+  arrangeBucket: (order) => req("PUT", "/bucket/arrange", { order }),
+  deleteBucketWish: (id) => req("DELETE", `/bucket/${id}`),
+  restoreBucketWish: (id) => req("POST", `/bucket/${id}/restore`),
+
+  // Challenges (money-goal steps toward success)
+  getChallenges: () => req("GET", "/challenges"),
+  createChallenge: (data) => req("POST", "/challenges", data),
+  updateChallenge: (id, data) => req("PUT", `/challenges/${id}`, data),
+  deleteChallenge: (id) => req("DELETE", `/challenges/${id}`),
+  restoreChallenge: (id) => req("POST", `/challenges/${id}/restore`),
 
   // Achievements
   getAchievements: () => req("GET", "/achievements"),

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Plus, X, Check, Pencil, ChevronLeft, ChevronRight, ReceiptText, Tag,
-  TrendingUp, TrendingDown, Minus,
+  TrendingUp, TrendingDown, Minus, ChevronUp, ChevronDown,
   Carrot, ShoppingCart, Clapperboard, ShoppingBag, Fuel, Sparkles, Shirt,
   WashingMachine, Zap, Tv, Droplet, Coffee, Utensils, Bus, Train, Plane,
   Home, Heart, Gift, Book, Dumbbell, Pill, Phone, Wifi, Gamepad2, Music,
@@ -29,6 +29,9 @@ const COLORS = ["#C9772E", "#4C9A6B", "#3A7CA5", "#8268B0", "#C2536B", "#C9A227"
 const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const TODAY = iso(new Date());
 
+// Cap the note length so a long comment can't push the amount off-screen.
+const NOTE_MAX = 120;
+
 function useIsMobile(bp = 760) {
   const [m, setM] = useState(() => window.innerWidth < bp);
   useEffect(() => {
@@ -47,8 +50,11 @@ export default function ExpensesScreen() {
   const [logs, setLogs] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [selDate, setSelDate] = useState(TODAY);
-  const [calMonth, setCalMonth] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
+  // Anchor on *today* so the calendar opens on the current billing cycle
+  // (cycleRange maps this to the right cycle for any month-start day).
+  const [calMonth, setCalMonth] = useState(() => new Date());
   const [addCat, setAddCat] = useState(null);     // category clicked → opens amount entry
+  const [editLog, setEditLog] = useState(null);   // existing log clicked → opens edit modal
   const [catForm, setCatForm] = useState(null);   // add/edit category modal
   const [manageOpen, setManageOpen] = useState(false);
   const [scope, setScope] = useState("day");       // "day" | "month" | "year" | "all" — drives totals + pie chart
@@ -140,32 +146,59 @@ export default function ExpensesScreen() {
     ? `conic-gradient(${cmpSegs.map((s) => `${s.cat.color} ${s.start}% ${s.end}%`).join(", ")})`
     : "var(--surface-2)";
 
-  // ── Calendar grid for the visible month ──
+  // ── Calendar grid for the visible billing cycle ──
+  // When the month starts on the 1st this is just the calendar month; for any
+  // other start day (e.g. 25) the grid spans the cycle, 25th → 24th next month.
   const calDays = useMemo(() => {
-    const first = calMonth;
-    const startDow = (first.getDay() + 6) % 7; // Monday-first
-    const daysInMonth = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
+    const [lo, hi] = cycleRange(calMonth, monthStartDay);
+    const start = new Date(lo + "T00:00");
+    const end = new Date(hi + "T00:00");
+    const startDow = (start.getDay() + 6) % 7; // Monday-first
     const totalsByDate = {};
-    logs.forEach((l) => { if (l.date.slice(0, 7) === iso(first).slice(0, 7)) totalsByDate[l.date] = (totalsByDate[l.date] || 0) + l.amount; });
+    logs.forEach((l) => { if (l.date >= lo && l.date <= hi) totalsByDate[l.date] = (totalsByDate[l.date] || 0) + l.amount; });
     const cells = [];
     for (let i = 0; i < startDow; i++) cells.push(null);
-    for (let d = 1; d <= daysInMonth; d++) {
-      const ds = iso(new Date(first.getFullYear(), first.getMonth(), d));
-      cells.push({ date: ds, day: d, total: totalsByDate[ds] || 0 });
+    for (let dt = new Date(start); dt <= end; dt.setDate(dt.getDate() + 1)) {
+      const ds = iso(dt);
+      cells.push({ date: ds, day: dt.getDate(), total: totalsByDate[ds] || 0 });
     }
     return cells;
-  }, [calMonth, logs]);
+  }, [calMonth, logs, monthStartDay]);
 
-  const shiftMonth = (delta) => setCalMonth((m) => new Date(m.getFullYear(), m.getMonth() + delta, 1));
-  const monthLabel = calMonth.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  // Shift by a whole cycle. Anchor on the cycle's start so repeated shifts stay aligned.
+  const shiftMonth = (delta) => setCalMonth((m) => {
+    const [lo] = cycleRange(m, monthStartDay, delta);
+    return new Date(lo + "T00:00");
+  });
+  const monthLabel = useMemo(() => {
+    const [lo, hi] = cycleRange(calMonth, monthStartDay);
+    if (monthStartDay === 1) return new Date(lo + "T00:00").toLocaleDateString("en-US", { month: "long", year: "numeric" });
+    const f = (s) => new Date(s + "T00:00").toLocaleDateString("en-US", { day: "numeric", month: "short" });
+    return `${f(lo)} – ${f(hi)}`;
+  }, [calMonth, monthStartDay]);
 
   // ── Add expense ──
   const openAdd = (cat) => setAddCat({ cat, amount: "", note: "" });
   const saveAdd = async () => {
     const amt = parseFloat(addCat.amount);
     if (!amt || amt <= 0) return;
-    await api.createExpenseLog({ category_id: addCat.cat.id, amount: amt, note: addCat.note.trim(), date: selDate });
+    await api.createExpenseLog({ category_id: addCat.cat.id, amount: amt, note: addCat.note.trim().slice(0, NOTE_MAX), date: selDate });
     setAddCat(null);
+    load();
+  };
+
+  // ── Edit / delete an existing expense ──
+  const openEdit = (l) => setEditLog({ id: l.id, category_id: l.category_id, amount: String(l.amount), note: l.note || "", date: l.date });
+  const saveEdit = async () => {
+    const amt = parseFloat(editLog.amount);
+    if (!amt || amt <= 0) return;
+    await api.updateExpenseLog(editLog.id, {
+      category_id: editLog.category_id,
+      amount: amt,
+      note: editLog.note.trim().slice(0, NOTE_MAX),
+      date: editLog.date,
+    });
+    setEditLog(null);
     load();
   };
 
@@ -190,6 +223,18 @@ export default function ExpensesScreen() {
     load();
   };
 
+  // Move a category one slot up/down; persist the new order immediately. We
+  // optimistically reorder the local list so the UI responds instantly.
+  const moveCat = async (index, dir) => {
+    const next = index + dir;
+    if (next < 0 || next >= categories.length) return;
+    const reordered = [...categories];
+    [reordered[index], reordered[next]] = [reordered[next], reordered[index]];
+    setCategories(reordered);
+    await api.arrangeExpenseCategories(reordered.map((c) => c.id)).catch(() => {});
+    load();
+  };
+
   const fmtSelDate = new Date(selDate + "T00:00").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
 
   // pie chart gradient
@@ -205,7 +250,7 @@ export default function ExpensesScreen() {
     : "var(--surface-2)";
 
   return (
-    <div style={S.page}>
+    <div style={{ ...S.page, ...(isMobile ? { padding: "20px 14px" } : {}) }}>
       <div style={S.head}>
         <div>
           <div style={S.eyebrow}>Anvil · Expenses</div>
@@ -232,9 +277,9 @@ export default function ExpensesScreen() {
         </div>
       </div>
 
-      <div style={{ ...S.cols, gridTemplateColumns: isMobile ? "1fr" : "320px 1fr" }}>
+      <div style={{ ...S.cols, gridTemplateColumns: isMobile ? "minmax(0,1fr)" : "320px minmax(0,1fr)" }}>
         {/* Calendar */}
-        <div style={S.card}>
+        <div style={{ ...S.card, minWidth: 0, ...(isMobile ? { padding: 12 } : {}) }}>
           <div style={S.calHead}>
             <button onClick={() => shiftMonth(-1)} style={S.calNav}><ChevronLeft size={16} /></button>
             <span style={S.calTitle}>{monthLabel}</span>
@@ -288,11 +333,12 @@ export default function ExpensesScreen() {
                       <span style={{ ...S.logIcon, background: (c?.color || "#9A968C") + "1A", color: c?.color || "#9A968C" }}>
                         <IconFor name={c?.icon} size={14} />
                       </span>
-                      <div style={{ flex: 1, minWidth: 0 }}>
+                      <button onClick={() => openEdit(l)} style={S.logInfoBtn} title="Edit this expense">
                         <div style={S.logCat}>{c?.name || "Deleted category"}</div>
                         {l.note && <div style={S.logNote}>{l.note}</div>}
-                      </div>
+                      </button>
                       <span style={S.logAmt}>{money(l.amount)}</span>
+                      <button onClick={() => openEdit(l)} style={S.editBtn} title="Edit"><Pencil size={13} /></button>
                       <button onClick={() => deleteLog(l.id, c?.name || "Expense")} style={S.delBtn}><X size={14} /></button>
                     </div>
                   );
@@ -421,8 +467,9 @@ export default function ExpensesScreen() {
               onChange={(e) => setAddCat((f) => ({ ...f, amount: e.target.value }))}
               onKeyDown={(e) => e.key === "Enter" && saveAdd()} placeholder="0" style={S.input} />
             <label style={S.label}>Note (optional)</label>
-            <input value={addCat.note} onChange={(e) => setAddCat((f) => ({ ...f, note: e.target.value }))}
+            <input value={addCat.note} maxLength={NOTE_MAX} onChange={(e) => setAddCat((f) => ({ ...f, note: e.target.value }))}
               onKeyDown={(e) => e.key === "Enter" && saveAdd()} placeholder="What was it for?" style={S.input} />
+            <div style={S.noteCount}>{addCat.note.length}/{NOTE_MAX}</div>
             <div style={S.modalActions}>
               <button onClick={() => setAddCat(null)} style={S.cancelBtn}>Cancel</button>
               <button onClick={saveAdd} disabled={!addCat.amount} style={{ ...S.saveBtn, ...(!addCat.amount ? { opacity: 0.5, cursor: "not-allowed" } : {}) }}>
@@ -433,6 +480,41 @@ export default function ExpensesScreen() {
         </div>
       )}
 
+      {/* Edit-expense modal */}
+      {editLog && (() => {
+        const c = catById[editLog.category_id];
+        return (
+        <div style={S.overlay} onClick={() => setEditLog(null)}>
+          <div style={S.modal} onClick={(e) => e.stopPropagation()}>
+            <div style={S.modalHead}>
+              <span style={S.modalTitle}>Edit expense</span>
+              <button onClick={() => setEditLog(null)} style={S.iconBtnPlain}><X size={16} /></button>
+            </div>
+            <label style={S.label}>Category</label>
+            <select value={editLog.category_id} onChange={(e) => setEditLog((f) => ({ ...f, category_id: Number(e.target.value) }))} style={S.input}>
+              {categories.map((cat) => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
+            </select>
+            <label style={S.label}>Amount *</label>
+            <input autoFocus type="number" inputMode="decimal" value={editLog.amount}
+              onChange={(e) => setEditLog((f) => ({ ...f, amount: e.target.value }))}
+              onKeyDown={(e) => e.key === "Enter" && saveEdit()} placeholder="0" style={S.input} />
+            <label style={S.label}>Date</label>
+            <input type="date" value={editLog.date} onChange={(e) => setEditLog((f) => ({ ...f, date: e.target.value }))} style={S.input} />
+            <label style={S.label}>Note (optional)</label>
+            <input value={editLog.note} maxLength={NOTE_MAX} onChange={(e) => setEditLog((f) => ({ ...f, note: e.target.value }))}
+              onKeyDown={(e) => e.key === "Enter" && saveEdit()} placeholder="What was it for?" style={S.input} />
+            <div style={S.noteCount}>{editLog.note.length}/{NOTE_MAX}</div>
+            <div style={S.modalActions}>
+              <button onClick={() => setEditLog(null)} style={S.cancelBtn}>Cancel</button>
+              <button onClick={saveEdit} disabled={!editLog.amount} style={{ ...S.saveBtn, ...(!editLog.amount ? { opacity: 0.5, cursor: "not-allowed" } : {}) }}>
+                <Check size={15} /> Save
+              </button>
+            </div>
+          </div>
+        </div>
+        );
+      })()}
+
       {/* Manage categories modal */}
       {manageOpen && (
         <div style={S.overlay} onClick={() => setManageOpen(false)}>
@@ -441,9 +523,16 @@ export default function ExpensesScreen() {
               <span style={S.modalTitle}>Customize categories</span>
               <button onClick={() => setManageOpen(false)} style={S.iconBtnPlain}><X size={16} /></button>
             </div>
+            <div style={S.manageHint}>Use the arrows to reorder how categories appear.</div>
             <div style={S.manageList}>
-              {categories.map((c) => (
+              {categories.map((c, i) => (
                 <div key={c.id} style={S.manageRow}>
+                  <div style={S.reorderCol}>
+                    <button onClick={() => moveCat(i, -1)} disabled={i === 0}
+                      style={{ ...S.reorderBtn, ...(i === 0 ? S.reorderDisabled : {}) }} title="Move up"><ChevronUp size={13} /></button>
+                    <button onClick={() => moveCat(i, 1)} disabled={i === categories.length - 1}
+                      style={{ ...S.reorderBtn, ...(i === categories.length - 1 ? S.reorderDisabled : {}) }} title="Move down"><ChevronDown size={13} /></button>
+                  </div>
                   <span style={{ ...S.iconBadge, background: c.color + "1A", color: c.color }}><IconFor name={c.icon} size={15} /></span>
                   <span style={{ flex: 1, fontSize: 13.5, fontWeight: 600 }}>{c.name}</span>
                   <button onClick={() => openEditCat(c)} style={S.delBtn}><Pencil size={13} /></button>
@@ -519,7 +608,7 @@ function TrendBars({ items, money }) {
 }
 
 const S = {
-  page: { fontFamily: "'Inter',system-ui,sans-serif", background: "var(--bg)", minHeight: "100%", padding: "26px 22px", color: "var(--text)", boxSizing: "border-box" },
+  page: { fontFamily: "'Inter',system-ui,sans-serif", background: "var(--bg)", minHeight: "100%", padding: "26px 22px", color: "var(--text)", boxSizing: "border-box", maxWidth: "100%", overflowX: "hidden" },
   head: { marginBottom: 16 },
   eyebrow: { fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--text-3)", fontWeight: 600, marginBottom: 4 },
   h1: { fontSize: 28, fontWeight: 700, margin: 0, letterSpacing: "-0.02em", fontFamily: "'Fraunces',Georgia,serif" },
@@ -545,7 +634,7 @@ const S = {
   calHead: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
   calNav: { border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-2)", width: 28, height: 28, borderRadius: 8, cursor: "pointer", display: "grid", placeItems: "center" },
   calTitle: { fontSize: 14, fontWeight: 700, fontFamily: "'Fraunces',Georgia,serif" },
-  calGrid: { display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 4 },
+  calGrid: { display: "grid", gridTemplateColumns: "repeat(7,minmax(0,1fr))", gap: 4 },
   calDow: { fontSize: 10.5, fontWeight: 700, color: "var(--text-3)", textAlign: "center", padding: "4px 0" },
   calCell: { position: "relative", border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-2)", borderRadius: 8, aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
   calCellOn: { background: ACCENT, color: "#fff", borderColor: ACCENT, fontWeight: 700 },
@@ -560,12 +649,15 @@ const S = {
   manageLink: { display: "inline-flex", alignItems: "center", gap: 5, border: "none", background: "none", color: "var(--text-3)", fontSize: 11.5, fontWeight: 600, cursor: "pointer", marginTop: 12, padding: 0, fontFamily: "inherit" },
 
   logList: { marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: 8 },
-  logRow: { display: "flex", alignItems: "center", gap: 10 },
+  logRow: { display: "flex", alignItems: "center", gap: 10, minWidth: 0 },
   logIcon: { width: 28, height: 28, borderRadius: 8, display: "grid", placeItems: "center", flexShrink: 0 },
-  logCat: { fontSize: 13, fontWeight: 600 },
+  logInfoBtn: { flex: 1, minWidth: 0, border: "none", background: "none", padding: 0, cursor: "pointer", textAlign: "left", fontFamily: "inherit", overflow: "hidden", color: "inherit" },
+  logCat: { fontSize: 13, fontWeight: 600, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
   logNote: { fontSize: 11, color: "var(--text-3)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
-  logAmt: { fontSize: 13.5, fontWeight: 700, fontFamily: "'Fraunces',Georgia,serif", whiteSpace: "nowrap" },
+  logAmt: { fontSize: 13.5, fontWeight: 700, fontFamily: "'Fraunces',Georgia,serif", whiteSpace: "nowrap", flexShrink: 0 },
+  editBtn: { border: "none", background: "none", color: "var(--text-3)", cursor: "pointer", padding: 4, display: "grid", placeItems: "center", flexShrink: 0 },
   delBtn: { border: "none", background: "none", color: "var(--text-3)", cursor: "pointer", padding: 4, display: "grid", placeItems: "center", flexShrink: 0 },
+  noteCount: { fontSize: 10.5, color: "var(--text-3)", textAlign: "right", marginTop: 3 },
 
   pieWrap: { display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap" },
   pieChart: { position: "relative", width: 132, height: 132, flexShrink: 0, margin: "0 auto" },
@@ -592,8 +684,12 @@ const S = {
   cancelBtn: { border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-2)", padding: "9px 16px", borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
   saveBtn: { display: "flex", alignItems: "center", gap: 6, border: "none", background: "#4C9A6B", color: "#fff", padding: "9px 18px", borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" },
 
+  manageHint: { fontSize: 11.5, color: "var(--text-3)", marginBottom: 8 },
   manageList: { display: "flex", flexDirection: "column", gap: 6, marginBottom: 10, maxHeight: 320, overflowY: "auto" },
   manageRow: { display: "flex", alignItems: "center", gap: 10, padding: "6px 2px" },
+  reorderCol: { display: "flex", flexDirection: "column", gap: 1, flexShrink: 0 },
+  reorderBtn: { border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-2)", width: 22, height: 17, borderRadius: 5, cursor: "pointer", display: "grid", placeItems: "center", padding: 0 },
+  reorderDisabled: { opacity: 0.35, cursor: "not-allowed" },
   addColInline: { display: "inline-flex", alignItems: "center", gap: 5, border: "1px dashed var(--border)", background: "none", color: "var(--text-2)", padding: "9px 12px", borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", width: "100%", justifyContent: "center" },
 
   colorRow: { display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 4 },
