@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo, Fragment } from "react";
-import { Pencil, Plus, Bell, Check, Flame, LayoutGrid, Menu, X, MoreHorizontal, FileText, Link2, ChevronLeft, ChevronRight, Power } from "lucide-react";
+import { Pencil, Plus, Bell, Check, Flame, LayoutGrid, Menu, X, MoreHorizontal, FileText, Link2, ChevronLeft, ChevronRight, Power, Eye, EyeOff } from "lucide-react";
 import { api } from "../api.js";
 import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
 import UndoToast from "../components/UndoToast.jsx";
@@ -596,6 +596,18 @@ function AllHabitsWeekly({ habits, dayAction, logSet, onDelete, onEdit, renderIn
   // On mobile the name column collapses to a round avatar so the whole week
   // fits; tapping an avatar expands just that habit's name inline.
   const [expanded, setExpanded] = useState(null); // habit id, or null
+  // Mobile-only master toggle: when on, every habit's name is shown at once
+  // (instead of tapping each circle). Persisted per-user.
+  const [showNames, setShowNames] = useState(false);
+  useEffect(() => {
+    api.getSetting("habit_show_names").then((r) => { if (typeof r?.value === "boolean") setShowNames(r.value); }).catch(() => {});
+  }, []);
+  const toggleShowNames = () => setShowNames((v) => {
+    const next = !v;
+    api.setSetting("habit_show_names", next).catch(() => {});
+    if (next) setExpanded(null); // showing all — clear any single expansion
+    return next;
+  });
   const weekDates = getWeekDates(weekOffset);
   const weekLabel = `${fmtShort(weekDates[0])} – ${fmtShort(weekDates[6])}${weekOffset === 0 ? " · This week" : ""}`;
 
@@ -675,7 +687,19 @@ function AllHabitsWeekly({ habits, dayAction, logSet, onDelete, onEdit, renderIn
     <div>
       <div style={S.mainHead}>
         <div style={S.eyebrow}>Weekly view</div>
-        <h1 style={S.h1}>All Habits</h1>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+          <h1 style={S.h1}>All Habits</h1>
+          {isMobile && habits.length > 0 && (
+            <button onClick={toggleShowNames} style={S.nameToggle}
+              title={showNames ? "Hide habit names — tap a circle to reveal one" : "Show all habit names"}>
+              <span style={{ ...S.nameToggleTrack, background: showNames ? "#4C9A6B" : "var(--border)" }}>
+                <span style={{ ...S.nameToggleKnob, left: showNames ? 19 : 3 }} />
+              </span>
+              {showNames ? <Eye size={13} /> : <EyeOff size={13} />}
+              <span>Names</span>
+            </button>
+          )}
+        </div>
       </div>
 
       <div style={S.navBar}>
@@ -731,8 +755,9 @@ function AllHabitsWeekly({ habits, dayAction, logSet, onDelete, onEdit, renderIn
           const isExpanded = expanded === h.id;
           return (
             <Fragment key={h.id}>
-            {/* Mobile: expanded habit shows its full name in a slim banner above the row */}
-            {isMobile && isExpanded && (
+            {/* Mobile: show the full name banner when expanded, or when the
+                global "Show names" toggle is on. */}
+            {isMobile && (isExpanded || showNames) && (
               <button onClick={() => onOpenHabit && onOpenHabit(h.id)} style={{ ...S.mobileNameBanner, color: c }}>
                 <span style={{ ...S.sideDot, background: c }} />
                 <span style={S.mobileNameText}>{h.name}</span>
@@ -1205,6 +1230,9 @@ const S = {
   habitAvatar: { width: 26, height: 26, borderRadius: "50%", border: "none", color: "#fff", fontSize: 12, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif", cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0, lineHeight: 1 },
   mobileNameBanner: { display: "flex", alignItems: "center", gap: 7, width: "100%", border: "none", background: "var(--hover)", borderRadius: 8, padding: "6px 10px", margin: "4px 0 2px", cursor: "pointer", fontFamily: "inherit", textAlign: "left" },
   mobileNameText: { fontSize: 13, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  nameToggle: { display: "inline-flex", alignItems: "center", gap: 6, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-2)", borderRadius: 20, padding: "5px 11px 5px 5px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 },
+  nameToggleTrack: { position: "relative", width: 34, height: 20, borderRadius: 10, flexShrink: 0, transition: "background 0.2s", display: "inline-block" },
+  nameToggleKnob: { position: "absolute", top: 3, width: 14, height: 14, borderRadius: "50%", background: "#fff", transition: "left 0.2s", boxShadow: "0 1px 2px rgba(0,0,0,0.3)" },
   weekDayHead: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 },
   weekDayName: { fontSize: 10, fontWeight: 600, color: "var(--text-3)", textTransform: "uppercase" },
   weekDayNum: { fontSize: 12, fontWeight: 600, color: "var(--text-2)", width: 22, height: 22, display: "grid", placeItems: "center", borderRadius: "50%" },
