@@ -77,6 +77,17 @@ export default function ExpensesScreen() {
   const dayLogs = useMemo(() => logs.filter((l) => l.date === selDate), [logs, selDate]);
   const dayTotal = dayLogs.reduce((n, l) => n + l.amount, 0);
 
+  // Today vs Yesterday vs Day-before spend (like the Grove daily comparison).
+  const threeDay = useMemo(() => {
+    const dayISO = (offset) => { const d = new Date(); d.setDate(d.getDate() + offset); return iso(d); };
+    const totalOn = (ds) => logs.filter((l) => l.date === ds).reduce((n, l) => n + l.amount, 0);
+    return [
+      { label: "Today", value: totalOn(dayISO(0)), color: ACCENT },
+      { label: "Yesterday", value: totalOn(dayISO(-1)), color: "var(--text-3)" },
+      { label: "Day before", value: totalOn(dayISO(-2)), color: "var(--text-3)" },
+    ];
+  }, [logs]);
+
   // ── Scope used for the headline total + pie chart ──
   const scopedLogs = useMemo(() => {
     if (scope === "day") return dayLogs;
@@ -275,6 +286,12 @@ export default function ExpensesScreen() {
             <button key={id} onClick={() => setScope(id)} style={{ ...S.scopeBtn, ...(scope === id ? S.scopeBtnOn : {}) }}>{lbl}</button>
           ))}
         </div>
+      </div>
+
+      {/* Last-3-days comparison */}
+      <div style={{ ...S.card, marginBottom: 16 }}>
+        <div style={S.threeDayTitle}>Last 3 days</div>
+        <TrendBars items={threeDay} money={money} />
       </div>
 
       <div style={{ ...S.cols, gridTemplateColumns: isMobile ? "minmax(0,1fr)" : "320px minmax(0,1fr)" }}>
@@ -709,6 +726,7 @@ const S = {
   trendVal: { fontSize: 18, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif" },
   trendLbl: { fontSize: 11, color: "var(--text-3)", marginTop: 2 },
   trendBadge: { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 13, fontWeight: 800, padding: "6px 12px", borderRadius: 20, width: "fit-content" },
+  threeDayTitle: { fontSize: 13, fontWeight: 700, fontFamily: "'Fraunces',Georgia,serif", marginBottom: 12 },
   tbWrap: { display: "flex", flexDirection: "column", gap: 8 },
   tbRow: { display: "flex", alignItems: "center", gap: 8 },
   tbLbl: { width: 78, fontSize: 11, color: "var(--text-2)", fontWeight: 600, flexShrink: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },

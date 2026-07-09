@@ -99,6 +99,7 @@ export default function GoldenBookScreen() {
           onCelebrate={(title, days) => setCelebrate({ title, days })}
           pickImage={pickImage}
           musicId={musicId}
+          setMusicId={setMusicId}
           musicOn={musicOn}
           setMusicOn={setMusicOn}
         />
@@ -192,7 +193,7 @@ const REMIND_KEY = "tesla369_reminders";
 
 // 369 tracker for a single dream. `g` is the loaded goal detail (carries
 // g.t369 summary + g.t369_affirmation). `onChanged` receives fresh detail.
-function Tesla369Tracker({ g, onChanged, musicId, musicOn, setMusicOn }) {
+function Tesla369Tracker({ g, onChanged, musicId, setMusicId, musicOn, setMusicOn }) {
   const [writing, setWriting] = useState("");
   const [pasteBlocked, setPasteBlocked] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -251,12 +252,7 @@ function Tesla369Tracker({ g, onChanged, musicId, musicOn, setMusicOn }) {
           </div>
         </div>
         <div style={S.tHeadBtns}>
-          {musicId && (
-            <button onClick={() => setMusicOn((v) => !v)} style={{ ...S.tRemBtn, ...(musicOn ? S.tuneOn : {}) }}
-              title={musicOn ? "Soft tunes on" : "Play soft tunes"}>
-              {musicOn ? <Music2 size={14} /> : <Music size={14} />} Soft tunes
-            </button>
-          )}
+          <MusicControl musicId={musicId} setMusicId={setMusicId} musicOn={musicOn} setMusicOn={setMusicOn} />
           <button onClick={toggleReminders} style={{ ...S.tRemBtn, ...(remOn ? S.tRemOn : {}) }}
             title={remOn ? "Reminders on" : "Turn on reminders"}>
             {remOn ? <Bell size={14} /> : <BellOff size={14} />} {remOn ? "Reminders on" : "Remind me"}
@@ -423,7 +419,7 @@ function GoalCard({ g, onOpen, onDelete, achieved }) {
   );
 }
 
-function GoalDetail({ goalId, onBack, onReload, onCelebrate, pickImage, musicId, musicOn, setMusicOn }) {
+function GoalDetail({ goalId, onBack, onReload, onCelebrate, pickImage, musicId, setMusicId, musicOn, setMusicOn }) {
   const [g, setG] = useState(null);
   const [entries, setEntries] = useState({});
   const [viewDate, setViewDate] = useState(todayISO());
@@ -573,7 +569,7 @@ function GoalDetail({ goalId, onBack, onReload, onCelebrate, pickImage, musicId,
               <button onClick={() => setEditAff(g.t369_affirmation)} style={S.ghostBtn} title="Edit affirmation"><Pencil size={13} /></button>
             </div>
           )}
-          <Tesla369Tracker g={g} onChanged={applyDetail} musicId={musicId} musicOn={musicOn} setMusicOn={setMusicOn} />
+          <Tesla369Tracker g={g} onChanged={applyDetail} musicId={musicId} setMusicId={setMusicId} musicOn={musicOn} setMusicOn={setMusicOn} />
         </>
       )}
 
@@ -581,13 +577,7 @@ function GoalDetail({ goalId, onBack, onReload, onCelebrate, pickImage, musicId,
       {!g.t369_enabled && (
       <div style={S.writeCard}>
         <div style={S.tuneRow}>
-          {musicId ? (
-            <button onClick={() => setMusicOn((v) => !v)} style={{ ...S.tuneBtn, ...(musicOn ? S.tuneOn : {}) }}>
-              {musicOn ? <Music2 size={14} /> : <Music size={14} />} Soft tunes
-            </button>
-          ) : (
-            <span style={S.tuneHint}>Add a track in Settings → Music</span>
-          )}
+          <MusicControl musicId={musicId} setMusicId={setMusicId} musicOn={musicOn} setMusicOn={setMusicOn} />
         </div>
         <div style={S.writeNav}>
           <button onClick={() => setViewDate((d) => addDays(d, -1))} disabled={!canPrev}
@@ -653,6 +643,56 @@ function MusicAudio({ musicId, on }) {
   );
 }
 
+// Inline music control: play/pause the soft tunes + set/reset the track by
+// pasting a YouTube link (saved to the shared `golden_music` setting). Used in
+// both the normal writing view and the 369 mode.
+function MusicControl({ musicId, setMusicId, musicOn, setMusicOn }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+
+  const openEdit = () => { setDraft(musicId ? `https://youtu.be/${musicId}` : ""); setEditing(true); };
+  const saveTrack = async () => {
+    const id = ytId(draft);
+    await api.setSetting("golden_music", draft.trim()).catch(() => {});
+    setMusicId(id);
+    if (id) setMusicOn(true);
+    setEditing(false);
+  };
+  const clearTrack = async () => {
+    await api.setSetting("golden_music", "").catch(() => {});
+    setMusicId("");
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <div style={S.musicEditRow}>
+        <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") saveTrack(); if (e.key === "Escape") setEditing(false); }}
+          placeholder="Paste a YouTube link…" style={S.musicInput} />
+        <button onClick={saveTrack} style={{ ...S.tRemBtn, ...S.tuneOn }} title="Save track"><Check size={14} /></button>
+        {musicId && <button onClick={clearTrack} style={S.tRemBtn} title="Remove track"><Trash2 size={14} /></button>}
+        <button onClick={() => setEditing(false)} style={S.tRemBtn} title="Cancel"><X size={14} /></button>
+      </div>
+    );
+  }
+  return (
+    <div style={S.musicCtrlRow}>
+      {musicId ? (
+        <button onClick={() => setMusicOn((v) => !v)} style={{ ...S.tRemBtn, ...(musicOn ? S.tuneOn : {}) }}
+          title={musicOn ? "Soft tunes on" : "Play soft tunes"}>
+          {musicOn ? <Music2 size={14} /> : <Music size={14} />} Soft tunes
+        </button>
+      ) : (
+        <button onClick={openEdit} style={S.tRemBtn} title="Add a track"><Music size={14} /> Add music</button>
+      )}
+      {musicId && (
+        <button onClick={openEdit} style={S.musicSetBtn} title="Change / reset track"><Pencil size={12} /></button>
+      )}
+    </div>
+  );
+}
+
 const GOLD = "#C9A227";
 
 const S = {
@@ -710,6 +750,10 @@ const S = {
   tuneRow: { display: "flex", justifyContent: "flex-end", marginBottom: 10 },
   tuneBtn: { display: "inline-flex", alignItems: "center", gap: 6, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-2)", padding: "6px 12px", borderRadius: 16, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
   tuneOn: { background: GOLD, color: "#fff", borderColor: GOLD },
+  musicCtrlRow: { display: "inline-flex", alignItems: "center", gap: 6 },
+  musicSetBtn: { display: "inline-grid", placeItems: "center", border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-3)", width: 28, height: 28, borderRadius: 14, cursor: "pointer", fontFamily: "inherit" },
+  musicEditRow: { display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" },
+  musicInput: { border: "1px solid var(--border)", borderRadius: 8, padding: "6px 10px", fontSize: 12.5, fontFamily: "inherit", outline: "none", background: "var(--bg)", color: "var(--text)", minWidth: 180 },
   tuneHint: { fontSize: 11, color: "var(--text-3)", fontWeight: 500 },
   writeNav: { display: "flex", alignItems: "center", justifyContent: "center", gap: 14, marginBottom: 12 },
   navBtn: { width: 34, height: 34, borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-2)", cursor: "pointer", display: "grid", placeItems: "center" },

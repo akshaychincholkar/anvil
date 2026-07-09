@@ -182,6 +182,33 @@ export default function WorthScreen() {
   const totalTaken = payouts.reduce((n, p) => n + p.amount, 0);
   const pending = Math.max(0, totalEarned - totalTaken);
 
+  // Reward earned on a specific day (focus + usage, respecting the toggles) —
+  // powers the Today / Yesterday / Day-before comparison.
+  const earnedOnDay = (ds) => {
+    let f = 0, u = 0;
+    if (toggles.focus) {
+      sessions.filter((s) => s.completed).forEach((s) => {
+        const day = (s.started_at || s.created_at || "").slice(0, 10);
+        if (day !== ds) return;
+        const p = TREES[s.tree] ? s.tree : DEFAULT_TREE;
+        f += ((s.actual_min || 0) / 60) * rateOn("focus", p, day);
+      });
+    }
+    if (toggles.usage) {
+      screenRows.forEach((r) => {
+        if (USAGE_EXCLUDE.has(r.screen) || r.date !== ds) return;
+        u += (r.seconds / 60) * rateOn("usage", r.screen, r.date);
+      });
+    }
+    return f + u;
+  };
+  const dayOffISO = (offset) => { const d = new Date(); d.setDate(d.getDate() + offset); return iso(d); };
+  const threeDayReward = [
+    { label: "Today", value: earnedOnDay(dayOffISO(0)), color: FOCUS_COLOR },
+    { label: "Yesterday", value: earnedOnDay(dayOffISO(-1)), color: "var(--text-3)" },
+    { label: "Day before", value: earnedOnDay(dayOffISO(-2)), color: "var(--text-3)" },
+  ];
+
   // ── Focus rewards for the selected period ──
   const focusByPillar = {};
   PILLARS.forEach((p) => (focusByPillar[p] = { minutes: 0, earned: 0 }));
@@ -339,6 +366,12 @@ export default function WorthScreen() {
       <div style={S.statRow}>
         <div style={S.statCard}><div style={S.statVal}>{reward(totalTaken)}</div><div style={S.statLbl}>Total taken</div></div>
         <div style={S.statCard}><div style={{ ...S.statVal, color: FOCUS_COLOR }}>{reward(pending)}</div><div style={S.statLbl}>Total pending</div></div>
+      </div>
+
+      {/* Reward earned — last 3 days */}
+      <div style={S.card}>
+        <div style={S.threeDayTitle}>Earned · last 3 days</div>
+        <RewardTrendBars items={threeDayReward} reward={reward} />
       </div>
 
       {/* Period selector */}
@@ -705,6 +738,22 @@ function Toggle({ on, onClick, color }) {
   );
 }
 
+// Horizontal bars comparing a reward value across the last few days.
+function RewardTrendBars({ items, reward }) {
+  const max = Math.max(1, ...items.map((i) => i.value));
+  return (
+    <div style={S.tbWrap}>
+      {items.map((it, i) => (
+        <div key={i} style={S.tbRow}>
+          <div style={S.tbLbl}>{it.label}</div>
+          <div style={S.tbTrack}><div style={{ ...S.tbBar, width: `${(it.value / max) * 100}%`, background: it.color }} /></div>
+          <div style={S.tbVal}>{reward(it.value)}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 const S = {
   page: { fontFamily: "'Inter',system-ui,sans-serif", background: "var(--bg)", minHeight: "100%", padding: "28px 20px 40px", color: "var(--text)", boxSizing: "border-box", maxWidth: 680, margin: "0 auto" },
   head: { marginBottom: 16 },
@@ -759,6 +808,13 @@ const S = {
 
   statRow: { display: "flex", gap: 10, marginBottom: 14 },
   statCard: { flex: 1, background: "var(--surface)", borderRadius: 12, padding: "12px 14px", textAlign: "center", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
+  threeDayTitle: { fontSize: 13, fontWeight: 700, fontFamily: "'Fraunces',Georgia,serif", marginBottom: 12 },
+  tbWrap: { display: "flex", flexDirection: "column", gap: 8 },
+  tbRow: { display: "flex", alignItems: "center", gap: 8 },
+  tbLbl: { width: 84, fontSize: 11.5, color: "var(--text-2)", fontWeight: 600, flexShrink: 0, whiteSpace: "nowrap" },
+  tbTrack: { flex: 1, height: 14, background: "var(--surface-2)", borderRadius: 7, overflow: "hidden" },
+  tbBar: { height: "100%", borderRadius: 7, transition: "width 0.3s" },
+  tbVal: { width: 76, fontSize: 11.5, color: "var(--text-2)", fontWeight: 700, flexShrink: 0, textAlign: "right" },
   statVal: { fontSize: 20, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif" },
   statLbl: { fontSize: 11, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", marginTop: 2 },
 

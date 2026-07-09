@@ -10,6 +10,16 @@ import { useMonthStartDay, cycleRange } from "../monthCycle.js";
 import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
 import UndoToast from "../components/UndoToast.jsx";
 
+function useIsMobile(bp = 600) {
+  const [m, setM] = useState(() => window.innerWidth < bp);
+  useEffect(() => {
+    const h = () => setM(window.innerWidth < bp);
+    window.addEventListener("resize", h);
+    return () => window.removeEventListener("resize", h);
+  }, [bp]);
+  return m;
+}
+
 const INCOME_CATS  = ["Salary", "Stocks", "Business", "Interest", "Rent", "Gift", "Other"];
 const EXPENSE_CATS = ["Bills", "EMI", "Rent", "Food", "Shopping", "Transport", "Health", "Entertainment", "Education", "Other"];
 const INVEST_KINDS = ["Stocks", "Mutual Fund", "SIP", "Fixed Deposit", "Gold", "Real Estate", "PPF/EPF", "Crypto", "Other"];
@@ -124,6 +134,7 @@ export default function FinanceScreen() {
 
 function Overview({ txns, investments, loaded, money, cur }) {
   const monthStartDay = useMonthStartDay();
+  const isMobile = useIsMobile();
   const [preset, setPreset] = useState("month");
   const [lo, hi] = presetRange(preset, monthStartDay);
 
@@ -169,15 +180,18 @@ function Overview({ txns, investments, loaded, money, cur }) {
         ))}
       </div>
 
-      {/* Summary */}
-      <div style={S.sumGrid}>
+      {/* Summary — Income · Expenses · Invested · Remaining. On mobile they lay
+          out as a 2×2 grid; on desktop, four across. */}
+      <div style={{ ...S.sumGrid, gridTemplateColumns: isMobile ? "repeat(2,1fr)" : "repeat(4,1fr)" }}>
         <SumCard icon={<ArrowDownLeft size={16} />} label="Income" value={money(totalIn)} color={INCOME} />
-        <SumCard icon={<ArrowUpRight size={16} />} label="Expenses" value={money(totalOutAll)} color={EXPENSE} />
-        <SumCard icon={net >= 0 ? <TrendingUp size={16} /> : <TrendingDown size={16} />} label="Net savings" value={money(net)} color={net >= 0 ? INCOME : EXPENSE} />
+        <SumCard icon={<ArrowUpRight size={16} />} label="Expenses" value={money(totalOut)} color={EXPENSE} />
+        <SumCard icon={<Sprout size={16} />} label="Invested" value={money(totalInvestedInRange)} color={INVEST} />
+        <SumCard icon={net >= 0 ? <PiggyBank size={16} /> : <TrendingDown size={16} />}
+          label="Remaining" value={money(net)} color={net >= 0 ? INCOME : EXPENSE} />
       </div>
       {totalInvestedInRange > 0 && (
         <div style={S.investNote}>
-          <Sprout size={13} color={INVEST} /> Includes {money(totalInvestedInRange)} invested this period — counted as outgoing and deducted from net savings.
+          <Sprout size={13} color={INVEST} /> {money(totalInvestedInRange)} invested this period — counted as outgoing and deducted from what remains.
         </div>
       )}
 
@@ -216,9 +230,21 @@ function Overview({ txns, investments, loaded, money, cur }) {
   );
 }
 
-function SumCard({ icon, label, value, color }) {
+function SumCard({ icon, wideIcon, label, value, color, style, wide }) {
+  // Wide (full-width) variant: a centered row with a big icon filling the space.
+  if (wide) {
+    return (
+      <div style={{ ...S.sumCard, ...S.sumCardWide, ...style }}>
+        <div style={{ ...S.sumIconWide, color, background: color + "1A" }}>{wideIcon || icon}</div>
+        <div style={S.sumWideText}>
+          <div style={S.sumLabel}>{label}</div>
+          <div style={{ ...S.sumVal, color, marginTop: 0 }}>{value}</div>
+        </div>
+      </div>
+    );
+  }
   return (
-    <div style={S.sumCard}>
+    <div style={{ ...S.sumCard, ...style }}>
       <div style={{ ...S.sumIcon, color, background: color + "1A" }}>{icon}</div>
       <div style={S.sumLabel}>{label}</div>
       <div style={{ ...S.sumVal, color }}>{value}</div>
@@ -991,7 +1017,10 @@ const S = {
 
   sumGrid: { display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 16 },
   sumCard: { background: "var(--surface)", borderRadius: 14, padding: "14px 14px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", border: "1px solid var(--border)" },
+  sumCardWide: { display: "flex", alignItems: "center", justifyContent: "center", gap: 14, padding: "16px 14px" },
   sumIcon: { width: 30, height: 30, borderRadius: 9, display: "grid", placeItems: "center", marginBottom: 8 },
+  sumIconWide: { width: 48, height: 48, borderRadius: 12, display: "grid", placeItems: "center", flexShrink: 0 },
+  sumWideText: { textAlign: "center" },
   sumLabel: { fontSize: 11.5, color: "var(--text-3)", fontWeight: 600 },
   sumVal: { fontSize: 18, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif", marginTop: 2, letterSpacing: "-0.01em", wordBreak: "break-word" },
 

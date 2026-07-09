@@ -497,6 +497,7 @@ class HabitCreate(BaseModel):
 
 class HabitUpdate(BaseModel):
     name: Optional[str] = None
+    pillar: Optional[str] = None
     target_per_week: Optional[int] = None
     reminder_time: Optional[str] = None
     type: Optional[str] = None
@@ -635,6 +636,8 @@ def create_habit(body: HabitCreate):
 def update_habit(habit_id: int, body: HabitUpdate):
     with db() as conn:
         updates = {k: v for k, v in body.dict().items() if v is not None}
+        if "pillar" in updates:  # resolve the pillar name to its id column
+            updates["pillar_id"] = pillar_id(conn, updates.pop("pillar"))
         if "days" in updates:  # store the weekday list as JSON
             updates["days"] = json.dumps(updates["days"])
         if updates:

@@ -383,6 +383,7 @@ function AddHabitForm({ habit, onChange, onSave, onCancel }) {
 
 function EditHabitModal({ habit, onSave, onClose }) {
   const [name, setName] = useState(habit.name);
+  const [pillar, setPillar] = useState(habit.pillar || "Health");
   const [type, setType] = useState(habit.type || "regular");
   const [targetCount, setTargetCount] = useState(habit.target_count || "");
   const [period, setPeriod] = useState(habit.period || "week");
@@ -397,7 +398,7 @@ function EditHabitModal({ habit, onSave, onClose }) {
   const save = () => {
     if (isWeekly && days.length === 0) return;
     onSave({
-      name: name.trim(), type,
+      name: name.trim(), pillar, type,
       target_count: needsCount ? Number(targetCount) : null,
       period: needsCount ? period : null,
       days: isWeekly ? days : [],
@@ -413,6 +414,10 @@ function EditHabitModal({ habit, onSave, onClose }) {
         <div style={S.modalHead}>Edit Habit<button onClick={onClose} style={S.closeBtn}><X size={16} /></button></div>
         <label style={S.modalLabel}>Name</label>
         <input value={name} onChange={(e) => setName(e.target.value)} style={S.sideInput} />
+        <label style={S.modalLabel}>Pillar</label>
+        <select value={pillar} onChange={(e) => setPillar(e.target.value)} style={S.sideInput}>
+          {Object.keys(PILLARS).map((p) => <option key={p} value={p}>{p}</option>)}
+        </select>
         <label style={S.modalLabel}>Type</label>
         <select value={type} onChange={(e) => setType(e.target.value)} style={S.sideInput}>
           <option value="regular">Regular (yes/no)</option>
@@ -683,6 +688,15 @@ function AllHabitsWeekly({ habits, dayAction, logSet, onDelete, onEdit, renderIn
   };
   const monthlyPct = habits.length ? Math.round((habits.reduce((s, h) => s + monthlyProgress(h), 0) / habits.length) * 100) : 0;
 
+  // Today / Yesterday / Day-before: how many habits were completed each day.
+  const dayOffISO = (offset) => { const d = new Date(); d.setDate(d.getDate() + offset); return toISO(d); };
+  const doneOnDay = (ds) => habits.filter((h) => isDoneOn(h, ds)).length;
+  const threeDay = [
+    { label: "Today", value: doneOnDay(dayOffISO(0)), color: "#4C9A6B" },
+    { label: "Yesterday", value: doneOnDay(dayOffISO(-1)), color: "var(--text-3)" },
+    { label: "Day before", value: doneOnDay(dayOffISO(-2)), color: "var(--text-3)" },
+  ];
+
   return (
     <div>
       <div style={S.mainHead}>
@@ -857,6 +871,29 @@ function AllHabitsWeekly({ habits, dayAction, logSet, onDelete, onEdit, renderIn
           <RingStat pct={monthlyPct} label="This month" sub="of monthly targets" color="#8268B0" />
         </div>
       )}
+
+      {habits.length > 0 && (
+        <div style={{ ...S.progressCard, marginTop: 14, marginBottom: 0, flexDirection: "column", alignItems: "stretch", gap: 12 }}>
+          <div style={S.threeDayTitle}>Last 3 days · habits completed</div>
+          <HabitTrendBars items={threeDay} total={habits.length} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Horizontal bars comparing how many habits were completed across recent days.
+function HabitTrendBars({ items, total }) {
+  const max = Math.max(1, total, ...items.map((i) => i.value));
+  return (
+    <div style={S.tbWrap}>
+      {items.map((it, i) => (
+        <div key={i} style={S.tbRow}>
+          <div style={S.tbLbl}>{it.label}</div>
+          <div style={S.tbTrack}><div style={{ ...S.tbBar, width: `${(it.value / max) * 100}%`, background: it.color }} /></div>
+          <div style={S.tbVal}>{it.value}/{total}</div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -1213,6 +1250,13 @@ const S = {
   actionBtn: { display: "flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 500, color: "var(--text-2)", border: "1px solid var(--border)", background: "var(--surface)", padding: "5px 10px", borderRadius: 7, cursor: "pointer", fontFamily: "inherit" },
   progressCard: { background: "var(--surface)", borderRadius: 12, padding: "16px 18px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", marginBottom: 14, display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" },
   progressDivider: { width: 1, alignSelf: "stretch", background: "var(--border)", minHeight: 48 },
+  threeDayTitle: { fontSize: 13, fontWeight: 700, fontFamily: "'Fraunces',Georgia,serif" },
+  tbWrap: { display: "flex", flexDirection: "column", gap: 8 },
+  tbRow: { display: "flex", alignItems: "center", gap: 8 },
+  tbLbl: { width: 84, fontSize: 11.5, color: "var(--text-2)", fontWeight: 600, flexShrink: 0, whiteSpace: "nowrap" },
+  tbTrack: { flex: 1, height: 14, background: "var(--surface-2)", borderRadius: 7, overflow: "hidden" },
+  tbBar: { height: "100%", borderRadius: 7, transition: "width 0.3s" },
+  tbVal: { width: 52, fontSize: 11.5, color: "var(--text-2)", fontWeight: 700, flexShrink: 0, textAlign: "right" },
   ringStat: { display: "flex", alignItems: "center", gap: 12, flex: "1 1 160px" },
   ringBox: { position: "relative", width: 70, height: 70, display: "grid", placeItems: "center", flexShrink: 0 },
   ringPct: { position: "absolute", inset: 0, display: "grid", placeItems: "center", fontSize: 16, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif" },
