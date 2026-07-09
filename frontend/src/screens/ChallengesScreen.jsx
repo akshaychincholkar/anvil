@@ -10,6 +10,16 @@ const GREEN = "#4C9A6B";
 const TODAY = new Date().toISOString().slice(0, 10);
 const prettyDate = (s) => s ? new Date(s + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
 
+function useIsMobile(bp = 620) {
+  const [m, setM] = useState(() => window.innerWidth < bp);
+  useEffect(() => {
+    const h = () => setM(window.innerWidth < bp);
+    window.addEventListener("resize", h);
+    return () => window.removeEventListener("resize", h);
+  }, [bp]);
+  return m;
+}
+
 // Plain number (grouped, up to 2 decimals) with NO currency symbol — the
 // progress bar tracks free-form units, not necessarily money.
 const fmtNum = (n) => (Number(n) || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
@@ -35,6 +45,7 @@ const blankForm = () => ({
 export default function ChallengesScreen() {
   const cur = useCurrency();
   const money = (n) => fmtMoney2(n, cur.code);
+  const isMobile = useIsMobile();
 
   const [challenges, setChallenges] = useState([]);
   const [loaded, setLoaded] = useState(false);
@@ -130,13 +141,15 @@ export default function ChallengesScreen() {
             const barColor = negative ? RED : c.status === "done" ? GREEN : ACCENT;
             return (
               <div key={c.id} style={{ ...S.card, ...(c.status === "failed" ? S.cardFailed : {}) }}>
-                <div style={S.cardTop}>
-                  <span style={S.num}>#{i + 1}</span>
+                <div style={{ ...S.cardTop, ...(isMobile ? { alignItems: "flex-start" } : {}) }}>
+                  <span style={{ ...S.num, ...(isMobile ? { marginTop: 2 } : {}) }}>#{i + 1}</span>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={S.name}>{c.name}</div>
+                    <div style={{ ...S.name, ...(isMobile ? S.nameMobile : {}) }}>{c.name}</div>
                     {c.comment && <div style={S.comment}>{c.comment}</div>}
+                    {/* On mobile the status moves below the name so the full name shows */}
+                    {isMobile && <div style={S.badgeRow}><StatusBadge status={c.status} /></div>}
                   </div>
-                  <StatusBadge status={c.status} />
+                  {!isMobile && <StatusBadge status={c.status} />}
                   <button onClick={() => openEdit(c)} style={S.iconBtn} title="Edit"><Pencil size={13} /></button>
                   <button onClick={() => remove(c)} style={S.iconBtn} title="Delete"><X size={14} /></button>
                 </div>
@@ -316,6 +329,8 @@ const S = {
   cardTop: { display: "flex", alignItems: "center", gap: 10 },
   num: { fontSize: 12, fontWeight: 800, color: "var(--text-3)", fontFamily: "'Fraunces',Georgia,serif", flexShrink: 0 },
   name: { fontSize: 15.5, fontWeight: 700, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  nameMobile: { whiteSpace: "normal", overflow: "visible", textOverflow: "clip", wordBreak: "break-word", lineHeight: 1.25 },
+  badgeRow: { marginTop: 6 },
   comment: { fontSize: 12, color: "var(--text-3)", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   badge: { fontSize: 11, fontWeight: 700, padding: "3px 9px", borderRadius: 20, border: "1px solid", flexShrink: 0, whiteSpace: "nowrap" },
   iconBtn: { border: "none", background: "var(--hover)", color: "var(--text-2)", width: 28, height: 28, borderRadius: 8, cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0 },
