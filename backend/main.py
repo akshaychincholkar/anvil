@@ -706,12 +706,15 @@ def set_habit_log_count(habit_id: int, log_date: str, body: HabitLogCount):
         #   • decreasing or keeping the count is always allowed (a correction);
         #   • increasing is allowed at most by +1 and only when out of cooldown,
         #     and it stamps last_count_at so the next gap is enforced.
-        is_today = log_date == date.today().isoformat()
+        # All times use the USER's wall clock (_user_now) — production runs in
+        # UTC, so naive date.today()/datetime.now() would misclassify "today"
+        # and record stamps the (local-time) frontend countdown misreads.
+        now = _user_now()
+        is_today = log_date == now.date().isoformat()
         stamp = None
         if interval > 0 and is_today and count > cur_count:
             if count - cur_count > 1:
                 raise HTTPException(409, "Timed habits add one entry at a time — wait for the gap, then add the next.")
-            now = datetime.now()
             last_at = existing["last_count_at"] if existing else None
             if last_at:
                 try:
@@ -756,7 +759,7 @@ def increment_habit_log(habit_id: int, log_date: str):
             "SELECT id, count, last_count_at FROM habit_log WHERE habit_id=? AND date=?", (habit_id, log_date)
         ).fetchone()
         interval = h["min_interval_min"] or 0
-        now = datetime.now()
+        now = _user_now()  # user wall clock — see set_habit_log_count
         if interval > 0 and existing and existing["last_count_at"]:
             try:
                 last = datetime.fromisoformat(existing["last_count_at"])

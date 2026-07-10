@@ -50,7 +50,9 @@ export default function GoldenBookScreen() {
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState({ title: "", image: "" });
   const [musicId, setMusicId] = useState("");
-  const [musicOn, setMusicOn] = useState(true); // enabled by default; plays when a dream is open
+  // Soft tunes always start OFF on entry — navigating away and back (or to any
+  // other module) must not leave music silently playing/re-enabled.
+  const [musicOn, setMusicOn] = useState(false);
   const [celebrate, setCelebrate] = useState(null); // { title, days }
 
   const load = useCallback(async () => {
@@ -63,8 +65,13 @@ export default function GoldenBookScreen() {
     api.deleteGolden, api.restoreGolden, load
   );
 
+  // Read the track configured in Settings → Music. Re-read when the window
+  // regains focus so a change made in Settings is picked up without a reload.
   useEffect(() => {
-    api.getSetting("golden_music").then((r) => setMusicId(ytId(r?.value || ""))).catch(() => {});
+    const refresh = () => api.getSetting("golden_music").then((r) => setMusicId(ytId(r?.value || ""))).catch(() => {});
+    refresh();
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
   }, []);
 
   // Music is started by an explicit tap on the writing screen (browsers block
@@ -252,7 +259,7 @@ function Tesla369Tracker({ g, onChanged, musicId, setMusicId, musicOn, setMusicO
           </div>
         </div>
         <div style={S.tHeadBtns}>
-          <MusicControl musicId={musicId} setMusicId={setMusicId} musicOn={musicOn} setMusicOn={setMusicOn} />
+          <MusicControl musicId={musicId} musicOn={musicOn} setMusicOn={setMusicOn} />
           <button onClick={toggleReminders} style={{ ...S.tRemBtn, ...(remOn ? S.tRemOn : {}) }}
             title={remOn ? "Reminders on" : "Turn on reminders"}>
             {remOn ? <Bell size={14} /> : <BellOff size={14} />} {remOn ? "Reminders on" : "Remind me"}
@@ -577,7 +584,7 @@ function GoalDetail({ goalId, onBack, onReload, onCelebrate, pickImage, musicId,
       {!g.t369_enabled && (
       <div style={S.writeCard}>
         <div style={S.tuneRow}>
-          <MusicControl musicId={musicId} setMusicId={setMusicId} musicOn={musicOn} setMusicOn={setMusicOn} />
+          <MusicControl musicId={musicId} musicOn={musicOn} setMusicOn={setMusicOn} />
         </div>
         <div style={S.writeNav}>
           <button onClick={() => setViewDate((d) => addDays(d, -1))} disabled={!canPrev}
@@ -643,53 +650,18 @@ function MusicAudio({ musicId, on }) {
   );
 }
 
-// Inline music control: play/pause the soft tunes + set/reset the track by
-// pasting a YouTube link (saved to the shared `golden_music` setting). Used in
-// both the normal writing view and the 369 mode.
-function MusicControl({ musicId, setMusicId, musicOn, setMusicOn }) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState("");
-
-  const openEdit = () => { setDraft(musicId ? `https://youtu.be/${musicId}` : ""); setEditing(true); };
-  const saveTrack = async () => {
-    const id = ytId(draft);
-    await api.setSetting("golden_music", draft.trim()).catch(() => {});
-    setMusicId(id);
-    if (id) setMusicOn(true);
-    setEditing(false);
-  };
-  const clearTrack = async () => {
-    await api.setSetting("golden_music", "").catch(() => {});
-    setMusicId("");
-    setEditing(false);
-  };
-
-  if (editing) {
-    return (
-      <div style={S.musicEditRow}>
-        <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") saveTrack(); if (e.key === "Escape") setEditing(false); }}
-          placeholder="Paste a YouTube link…" style={S.musicInput} />
-        <button onClick={saveTrack} style={{ ...S.tRemBtn, ...S.tuneOn }} title="Save track"><Check size={14} /></button>
-        {musicId && <button onClick={clearTrack} style={S.tRemBtn} title="Remove track"><Trash2 size={14} /></button>}
-        <button onClick={() => setEditing(false)} style={S.tRemBtn} title="Cancel"><X size={14} /></button>
-      </div>
-    );
+// Music control: play/pause the soft tunes. The track itself is configured in
+// Settings → Music (the shared `golden_music` setting). Used in both the normal
+// writing view and the 369 mode.
+function MusicControl({ musicId, musicOn, setMusicOn }) {
+  if (!musicId) {
+    return <span style={S.tuneHint}>Add a track in Settings → Music</span>;
   }
   return (
-    <div style={S.musicCtrlRow}>
-      {musicId ? (
-        <button onClick={() => setMusicOn((v) => !v)} style={{ ...S.tRemBtn, ...(musicOn ? S.tuneOn : {}) }}
-          title={musicOn ? "Soft tunes on" : "Play soft tunes"}>
-          {musicOn ? <Music2 size={14} /> : <Music size={14} />} Soft tunes
-        </button>
-      ) : (
-        <button onClick={openEdit} style={S.tRemBtn} title="Add a track"><Music size={14} /> Add music</button>
-      )}
-      {musicId && (
-        <button onClick={openEdit} style={S.musicSetBtn} title="Change / reset track"><Pencil size={12} /></button>
-      )}
-    </div>
+    <button onClick={() => setMusicOn((v) => !v)} style={{ ...S.tRemBtn, ...(musicOn ? S.tuneOn : {}) }}
+      title={musicOn ? "Soft tunes on" : "Play soft tunes"}>
+      {musicOn ? <Music2 size={14} /> : <Music size={14} />} Soft tunes
+    </button>
   );
 }
 

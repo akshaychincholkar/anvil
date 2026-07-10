@@ -60,7 +60,13 @@ export default function ExpensesScreen() {
   const [scope, setScope] = useState("day");       // "day" | "month" | "year" | "all" — drives totals + pie chart
   // Month "tag" = the ISO start-date of that billing cycle (per the Settings month-start-day), not a calendar YYYY-MM.
   const [cmpMonth, setCmpMonth] = useState(() => cycleRange(new Date(), monthStartDay)[0]);
-  const [cmpCat, setCmpCat] = useState("all");      // category sub-filter for the trend comparison
+  // Trend comparison category filter — multi-select. Empty set = "All categories".
+  const [cmpCats, setCmpCats] = useState(new Set());
+  const toggleCmpCat = (id) => setCmpCats((prev) => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
 
   const load = useCallback(() => {
     api.getExpenses().then((d) => { setCategories(d.categories); setLogs(d.logs); setLoaded(true); }).catch(() => setLoaded(true));
@@ -125,7 +131,7 @@ export default function ExpensesScreen() {
   const prevCycleStart = (cycleStart, back) => cycleRange(new Date(cycleStart + "T00:00"), monthStartDay, -back)[0];
 
   // ── Filtered-by-category logs for the selected comparison cycle + prior two ──
-  const cmpFilter = (l) => cmpCat === "all" || l.category_id === Number(cmpCat);
+  const cmpFilter = (l) => cmpCats.size === 0 || cmpCats.has(l.category_id);
   const cmpMonths = [cmpMonth, prevCycleStart(cmpMonth, 1), prevCycleStart(cmpMonth, 2)];
   const cmpTotals = cmpMonths.map((cs) => {
     const [lo, hi] = cycleRange(new Date(cs + "T00:00"), monthStartDay);
@@ -145,7 +151,7 @@ export default function ExpensesScreen() {
       .map(([cid, amount]) => ({ cat: catById[cid], amount }))
       .filter((x) => x.cat)
       .sort((a, b) => b.amount - a.amount);
-  }, [logs, cmpMonth, cmpCat, catById, monthStartDay]);
+  }, [logs, cmpMonth, cmpCats, catById, monthStartDay]);
   let cmpAcc = 0;
   const cmpSegs = cmpByCat.map((d) => {
     const start = cmpTotal > 0 ? (cmpAcc / cmpTotal) * 100 : 0;
@@ -414,14 +420,17 @@ export default function ExpensesScreen() {
             </div>
 
             <div style={{ ...S.tagRow, marginTop: 8 }}>
-              <button onClick={() => setCmpCat("all")} style={{ ...S.tagChip, ...(cmpCat === "all" ? S.tagChipOn : {}) }}>
+              <button onClick={() => setCmpCats(new Set())} style={{ ...S.tagChip, ...(cmpCats.size === 0 ? S.tagChipOn : {}) }}>
                 <Tag size={11} /> All categories
               </button>
-              {categories.map((c) => (
-                <button key={c.id} onClick={() => setCmpCat(String(c.id))} style={{ ...S.tagChip, ...(cmpCat === String(c.id) ? S.tagChipOn : {}) }}>
-                  <IconFor name={c.icon} size={11} /> {c.name}
-                </button>
-              ))}
+              {categories.map((c) => {
+                const on = cmpCats.has(c.id);
+                return (
+                  <button key={c.id} onClick={() => toggleCmpCat(c.id)} style={{ ...S.tagChip, ...(on ? S.tagChipOn : {}) }}>
+                    <IconFor name={c.icon} size={11} /> {c.name}{on && <Check size={11} style={{ marginLeft: 2 }} />}
+                  </button>
+                );
+              })}
             </div>
 
             <div style={{ ...S.trend3, marginTop: 16 }}>

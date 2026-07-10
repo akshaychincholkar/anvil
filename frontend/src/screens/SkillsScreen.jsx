@@ -191,7 +191,7 @@ export default function SkillsScreen() {
       <div style={S.head}>
         <div>
           <div style={S.eyebrow}>Anvil · Skills</div>
-          <h1 style={S.h1}>DIKW Skills</h1>
+          <h1 style={S.h1}>Skills</h1>
           <div style={S.subhead}>Data → Information → Knowledge → Wisdom</div>
         </div>
         <div style={S.headRight}>
