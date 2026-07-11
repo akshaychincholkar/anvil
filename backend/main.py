@@ -2169,8 +2169,11 @@ def set_trade_learning(body: TradeLearningBody):
 
 # ── Kickstart (motivation video hub) ─────────────────────────────────────────
 
+KICKSTART_PLATFORMS = ("youtube", "instagram")
+
 class KickstartCreate(BaseModel):
-    youtube_id: str
+    youtube_id: str          # generic video id: YouTube id or Instagram shortcode
+    platform: str = "youtube"
     title: str = ""
     start_sec: int = 0
     end_sec: Optional[int] = None
@@ -2180,6 +2183,7 @@ class KickstartCreate(BaseModel):
 
 class KickstartUpdate(BaseModel):
     youtube_id: Optional[str] = None
+    platform: Optional[str] = None
     title: Optional[str] = None
     start_sec: Optional[int] = None
     end_sec: Optional[int] = None
@@ -2189,13 +2193,14 @@ class KickstartUpdate(BaseModel):
 
 def _ks_row(r):
     return {
-        "id": r["id"], "youtube_id": r["youtube_id"], "title": r["title"],
+        "id": r["id"], "youtube_id": r["youtube_id"], "platform": r["platform"] or "youtube",
+        "title": r["title"],
         "start_sec": r["start_sec"], "end_sec": r["end_sec"],
         "days": json.loads(r["days"]), "pillars": json.loads(r["pillars"]),
         "customs": json.loads(r["customs"]),
     }
 
-_KS_COLS = "id, youtube_id, title, start_sec, end_sec, days, pillars, customs"
+_KS_COLS = "id, youtube_id, platform, title, start_sec, end_sec, days, pillars, customs"
 
 @app.get("/api/kickstart/videos")
 def get_kickstart():
@@ -2209,14 +2214,16 @@ def get_kickstart():
 @app.post("/api/kickstart/videos", status_code=201)
 def create_kickstart(body: KickstartCreate):
     if not body.youtube_id.strip():
-        raise HTTPException(400, "youtube_id required")
+        raise HTTPException(400, "video id required")
+    if body.platform not in KICKSTART_PLATFORMS:
+        raise HTTPException(400, "platform must be youtube or instagram")
     if not body.days:
         raise HTTPException(400, "at least one day tag is required")
     with db() as conn:
         cur = conn.execute(
-            f"INSERT INTO kickstart_video (user_id, youtube_id, title, start_sec, end_sec, days, pillars, customs) "
-            f"VALUES ({cu()}, ?, ?, ?, ?, ?, ?, ?)",
-            (body.youtube_id.strip(), body.title.strip(), max(0, body.start_sec), body.end_sec,
+            f"INSERT INTO kickstart_video (user_id, youtube_id, platform, title, start_sec, end_sec, days, pillars, customs) "
+            f"VALUES ({cu()}, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (body.youtube_id.strip(), body.platform, body.title.strip(), max(0, body.start_sec), body.end_sec,
              json.dumps(body.days), json.dumps(body.pillars), json.dumps(body.customs))
         )
         r = conn.execute(f"SELECT {_KS_COLS} FROM kickstart_video WHERE id=?", (cur.lastrowid,)).fetchone()
@@ -2227,8 +2234,10 @@ def update_kickstart(vid: int, body: KickstartUpdate):
     data = body.dict(exclude_unset=True)  # only fields the client actually sent
     if "days" in data and not data["days"]:
         raise HTTPException(400, "at least one day tag is required")
+    if "platform" in data and data["platform"] not in KICKSTART_PLATFORMS:
+        raise HTTPException(400, "platform must be youtube or instagram")
     updates = {}
-    for k in ("youtube_id", "title", "start_sec", "end_sec"):
+    for k in ("youtube_id", "platform", "title", "start_sec", "end_sec"):
         if k in data:
             updates[k] = data[k]   # end_sec=None is allowed → clears the trim end
     for k in ("days", "pillars", "customs"):

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Plus, X, Check, Play, Pencil, Scissors, Tag } from "lucide-react";
+import { Plus, X, Check, Play, Pencil, Scissors, Tag, Instagram, Youtube } from "lucide-react";
 import { api } from "../api.js";
 import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
 import UndoToast from "../components/UndoToast.jsx";
@@ -22,6 +22,22 @@ const ytId = (url) => {
   const m = u.match(/(?:youtu\.be\/|[?&]v=|\/embed\/|\/shorts\/)([A-Za-z0-9_-]{11})/);
   return m ? m[1] : "";
 };
+// Instagram reel / post / IGTV shortcode from a pasted link.
+const igId = (url) => {
+  if (!url) return "";
+  const m = url.trim().match(/instagram\.com\/(?:reels?|p|tv)\/([A-Za-z0-9_-]+)/);
+  return m ? m[1] : "";
+};
+// Detect platform + video id from whatever link was pasted. Instagram is
+// checked first (its links never match the YouTube patterns, but a bare
+// shortcode could pass the loose 11-char YouTube fallback).
+const parseVideo = (url) => {
+  const ig = igId(url);
+  if (ig) return { platform: "instagram", id: ig };
+  const yt = ytId(url);
+  if (yt) return { platform: "youtube", id: yt };
+  return null;
+};
 const parseTime = (s) => {
   if (!s || !String(s).trim()) return null;
   const parts = String(s).split(":").map((x) => parseInt(x.trim(), 10));
@@ -34,8 +50,10 @@ const fmtTime = (sec) => {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 };
 const embedUrl = (v) =>
-  `https://www.youtube.com/embed/${v.youtube_id}?start=${v.start_sec || 0}` +
-  (v.end_sec ? `&end=${v.end_sec}` : "") + `&autoplay=1&rel=0`;
+  v.platform === "instagram"
+    ? `https://www.instagram.com/p/${v.youtube_id}/embed/`   // works for reels & posts
+    : `https://www.youtube.com/embed/${v.youtube_id}?start=${v.start_sec || 0}` +
+      (v.end_sec ? `&end=${v.end_sec}` : "") + `&autoplay=1&rel=0`;
 
 const blankForm = () => ({ id: null, url: "", title: "", start: "", end: "", days: [todayName()], pillars: [], customs: [] });
 
@@ -95,17 +113,24 @@ export default function KickstartScreen() {
   }));
 
   const openEdit = (v) => setForm({
-    id: v.id, url: `https://youtu.be/${v.youtube_id}`, title: v.title,
+    id: v.id,
+    url: v.platform === "instagram"
+      ? `https://www.instagram.com/reel/${v.youtube_id}/`
+      : `https://youtu.be/${v.youtube_id}`,
+    title: v.title,
     start: fmtTime(v.start_sec), end: v.end_sec ? fmtTime(v.end_sec) : "",
     days: [...v.days], pillars: [...v.pillars], customs: [...v.customs],
   });
 
   const save = async () => {
-    const id = ytId(form.url);
-    if (!id || form.days.length === 0 || !form.title.trim()) return;
+    const parsed = parseVideo(form.url);
+    if (!parsed || form.days.length === 0 || !form.title.trim()) return;
+    const isInsta = parsed.platform === "instagram";
     const payload = {
-      youtube_id: id, title: form.title.trim(),
-      start_sec: parseTime(form.start) || 0, end_sec: parseTime(form.end),
+      youtube_id: parsed.id, platform: parsed.platform, title: form.title.trim(),
+      // Instagram embeds can't be trimmed — always play the whole clip.
+      start_sec: isInsta ? 0 : (parseTime(form.start) || 0),
+      end_sec: isInsta ? null : parseTime(form.end),
       days: form.days, pillars: form.pillars, customs: form.customs,
     };
     if (form.id) await api.updateKickstart(form.id, payload);
@@ -123,8 +148,9 @@ export default function KickstartScreen() {
   }), [videos, filter]);
 
   const isFilter = (type, value) => filter.type === type && filter.value === value;
+  const formParsed = form ? parseVideo(form.url) : null;
   const missing = form ? [
-    !ytId(form.url) && "a valid YouTube link",
+    !formParsed && "a valid YouTube or Instagram link",
     !form.title.trim() && "a title",
     form.days.length === 0 && "at least one day",
   ].filter(Boolean) : [];
@@ -145,21 +171,34 @@ export default function KickstartScreen() {
       {form && (
         <div style={S.card}>
           <div style={S.cardTitle}>{form.id ? "Edit video" : "Add video"}</div>
-          <input placeholder="YouTube link (or video ID)" value={form.url}
+          <input placeholder="YouTube or Instagram link" value={form.url}
             onChange={(e) => setForm({ ...form, url: e.target.value })} style={S.input} autoFocus />
-          {form.url && !ytId(form.url) && <div style={S.warn}>Couldn't find a YouTube video ID in that link.</div>}
+          {form.url && !formParsed && <div style={S.warn}>Couldn't find a YouTube or Instagram video in that link.</div>}
+          {formParsed && (
+            <div style={S.platformRow}>
+              {formParsed.platform === "instagram"
+                ? <><Instagram size={13} color="#C2536B" /> Instagram reel detected</>
+                : <><Youtube size={13} color="#C2536B" /> YouTube video detected</>}
+            </div>
+          )}
           <input placeholder="Title (required)" value={form.title}
             onChange={(e) => setForm({ ...form, title: e.target.value })} style={{ ...S.input, marginTop: 8 }} />
 
-          <div style={S.trimRow}>
-            <Scissors size={15} color="var(--text-3)" />
-            <label style={S.trimField}><span style={S.trimLbl}>Start</span>
-              <input placeholder="0:30" value={form.start} onChange={(e) => setForm({ ...form, start: e.target.value })} style={S.trimInput} /></label>
-            <span style={S.trimArrow}>→</span>
-            <label style={S.trimField}><span style={S.trimLbl}>End</span>
-              <input placeholder="end (optional)" value={form.end} onChange={(e) => setForm({ ...form, end: e.target.value })} style={S.trimInput} /></label>
-          </div>
-          <div style={S.hint}>Only this trimmed part plays. Use m:ss (e.g. 1:30). Leave End blank to play to the end.</div>
+          {formParsed?.platform === "instagram" ? (
+            <div style={S.hint}>Instagram clips always play in full — trimming isn't supported by Instagram embeds.</div>
+          ) : (
+            <>
+              <div style={S.trimRow}>
+                <Scissors size={15} color="var(--text-3)" />
+                <label style={S.trimField}><span style={S.trimLbl}>Start</span>
+                  <input placeholder="0:30" value={form.start} onChange={(e) => setForm({ ...form, start: e.target.value })} style={S.trimInput} /></label>
+                <span style={S.trimArrow}>→</span>
+                <label style={S.trimField}><span style={S.trimLbl}>End</span>
+                  <input placeholder="end (optional)" value={form.end} onChange={(e) => setForm({ ...form, end: e.target.value })} style={S.trimInput} /></label>
+              </div>
+              <div style={S.hint}>Only this trimmed part plays. Use m:ss (e.g. 1:30). Leave End blank to play to the end.</div>
+            </>
+          )}
 
           {/* Day tags — mandatory */}
           <div style={S.tagBlock}>
@@ -255,10 +294,16 @@ export default function KickstartScreen() {
         <div style={S.grid}>
           {filtered.map((v) => (
             <div key={v.id} style={S.videoCard}>
-              <div style={S.thumbWrap}>
+              <div style={{ ...S.thumbWrap, ...(v.platform === "instagram" && playing === v.id ? S.thumbWrapInsta : {}) }}>
                 {playing === v.id ? (
                   <iframe src={embedUrl(v)} title={v.title || v.youtube_id} style={S.iframe} frameBorder="0"
                     allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen />
+                ) : v.platform === "instagram" ? (
+                  <button onClick={() => setPlaying(v.id)} style={{ ...S.thumbBtn, ...S.instaThumb }}>
+                    <Instagram size={34} color="#fff" />
+                    <span style={S.instaLabel}>Instagram reel</span>
+                    <span style={S.playOverlay}><Play size={22} color="#fff" fill="#fff" /></span>
+                  </button>
                 ) : (
                   <button onClick={() => setPlaying(v.id)} style={S.thumbBtn}>
                     <img src={`https://img.youtube.com/vi/${v.youtube_id}/hqdefault.jpg`} alt="" style={S.thumb} />
@@ -302,6 +347,7 @@ const S = {
   input: { border: "1px solid var(--border)", borderRadius: 8, padding: "9px 11px", fontSize: 13.5, fontFamily: "inherit", color: "var(--text)", background: "var(--surface)", outline: "none", width: "100%", boxSizing: "border-box" },
   warn: { fontSize: 11.5, color: "#C2773B", marginTop: 5, fontWeight: 600 },
   hint: { fontSize: 11.5, color: "var(--text-3)", marginTop: 6, lineHeight: 1.4 },
+  platformRow: { display: "flex", alignItems: "center", gap: 5, fontSize: 11.5, color: "var(--text-2)", fontWeight: 600, marginTop: 5 },
 
   trimRow: { display: "flex", alignItems: "flex-end", gap: 10, marginTop: 10 },
   trimField: { display: "flex", flexDirection: "column", gap: 4, flex: 1 },
@@ -338,7 +384,12 @@ const S = {
   grid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 14 },
   videoCard: { background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", display: "flex", flexDirection: "column" },
   thumbWrap: { position: "relative", width: "100%", aspectRatio: "16 / 9", background: "#000" },
+  // Reels are vertical — give the playing Instagram embed a portrait frame.
+  thumbWrapInsta: { aspectRatio: "9 / 14" },
   thumbBtn: { border: "none", padding: 0, margin: 0, cursor: "pointer", width: "100%", height: "100%", position: "relative", display: "block", background: "#000" },
+  // No public thumbnail API for Instagram — show a branded gradient placeholder.
+  instaThumb: { background: "linear-gradient(135deg, #833AB4, #E1306C 55%, #F77737)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6 },
+  instaLabel: { color: "rgba(255,255,255,0.9)", fontSize: 12, fontWeight: 700, letterSpacing: "0.04em" },
   thumb: { width: "100%", height: "100%", objectFit: "cover", display: "block" },
   playOverlay: { position: "absolute", inset: 0, display: "grid", placeItems: "center", background: "rgba(0,0,0,0.28)" },
   trimBadge: { position: "absolute", bottom: 8, right: 8, background: "rgba(0,0,0,0.75)", color: "#fff", fontSize: 11, fontWeight: 700, padding: "2px 7px", borderRadius: 6, fontFamily: "'Fraunces',Georgia,serif" },

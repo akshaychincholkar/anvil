@@ -137,11 +137,13 @@ export default function HabitTracker() {
   const pick = (id) => { setSelected(id); if (isMobile) setSidebarOpen(false); };
 
   // Per-day count habits open the counter popup; everything else toggles done/undone.
-  // While a habit is inside its interval cooldown, show the counter inline (below
-  // the row) instead of the popup, so the countdown is visible without a modal.
+  // While a habit is inside its interval cooldown, desktop shows the counter
+  // inline (below the row) so the countdown is visible without a modal. On
+  // mobile that inline row is too cramped to notice — always open the popup,
+  // which shows the "Wait X:XX before the next entry" countdown itself.
   const dayAction = (habit, dateStr) => {
     if ((habit.type === "minimum" || habit.type === "maximum") && habit.period === "day") {
-      if (cooldownMs(habit, dateStr) > 0) {
+      if (!isMobile && cooldownMs(habit, dateStr) > 0) {
         setInlineCounter((c) => (c && c.habitId === habit.id && c.date === dateStr ? null : { habitId: habit.id, date: dateStr }));
       } else {
         setCountPopup({ habit, date: dateStr });

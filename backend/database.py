@@ -126,6 +126,11 @@ def migrate_db():
         if ec_cols:
             add_col("expense_category", "position", "INTEGER NOT NULL DEFAULT 0")
 
+        # Kickstart: which platform the clip lives on. youtube_id doubles as the
+        # generic video id (an Instagram reel/post shortcode when platform is
+        # 'instagram'); existing rows are all YouTube.
+        add_col("kickstart_video", "platform", "TEXT NOT NULL DEFAULT 'youtube'")
+
 def init_db():
     with db() as conn:
         conn.executescript("""
@@ -339,6 +344,7 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL DEFAULT 1,
             youtube_id TEXT NOT NULL,
+            platform TEXT NOT NULL DEFAULT 'youtube',
             title TEXT NOT NULL DEFAULT '',
             start_sec INTEGER NOT NULL DEFAULT 0,
             end_sec INTEGER,
