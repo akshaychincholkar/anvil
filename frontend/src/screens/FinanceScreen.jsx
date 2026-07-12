@@ -9,6 +9,7 @@ import { useCurrency, fmtMoney, fmtCompact } from "../currency.js";
 import { useMonthStartDay, cycleRange } from "../monthCycle.js";
 import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
 import UndoToast from "../components/UndoToast.jsx";
+import Dropdown from "../components/Dropdown.jsx";
 
 function useIsMobile(bp = 600) {
   const [m, setM] = useState(() => window.innerWidth < bp);
@@ -156,8 +157,19 @@ function Overview({ txns, investments, loaded, money, cur }) {
   const net = totalIn - totalOutAll;
 
   const totalInvested = investments.reduce((n, i) => n + i.invested, 0);
-  const totalCurrentValue = investments.reduce((n, i) => n + i.current_value, 0);
-  const investGain = totalCurrentValue - totalInvested;
+
+  // Daily budget for the CURRENT cycle (independent of the selected preset):
+  // what's left ÷ days until the next month-start, shown under "Remaining".
+  const dailyBudget = useMemo(() => {
+    const [cLo, cHi] = cycleRange(new Date(), monthStartDay);
+    const inCycle = (t) => t.date >= cLo && t.date <= cHi;
+    const cIn = txns.filter((t) => t.kind === "income" && inCycle(t)).reduce((n, t) => n + t.amount, 0);
+    const cOut = txns.filter((t) => t.kind === "expense" && inCycle(t)).reduce((n, t) => n + t.amount, 0);
+    const cInv = investments.filter((i) => inCycle(i)).reduce((n, i) => n + i.invested, 0);
+    const remaining = cIn - cOut - cInv;
+    const daysLeft = Math.max(1, Math.round((new Date(cHi + "T00:00") - new Date(TODAY + "T00:00")) / 86400000) + 1);
+    return { remaining, daysLeft, perDay: remaining / daysLeft };
+  }, [txns, investments, monthStartDay]);
 
   const byCat = (list) => {
     const m = {};
@@ -187,7 +199,10 @@ function Overview({ txns, investments, loaded, money, cur }) {
         <SumCard icon={<ArrowUpRight size={16} />} label="Expenses" value={money(totalOut)} color={EXPENSE} />
         <SumCard icon={<Sprout size={16} />} label="Invested" value={money(totalInvestedInRange)} color={INVEST} />
         <SumCard icon={net >= 0 ? <PiggyBank size={16} /> : <TrendingDown size={16} />}
-          label="Remaining" value={money(net)} color={net >= 0 ? INCOME : EXPENSE} />
+          label="Remaining" value={money(net)} color={net >= 0 ? INCOME : EXPENSE}
+          sub={dailyBudget.perDay >= 0
+            ? `≈ ${money(dailyBudget.perDay)}/day · ${dailyBudget.daysLeft}d left`
+            : `overspent · ${dailyBudget.daysLeft}d left`} />
       </div>
       {totalInvestedInRange > 0 && (
         <div style={S.investNote}>
@@ -202,15 +217,12 @@ function Overview({ txns, investments, loaded, money, cur }) {
               <Sprout size={18} color={INVEST} />
               <div>
                 <div style={S.cardTitle}>Assets &amp; investments</div>
-                <div style={S.cardSub}>Across all your holdings, all time</div>
+                <div style={S.cardSub}>Total invested across all your holdings, all time</div>
               </div>
             </div>
-            <div style={{ ...S.cardTotal, color: INVEST }}>{money(totalCurrentValue)}</div>
+            <div style={{ ...S.cardTotal, color: INVEST }}>{money(totalInvested)}</div>
           </div>
-          <div style={S.healthStats}>
-            <div style={S.healthStat}><span style={S.healthStatV}>{money(totalInvested)}</span><span style={S.healthStatL}>Total invested</span></div>
-            <div style={S.healthStat}><span style={{ ...S.healthStatV, color: investGain >= 0 ? INCOME : EXPENSE }}>{investGain >= 0 ? "+" : ""}{money(investGain)}</span><span style={S.healthStatL}>Unrealized gain</span></div>
-          </div>
+          <ForecastBlock invested={totalInvested} investments={investments} money={money} cur={cur} />
         </div>
       )}
 
@@ -230,7 +242,112 @@ function Overview({ txns, investments, loaded, money, cur }) {
   );
 }
 
-function SumCard({ icon, wideIcon, label, value, color, style, wide }) {
+// Growth forecast: SIP-style projection. You keep investing a monthly amount
+// (e.g. ₹15k/month) that steps up by a yearly % (e.g. +10% → ₹16,500/month
+// from year two), all compounding monthly at the annual rate (default 10%).
+// Every input persists. Timeline can be viewed month-wise or year-wise.
+function ForecastBlock({ invested, investments, money, cur }) {
+  const [rate, setRate] = useState(10);
+  const [monthly, setMonthly] = useState("");
+  const [stepUp, setStepUp] = useState(5);
+  useEffect(() => {
+    api.getSetting("invest_forecast_rate").then((r) => {
+      const v = parseFloat(r?.value);
+      if (!isNaN(v) && v > 0) setRate(v);
+    }).catch(() => {});
+    api.getSetting("invest_forecast_stepup").then((r) => {
+      const v = parseFloat(r?.value);
+      if (!isNaN(v) && v >= 0) setStepUp(v);
+    }).catch(() => {});
+    api.getSetting("invest_forecast_monthly").then((r) => {
+      const v = parseFloat(r?.value);
+      if (!isNaN(v) && v >= 0) { setMonthly(v); return; }
+      // Never set — suggest your actual pace: total invested ÷ distinct months.
+      const months = new Set((investments || []).map((i) => (i.date || "").slice(0, 7)).filter(Boolean));
+      if (months.size > 0) setMonthly(Math.round(invested / months.size / 100) * 100);
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const persistNum = (key, v, min = 0) => {
+    const n = parseFloat(v);
+    if (!isNaN(n) && n >= min) api.setSetting(key, n).catch(() => {});
+  };
+  const changeRate = (v) => { setRate(v); persistNum("invest_forecast_rate", v, 0.01); };
+  const changeMonthly = (v) => { setMonthly(v); persistNum("invest_forecast_monthly", v); };
+  const changeStepUp = (v) => { setStepUp(v); persistNum("invest_forecast_stepup", v); };
+
+  const r = parseFloat(rate);
+  const pct = !isNaN(r) && r > 0 ? r : 10;
+  const m = Math.max(0, parseFloat(monthly) || 0);
+  const sPct = Math.max(0, parseFloat(stepUp) || 0);
+  const i = pct / 100 / 12; // monthly compounding, standard SIP maths
+
+  // Simulate month by month (annuity-due: each installment compounds the month
+  // it's invested). After every 12 months the contribution steps up by sPct%.
+  const fv = (totalMonths) => {
+    let corpus = invested, contrib = m, putIn = invested;
+    for (let t = 1; t <= totalMonths; t++) {
+      corpus = (corpus + contrib) * (1 + i);
+      putIn += contrib;
+      if (t % 12 === 0) contrib *= 1 + sPct / 100;
+    }
+    return { value: corpus, putIn };
+  };
+  // A bar every 2 years across the 20-year horizon.
+  const milestones = Array.from({ length: 10 }, (_, k) => (k + 1) * 24);
+  const bars = milestones.map((mo) => ({ mo, ...fv(mo) }));
+  const max = Math.max(...bars.map((b) => b.value), 1);
+  const last = bars[bars.length - 1];
+
+  return (
+    <div style={S.forecastWrap}>
+      <div style={S.forecastHead}>
+        <div>
+          <div style={S.forecastTitle}>Growth forecast</div>
+          <div style={S.cardSub}>
+            {money(m)}/month{sPct > 0 ? `, stepping up ${sPct}% yearly (${money(m * (1 + sPct / 100))}/mo from year 2)` : ""}
+          </div>
+        </div>
+        <div style={S.forecastInputs}>
+          <label style={S.rateWrap} title="How much you invest every month">
+            <span style={S.rateUnit}>{cur.symbol}</span>
+            <input type="number" min="0" step="500" value={monthly} placeholder="15000"
+              onChange={(e) => changeMonthly(e.target.value)} style={{ ...S.rateInput, width: 76, textAlign: "left" }} />
+            <span style={S.rateUnit}>/ mo</span>
+          </label>
+          <label style={S.rateWrap} title="Yearly increase of the monthly amount">
+            <span style={S.rateUnit}>+</span>
+            <input type="number" min="0" max="100" step="1" value={stepUp}
+              onChange={(e) => changeStepUp(e.target.value)} style={{ ...S.rateInput, width: 40 }} />
+            <span style={S.rateUnit}>% / yr</span>
+          </label>
+          <label style={S.rateWrap} title="Expected annual return">
+            <input type="number" min="1" max="100" step="0.5" value={rate}
+              onChange={(e) => changeRate(e.target.value)} style={S.rateInput} />
+            <span style={S.rateUnit}>% / yr</span>
+          </label>
+        </div>
+      </div>
+
+      <div style={S.forecastBars}>
+        {bars.map((b, idx) => (
+          <div key={b.mo} style={S.fBarCol}>
+            <div style={S.fBarVal}>{fmtCompact(b.value, cur.code)}</div>
+            <div style={S.fBarTrack}>
+              <div style={{ ...S.fBar, height: `${Math.max(6, (b.value / max) * 100)}%`, opacity: 0.45 + 0.55 * (idx / (bars.length - 1)) }} />
+            </div>
+            <div style={S.fBarLbl}>{b.mo / 12}y</div>
+          </div>
+        ))}
+      </div>
+      <div style={S.forecastNote}>
+        In 20 years at {pct}% p.a. → <b>{money(last.value)}</b> (you'd put in {money(last.putIn)}, growth adds {money(Math.max(0, last.value - last.putIn))})
+      </div>
+    </div>
+  );
+}
+
+function SumCard({ icon, wideIcon, label, value, color, style, wide, sub }) {
   // Wide (full-width) variant: a centered row with a big icon filling the space.
   if (wide) {
     return (
@@ -239,6 +356,7 @@ function SumCard({ icon, wideIcon, label, value, color, style, wide }) {
         <div style={S.sumWideText}>
           <div style={S.sumLabel}>{label}</div>
           <div style={{ ...S.sumVal, color, marginTop: 0 }}>{value}</div>
+          {sub && <div style={S.sumSub}>{sub}</div>}
         </div>
       </div>
     );
@@ -248,6 +366,7 @@ function SumCard({ icon, wideIcon, label, value, color, style, wide }) {
       <div style={{ ...S.sumIcon, color, background: color + "1A" }}>{icon}</div>
       <div style={S.sumLabel}>{label}</div>
       <div style={{ ...S.sumVal, color }}>{value}</div>
+      {sub && <div style={S.sumSub}>{sub}</div>}
     </div>
   );
 }
@@ -438,8 +557,6 @@ function MoneyTab({ txns, expCats, investments, fixedItems, reload, money, cur }
     reload();
   };
   const investedTotal = investments.reduce((n, i) => n + i.invested, 0);
-  const currentTotal = investments.reduce((n, i) => n + i.current_value, 0);
-  const investGain = currentTotal - investedTotal;
 
   const add = async () => {
     const amt = parseFloat(amount);
@@ -485,9 +602,7 @@ function MoneyTab({ txns, expCats, investments, fixedItems, reload, money, cur }
         <div style={S.formGrid}>
           <input type="number" inputMode="decimal" placeholder="Amount" value={amount}
             onChange={(e) => setAmount(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} style={S.input} autoFocus />
-          <select value={category} onChange={(e) => setCategory(e.target.value)} style={S.input}>
-            {INCOME_CATS.map((c) => <option key={c}>{c}</option>)}
-          </select>
+          <Dropdown value={category} options={INCOME_CATS} onChange={setCategory} />
           <input type="date" value={date} max={TODAY} onChange={(e) => setDate(e.target.value)} style={S.input} />
         </div>
         <input placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)}
@@ -539,7 +654,7 @@ function MoneyTab({ txns, expCats, investments, fixedItems, reload, money, cur }
             <Sprout size={18} color={INVEST} />
             <div>
               <div style={S.cardTitle}>Investments</div>
-              <div style={S.cardSub}>Asset generation — what you've put in vs. what it's worth now</div>
+              <div style={S.cardSub}>Asset generation — money you've set aside</div>
             </div>
           </div>
           <button onClick={openAddInv} style={S.invAddBtn}><Plus size={14} /> Add</button>
@@ -548,30 +663,21 @@ function MoneyTab({ txns, expCats, investments, fixedItems, reload, money, cur }
         {investments.length === 0 ? <div style={S.muted}>No investments tracked yet.</div> : (
           <>
             <div style={S.healthStats}>
-              <div style={S.healthStat}><span style={S.healthStatV}>{money(investedTotal)}</span><span style={S.healthStatL}>Invested</span></div>
-              <div style={S.healthStat}><span style={S.healthStatV}>{money(currentTotal)}</span><span style={S.healthStatL}>Current value</span></div>
-              <div style={S.healthStat}><span style={{ ...S.healthStatV, color: investGain >= 0 ? INCOME : EXPENSE }}>{investGain >= 0 ? "+" : ""}{money(investGain)}</span><span style={S.healthStatL}>Gain / loss</span></div>
+              <div style={S.healthStat}><span style={S.healthStatV}>{money(investedTotal)}</span><span style={S.healthStatL}>Total invested</span></div>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
-              {investments.map((inv) => {
-                const gain = inv.current_value - inv.invested;
-                const pct = inv.invested > 0 ? (gain / inv.invested) * 100 : 0;
-                return (
-                  <div key={inv.id} style={S.invRow}>
-                    <span style={{ ...S.txnDot, background: INVEST }} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={S.txnCat}>{inv.name}</div>
-                      <div style={S.txnNote}>{inv.kind} · invested {money(inv.invested)}</div>
-                    </div>
-                    <div style={{ textAlign: "right" }}>
-                      <div style={S.txnAmt}>{money(inv.current_value)}</div>
-                      <div style={{ ...S.invPct, color: gain >= 0 ? INCOME : EXPENSE }}>{gain >= 0 ? "+" : ""}{Math.round(pct)}%</div>
-                    </div>
-                    <button onClick={() => openEditInv(inv)} style={S.delBtn}><Pencil size={13} /></button>
-                    <button onClick={() => deleteInvItem(inv.id, inv.name)} style={S.delBtn}><X size={14} /></button>
+              {investments.map((inv) => (
+                <div key={inv.id} style={S.invRow}>
+                  <span style={{ ...S.txnDot, background: INVEST }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={S.txnCat}>{inv.name}</div>
+                    <div style={S.txnNote}>{inv.kind} · {inv.date}</div>
                   </div>
-                );
-              })}
+                  <div style={S.txnAmt}>{money(inv.invested)}</div>
+                  <button onClick={() => openEditInv(inv)} style={S.delBtn}><Pencil size={13} /></button>
+                  <button onClick={() => deleteInvItem(inv.id, inv.name)} style={S.delBtn}><X size={14} /></button>
+                </div>
+              ))}
             </div>
           </>
         )}
@@ -589,9 +695,8 @@ function MoneyTab({ txns, expCats, investments, fixedItems, reload, money, cur }
                     <div key={t.id} style={S.editTxn}>
                       <div style={S.formGrid}>
                         <input type="number" inputMode="decimal" value={edit.amount} onChange={(e) => setEdit({ ...edit, amount: e.target.value })} style={S.input} />
-                        <select value={edit.category} onChange={(e) => setEdit({ ...edit, category: e.target.value })} style={S.input}>
-                          {editCats.map((c) => <option key={c}>{c}</option>)}
-                        </select>
+                        <Dropdown value={edit.category} options={editCats}
+                          onChange={(v) => setEdit({ ...edit, category: v })} />
                         <input type="date" value={edit.date} max={TODAY} onChange={(e) => setEdit({ ...edit, date: e.target.value })} style={S.input} />
                       </div>
                       <input placeholder="Note (optional)" value={edit.note} onChange={(e) => setEdit({ ...edit, note: e.target.value })}
@@ -634,9 +739,8 @@ function MoneyTab({ txns, expCats, investments, fixedItems, reload, money, cur }
               placeholder="e.g. Nifty Index Fund, HDFC FD…" style={S.input} />
 
             <label style={S.label}>Type</label>
-            <select value={invForm.kind} onChange={(e) => setInvForm((f) => ({ ...f, kind: e.target.value }))} style={S.input}>
-              {INVEST_KINDS.map((k) => <option key={k}>{k}</option>)}
-            </select>
+            <Dropdown value={invForm.kind} options={INVEST_KINDS}
+              onChange={(v) => setInvForm((f) => ({ ...f, kind: v }))} />
 
             <div style={S.formGrid}>
               <div>
@@ -694,13 +798,12 @@ function MoneyTab({ txns, expCats, investments, fixedItems, reload, money, cur }
               <div>
                 <label style={S.label}>{fixedForm.kind === "expense" ? "Category" : "Type"}</label>
                 {fixedForm.kind === "expense" ? (
-                  <select value={fixedForm.category_id} onChange={(e) => setFixedForm((f) => ({ ...f, category_id: e.target.value }))} style={S.input}>
-                    {expCats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
+                  <Dropdown value={fixedForm.category_id}
+                    options={expCats.map((c) => ({ value: c.id, label: c.name }))}
+                    onChange={(v) => setFixedForm((f) => ({ ...f, category_id: v }))} />
                 ) : (
-                  <select value={fixedForm.invest_kind} onChange={(e) => setFixedForm((f) => ({ ...f, invest_kind: e.target.value }))} style={S.input}>
-                    {INVEST_KINDS.map((k) => <option key={k}>{k}</option>)}
-                  </select>
+                  <Dropdown value={fixedForm.invest_kind} options={INVEST_KINDS}
+                    onChange={(v) => setFixedForm((f) => ({ ...f, invest_kind: v }))} />
                 )}
               </div>
             </div>
@@ -1023,6 +1126,7 @@ const S = {
   sumWideText: { textAlign: "center" },
   sumLabel: { fontSize: 11.5, color: "var(--text-3)", fontWeight: 600 },
   sumVal: { fontSize: 18, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif", marginTop: 2, letterSpacing: "-0.01em", wordBreak: "break-word" },
+  sumSub: { fontSize: 10.5, color: "var(--text-3)", fontWeight: 600, marginTop: 3 },
 
   card: { background: "var(--surface)", borderRadius: 16, padding: 18, boxShadow: "0 1px 3px rgba(0,0,0,0.05)", border: "1px solid var(--border)", marginBottom: 16 },
   cardTitleRow: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14, gap: 10 },
@@ -1064,6 +1168,21 @@ const S = {
   healthStat: { display: "flex", flexDirection: "column" },
   healthStatV: { fontSize: 18, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif" },
   healthStatL: { fontSize: 11, color: "var(--text-3)", fontWeight: 600 },
+
+  forecastWrap: { marginTop: 4, paddingTop: 14, borderTop: "1px solid var(--border)" },
+  forecastHead: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap", marginBottom: 14 },
+  forecastInputs: { display: "flex", gap: 8, flexWrap: "wrap" },
+  forecastTitle: { fontSize: 14, fontWeight: 700, fontFamily: "'Fraunces',Georgia,serif" },
+  rateWrap: { display: "inline-flex", alignItems: "center", gap: 4, border: "1px solid var(--border)", borderRadius: 9, padding: "5px 10px", background: "var(--surface-2)" },
+  rateInput: { border: "none", background: "none", outline: "none", width: 52, fontSize: 14, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif", color: "var(--text)", textAlign: "right" },
+  rateUnit: { fontSize: 11.5, color: "var(--text-3)", fontWeight: 600 },
+  forecastBars: { display: "flex", alignItems: "stretch", gap: 8 },
+  fBarCol: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, minWidth: 0 },
+  fBarVal: { fontSize: 10.5, fontWeight: 700, color: "var(--text-2)", whiteSpace: "nowrap" },
+  fBarTrack: { width: "100%", maxWidth: 44, height: 110, display: "flex", alignItems: "flex-end" },
+  fBar: { width: "100%", background: "#3A7CA5", borderRadius: "6px 6px 2px 2px", transition: "height 0.35s ease" },
+  fBarLbl: { fontSize: 10.5, fontWeight: 700, color: "var(--text-3)" },
+  forecastNote: { fontSize: 11.5, color: "var(--text-3)", marginTop: 12, textAlign: "center" },
   tip: { fontSize: 12.5, lineHeight: 1.5, padding: "10px 12px", borderRadius: 10, border: "1px solid", fontWeight: 500 },
 
   kindToggle: { display: "flex", gap: 8, marginBottom: 12 },

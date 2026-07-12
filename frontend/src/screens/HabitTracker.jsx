@@ -3,6 +3,15 @@ import { Pencil, Plus, Bell, Check, Flame, LayoutGrid, Menu, X, MoreHorizontal, 
 import { api } from "../api.js";
 import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
 import UndoToast from "../components/UndoToast.jsx";
+import Dropdown from "../components/Dropdown.jsx";
+
+const HABIT_TYPES = [
+  { value: "regular", label: "Regular (yes/no)" },
+  { value: "weekly", label: "Weekly (specific days)" },
+  { value: "minimum", label: "Minimum (at least N)" },
+  { value: "maximum", label: "Maximum (no more than N)" },
+];
+const PERIODS = ["day", "week", "month", "year"];
 
 const PILLARS = {
   Financial:    { dot: "#C9A227", soft: "rgba(201,162,39,0.12)" },
@@ -340,15 +349,10 @@ function AddHabitForm({ habit, onChange, onSave, onCancel }) {
         onChange={(e) => onChange((n) => ({ ...n, name: e.target.value }))}
         onKeyDown={(e) => e.key === "Enter" && onSave()}
         style={S.sideInput} />
-      <select value={habit.pillar} onChange={(e) => onChange((n) => ({ ...n, pillar: e.target.value }))} style={S.sideInput}>
-        {Object.keys(PILLARS).map((p) => <option key={p}>{p}</option>)}
-      </select>
-      <select value={habit.type} onChange={(e) => onChange((n) => ({ ...n, type: e.target.value }))} style={S.sideInput}>
-        <option value="regular">Regular (yes/no)</option>
-        <option value="weekly">Weekly (specific days)</option>
-        <option value="minimum">Minimum (at least N)</option>
-        <option value="maximum">Maximum (no more than N)</option>
-      </select>
+      <Dropdown value={habit.pillar} options={Object.keys(PILLARS)}
+        onChange={(v) => onChange((n) => ({ ...n, pillar: v }))} />
+      <Dropdown value={habit.type} options={HABIT_TYPES}
+        onChange={(v) => onChange((n) => ({ ...n, type: v }))} />
       {isWeekly && (
         <>
           <div style={S.pickHint}>Do this on…</div>
@@ -361,9 +365,8 @@ function AddHabitForm({ habit, onChange, onSave, onCancel }) {
             <input type="number" min={1} placeholder="N" value={habit.target_count || ""}
               onChange={(e) => onChange((n) => ({ ...n, target_count: e.target.value }))}
               style={{ ...S.sideInput, width: 60 }} />
-            <select value={habit.period} onChange={(e) => onChange((n) => ({ ...n, period: e.target.value }))} style={S.sideInput}>
-              {["day","week","month","year"].map((p) => <option key={p}>{p}</option>)}
-            </select>
+            <Dropdown value={habit.period} options={PERIODS} style={{ flex: 1 }}
+              onChange={(v) => onChange((n) => ({ ...n, period: v }))} />
           </div>
           {habit.period === "day" && (
             <>
@@ -417,16 +420,9 @@ function EditHabitModal({ habit, onSave, onClose }) {
         <label style={S.modalLabel}>Name</label>
         <input value={name} onChange={(e) => setName(e.target.value)} style={S.sideInput} />
         <label style={S.modalLabel}>Pillar</label>
-        <select value={pillar} onChange={(e) => setPillar(e.target.value)} style={S.sideInput}>
-          {Object.keys(PILLARS).map((p) => <option key={p} value={p}>{p}</option>)}
-        </select>
+        <Dropdown value={pillar} options={Object.keys(PILLARS)} onChange={setPillar} />
         <label style={S.modalLabel}>Type</label>
-        <select value={type} onChange={(e) => setType(e.target.value)} style={S.sideInput}>
-          <option value="regular">Regular (yes/no)</option>
-          <option value="weekly">Weekly (specific days)</option>
-          <option value="minimum">Minimum (at least N)</option>
-          <option value="maximum">Maximum (no more than N)</option>
-        </select>
+        <Dropdown value={type} options={HABIT_TYPES} onChange={setType} />
         {isWeekly && (
           <>
             <label style={S.modalLabel}>Days</label>
@@ -437,9 +433,7 @@ function EditHabitModal({ habit, onSave, onClose }) {
           <>
             <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
               <input type="number" min={1} value={targetCount} onChange={(e) => setTargetCount(e.target.value)} style={{ ...S.sideInput, width: 70 }} />
-              <select value={period} onChange={(e) => setPeriod(e.target.value)} style={S.sideInput}>
-                {["day","week","month","year"].map((p) => <option key={p}>{p}</option>)}
-              </select>
+              <Dropdown value={period} options={PERIODS} onChange={setPeriod} style={{ flex: 1 }} />
             </div>
             {period === "day" && (
               <>
@@ -560,6 +554,11 @@ function CountPopup({ habit, date, initialCount, initialNote, onSave, onClear, o
         {gated && waitMs <= 0 && (
           <div style={{ textAlign: "center", fontSize: 11.5, color: "var(--text-3)", marginBottom: 8 }}>
             {staged > 0 ? "Press Set to confirm this entry" : `Tap + to add an entry (each at least ${interval}m apart)`}
+          </div>
+        )}
+        {interval > 0 && !isToday && (
+          <div style={S.pastEditNote}>
+            Editing a past day — the {interval}-minute gap between entries applies only to today's logging, so you can adjust this freely.
           </div>
         )}
         <div style={{ textAlign: "center", fontSize: 12.5, fontWeight: 700, color: statusColor, marginBottom: 12 }}>{statusText}</div>
@@ -1313,6 +1312,7 @@ const S = {
   cellNoteBubble: { position: "absolute", top: 2, right: "calc(50% - 16px)", width: 5, height: 5, borderRadius: "50%", background: "#3A7CA5" },
   countBadge: { position: "absolute", bottom: 2, right: 2, minWidth: 13, height: 13, padding: "0 2px", borderRadius: 7, color: "#fff", fontSize: 9, fontWeight: 700, display: "grid", placeItems: "center", lineHeight: 1 },
   counterBtn: { width: 44, height: 44, borderRadius: "50%", border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: 24, fontWeight: 700, cursor: "pointer", display: "grid", placeItems: "center", fontFamily: "inherit", lineHeight: 1 },
+  pastEditNote: { textAlign: "center", fontSize: 11.5, fontWeight: 600, color: "#C2773B", background: "rgba(194,119,59,0.10)", borderRadius: 8, padding: "7px 10px", marginBottom: 8, lineHeight: 1.4 },
   inlineCounter: { display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", margin: "2px 0 8px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, flexWrap: "wrap" },
   inlineCount: { fontSize: 20, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif", lineHeight: 1 },
   inlineTarget: { fontSize: 12, fontWeight: 600, color: "var(--text-3)", marginLeft: 1 },

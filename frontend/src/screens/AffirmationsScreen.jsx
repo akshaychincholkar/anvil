@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import { Star, Quote, ChevronLeft, ChevronRight } from "lucide-react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { Star, Quote, ChevronLeft, ChevronRight, Plus, X, Check, Trash2 } from "lucide-react";
 import { AFFIRMATION_TABS } from "./spiritual/affirmationsData.js";
 import { api } from "../api.js";
+import Dropdown from "../components/Dropdown.jsx";
 
 // A calm rotating palette, one colour per category.
 const PALETTE = ["#3A7CA5", "#4C9A6B", "#C2773B", "#8268B0", "#C2536B", "#C9A227", "#3A7CA5", "#4C9A6B"];
@@ -17,11 +18,35 @@ const loadLocalFavs = () => {
   catch { return []; }
 };
 
+const NEW_CAT = "__new__";
+
 export default function AffirmationsScreen() {
   const [tab, setTab] = useState(0);       // category index, or "FAV"
   const [index, setIndex] = useState(0);   // current card within the section
   const [favs, setFavs] = useState(() => new Set(loadLocalFavs()));
+  const [userAffs, setUserAffs] = useState([]); // your own affirmations (backend)
+  const [adding, setAdding] = useState(false);
+  const [form, setForm] = useState({ text: "", category: AFFIRMATION_TABS[0]?.title || "", newCat: "" });
   const hydrated = useRef(false); // guard so the initial server load doesn't re-push
+
+  const loadUserAffs = useCallback(() => {
+    api.getAffirmations().then((a) => setUserAffs(Array.isArray(a) ? a : [])).catch(() => {});
+  }, []);
+  useEffect(() => { loadUserAffs(); }, [loadUserAffs]);
+
+  // Static library + your own affirmations, merged per category. Unknown
+  // categories become new tabs. User cards get a `u`-prefixed id so favorites
+  // never collide with the static cards' numeric ids.
+  const tabs = useMemo(() => {
+    const merged = AFFIRMATION_TABS.map((t) => ({ title: t.title, cards: [...t.cards] }));
+    userAffs.forEach((a) => {
+      const card = { id: `u${a.id}`, text: a.text, user: true, dbId: a.id };
+      const t = merged.find((x) => x.title.toLowerCase() === (a.category || "").toLowerCase());
+      if (t) t.cards.push(card);
+      else merged.push({ title: a.category || "My affirmations", cards: [card] });
+    });
+    return merged;
+  }, [userAffs]);
 
   // On mount, pull the authoritative favorites from the backend. The server is
   // the source of truth so every device shows the same list. The only exception
@@ -53,11 +78,13 @@ export default function AffirmationsScreen() {
 
   const keyOf = (title, card) => `${title}#${card.id}`;
 
-  // Resolve the cards for the active section.
-  const cards = tab === "FAV"
-    ? AFFIRMATION_TABS.flatMap((t, i) =>
+  // Resolve the cards for the active section (guard against a tab index that
+  // no longer exists, e.g. after deleting the last card of a custom category).
+  const safeTab = tab === "FAV" ? "FAV" : Math.min(tab, tabs.length - 1);
+  const cards = safeTab === "FAV"
+    ? tabs.flatMap((t, i) =>
         t.cards.filter((c) => favs.has(keyOf(t.title, c))).map((c) => ({ ...c, color: catColor(i), title: t.title })))
-    : AFFIRMATION_TABS[tab].cards.map((c) => ({ ...c, color: catColor(tab), title: AFFIRMATION_TABS[tab].title }));
+    : tabs[safeTab].cards.map((c) => ({ ...c, color: catColor(safeTab), title: tabs[safeTab].title }));
 
   const total = cards.length;
   const safeIndex = Math.min(index, Math.max(0, total - 1));
@@ -80,20 +107,73 @@ export default function AffirmationsScreen() {
     return n;
   });
 
+  // ── Add / delete your own affirmations ──
+  const saveAffirmation = async () => {
+    const text = form.text.trim();
+    const category = (form.category === NEW_CAT ? form.newCat : form.category).trim();
+    if (!text || !category) return;
+    await api.createAffirmation({ text, category });
+    setAdding(false);
+    setForm({ text: "", category, newCat: "" });
+    loadUserAffs();
+    // Jump to the category so the new card is visible.
+    const idx = tabs.findIndex((t) => t.title.toLowerCase() === category.toLowerCase());
+    selectTab(idx >= 0 ? idx : tabs.length); // new category lands at the end
+  };
+  const deleteAffirmation = async (c) => {
+    if (!window.confirm("Delete this affirmation?")) return;
+    await api.deleteAffirmation(c.dbId);
+    setFavs((prev) => { const n = new Set(prev); n.delete(keyOf(c.title, c)); return n; });
+    loadUserAffs();
+  };
+  const canSaveAff = form.text.trim() && (form.category === NEW_CAT ? form.newCat.trim() : form.category);
+
   const accent = card ? card.color : "#8268B0";
 
   return (
     <div style={S.page}>
-      <div style={S.head}>
-        <div style={S.eyebrow}>Anvil · Affirmations</div>
-        <h1 style={S.h1}>Affirmations</h1>
-        <div style={S.subhead}>One at a time — read it, mean it.</div>
+      <div style={{ ...S.head, display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <div style={S.eyebrow}>Anvil · Affirmations</div>
+          <h1 style={S.h1}>Affirmations</h1>
+          <div style={S.subhead}>One at a time — read it, mean it.</div>
+        </div>
+        {!adding && (
+          <button onClick={() => setAdding(true)} style={S.addBtn}><Plus size={15} /> Add affirmation</button>
+        )}
       </div>
+
+      {/* Add your own affirmation, with its category */}
+      {adding && (
+        <div style={S.addCard}>
+          <div style={S.addTitle}>New affirmation</div>
+          <textarea autoFocus value={form.text}
+            onChange={(e) => setForm((f) => ({ ...f, text: e.target.value }))}
+            placeholder="Write it in the present tense — e.g. 'I attract abundance effortlessly.'"
+            style={S.addArea} />
+          <div style={S.addRow}>
+            <Dropdown value={form.category}
+              options={[...tabs.map((t) => t.title), { value: NEW_CAT, label: "+ New category…" }]}
+              onChange={(v) => setForm((f) => ({ ...f, category: v }))} style={{ minWidth: 180 }} />
+            {form.category === NEW_CAT && (
+              <input value={form.newCat} onChange={(e) => setForm((f) => ({ ...f, newCat: e.target.value }))}
+                placeholder="Category name" style={S.addInput} />
+            )}
+          </div>
+          <div style={S.addActions}>
+            <button onClick={() => setAdding(false)} style={S.cancelBtn}><X size={14} /> Cancel</button>
+            <button onClick={saveAffirmation} disabled={!canSaveAff}
+              style={{ ...S.saveBtn, ...(canSaveAff ? {} : { opacity: 0.5, cursor: "not-allowed" }) }}>
+              <Check size={15} /> Save
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Section chips */}
       <div style={S.filterBar}>
-        {AFFIRMATION_TABS.map((t, i) => {
-          const on = tab === i;
+        {tabs.map((t, i) => {
+          const on = safeTab === i;
           const col = catColor(i);
           return (
             <button key={t.title} onClick={() => selectTab(i)}
@@ -122,6 +202,11 @@ export default function AffirmationsScreen() {
               style={{ ...S.favBtn, color: favs.has(keyOf(card.title, card)) ? "#C9A227" : "#C3BFB5" }} title="Favorite">
               <Star size={20} fill={favs.has(keyOf(card.title, card)) ? "#C9A227" : "none"} />
             </button>
+            {card.user && (
+              <button onClick={() => deleteAffirmation(card)} style={S.trashBtn} title="Delete your affirmation">
+                <Trash2 size={16} />
+              </button>
+            )}
             <Quote size={30} color={accent} style={{ opacity: 0.25 }} />
             <p style={S.cardText}>{card.text.trim()}</p>
           </div>
@@ -159,6 +244,17 @@ const S = {
   eyebrow: { fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--text-3)", fontWeight: 600, marginBottom: 4 },
   h1: { fontSize: 28, fontWeight: 700, margin: 0, letterSpacing: "-0.02em", fontFamily: "'Fraunces',Georgia,serif" },
   subhead: { fontSize: 13, color: "var(--text-3)", marginTop: 4 },
+  addBtn: { display: "flex", alignItems: "center", gap: 6, border: "none", background: "var(--accent-strong)", color: "#fff", padding: "9px 14px", borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
+  addCard: { background: "var(--surface)", borderRadius: 14, padding: 16, marginBottom: 18, boxShadow: "0 1px 3px rgba(0,0,0,0.05)", border: "1px solid var(--border)" },
+  addTitle: { fontSize: 15, fontWeight: 700, fontFamily: "'Fraunces',Georgia,serif", marginBottom: 10 },
+  addArea: { width: "100%", boxSizing: "border-box", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px", fontSize: 14, fontFamily: "inherit", color: "var(--text)", background: "var(--bg)", outline: "none", minHeight: 64, resize: "vertical", lineHeight: 1.5 },
+  addRow: { display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" },
+  addSelect: { border: "1px solid var(--border)", borderRadius: 9, padding: "8px 10px", fontSize: 13, fontFamily: "inherit", color: "var(--text)", background: "var(--bg)", outline: "none", minWidth: 160 },
+  addInput: { flex: 1, minWidth: 140, border: "1px solid var(--border)", borderRadius: 9, padding: "8px 10px", fontSize: 13, fontFamily: "inherit", color: "var(--text)", background: "var(--bg)", outline: "none" },
+  addActions: { display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 },
+  cancelBtn: { display: "flex", alignItems: "center", gap: 5, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-2)", padding: "8px 14px", borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
+  saveBtn: { display: "flex", alignItems: "center", gap: 6, border: "none", background: "#4C9A6B", color: "#fff", padding: "8px 16px", borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" },
+  trashBtn: { position: "absolute", top: 14, right: 46, border: "none", background: "none", cursor: "pointer", padding: 4, display: "grid", placeItems: "center", color: "#C3BFB5" },
   filterBar: { display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 22 },
   chip: { display: "flex", alignItems: "center", gap: 6, border: "1px solid var(--border)", background: "var(--surface)", padding: "6px 12px", borderRadius: 20, fontSize: 12.5, fontWeight: 600, color: "var(--text-2)", cursor: "pointer", fontFamily: "inherit" },
   chipCount: { fontSize: 11, fontWeight: 700, opacity: 0.7 },

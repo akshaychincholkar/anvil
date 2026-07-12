@@ -12,6 +12,7 @@ import { useCurrency, fmtMoney } from "../currency.js";
 import { useMonthStartDay, cycleRange } from "../monthCycle.js";
 import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
 import UndoToast from "../components/UndoToast.jsx";
+import Dropdown from "../components/Dropdown.jsx";
 
 const ACCENT = "#C9772E";
 
@@ -48,6 +49,8 @@ export default function ExpensesScreen() {
   const monthStartDay = useMonthStartDay();
   const [categories, setCategories] = useState([]);
   const [logs, setLogs] = useState([]);
+  const [txns, setTxns] = useState([]);             // income + legacy expenses (for the daily budget)
+  const [investments, setInvestments] = useState([]); // money set aside this cycle
   const [loaded, setLoaded] = useState(false);
   const [selDate, setSelDate] = useState(TODAY);
   // Anchor on *today* so the calendar opens on the current billing cycle
@@ -55,6 +58,7 @@ export default function ExpensesScreen() {
   const [calMonth, setCalMonth] = useState(() => new Date());
   const [addCat, setAddCat] = useState(null);     // category clicked → opens amount entry
   const [editLog, setEditLog] = useState(null);   // existing log clicked → opens edit modal
+  const [drillCat, setDrillCat] = useState(null); // donut category clicked → lists its expenses
   const [catForm, setCatForm] = useState(null);   // add/edit category modal
   const [manageOpen, setManageOpen] = useState(false);
   const [scope, setScope] = useState("day");       // "day" | "month" | "year" | "all" — drives totals + pie chart
@@ -69,7 +73,13 @@ export default function ExpensesScreen() {
   });
 
   const load = useCallback(() => {
-    api.getExpenses().then((d) => { setCategories(d.categories); setLogs(d.logs); setLoaded(true); }).catch(() => setLoaded(true));
+    Promise.all([api.getExpenses(), api.getTxns(), api.getInvestments()])
+      .then(([d, t, inv]) => {
+        setCategories(d.categories); setLogs(d.logs);
+        setTxns(Array.isArray(t) ? t : []); setInvestments(Array.isArray(inv) ? inv : []);
+        setLoaded(true);
+      })
+      .catch(() => setLoaded(true));
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -82,6 +92,21 @@ export default function ExpensesScreen() {
   // ── Day logs (for the selected calendar day) ──
   const dayLogs = useMemo(() => logs.filter((l) => l.date === selDate), [logs, selDate]);
   const dayTotal = dayLogs.reduce((n, l) => n + l.amount, 0);
+
+  // Daily budget: what's left this cycle (income − expenses − invested, same
+  // maths as the Wallet's "Remaining") spread over the days until the next
+  // month-start. Tells you how much you can safely spend per day.
+  const dailyBudget = useMemo(() => {
+    const [lo, hi] = cycleRange(new Date(), monthStartDay);
+    const inCycle = (d) => d >= lo && d <= hi;
+    const income = txns.filter((t) => t.kind === "income" && inCycle(t.date)).reduce((n, t) => n + t.amount, 0);
+    const legacyExp = txns.filter((t) => t.kind === "expense" && inCycle(t.date)).reduce((n, t) => n + t.amount, 0);
+    const spent = logs.filter((l) => inCycle(l.date)).reduce((n, l) => n + l.amount, 0);
+    const invested = investments.filter((i) => inCycle(i.date)).reduce((n, i) => n + i.invested, 0);
+    const remaining = income - legacyExp - spent - invested;
+    const daysLeft = Math.max(1, Math.round((new Date(hi + "T00:00") - new Date(TODAY + "T00:00")) / 86400000) + 1);
+    return { remaining, daysLeft, perDay: remaining / daysLeft };
+  }, [txns, logs, investments, monthStartDay]);
 
   // Today vs Yesterday vs Day-before spend (like the Grove daily comparison).
   const threeDay = useMemo(() => {
@@ -285,6 +310,11 @@ export default function ExpensesScreen() {
               Total spent {scope === "day" ? "today" : scope === "month" ? "this month" : scope === "year" ? "this year" : "all time"}
             </div>
             <div style={S.totalVal}>{money(scopedTotal)}</div>
+            <div style={{ ...S.budgetLine, color: dailyBudget.perDay >= 0 ? "#4C9A6B" : "#C2536B" }}>
+              {dailyBudget.perDay >= 0
+                ? <>You can spend ≈ <b>{money(dailyBudget.perDay)}/day</b> · {dailyBudget.daysLeft} day{dailyBudget.daysLeft === 1 ? "" : "s"} till next cycle</>
+                : <>Overspent this cycle by {money(Math.abs(dailyBudget.remaining))} · {dailyBudget.daysLeft} day{dailyBudget.daysLeft === 1 ? "" : "s"} left</>}
+            </div>
           </div>
         </div>
         <div style={S.scopeRow}>
@@ -389,17 +419,74 @@ export default function ExpensesScreen() {
                 </div>
                 <div style={S.pieLegend}>
                   {segs.map((s) => (
-                    <div key={s.cat.id} style={S.legendRow}>
+                    <button key={s.cat.id}
+                      onClick={() => setDrillCat((c) => (c === s.cat.id ? null : s.cat.id))}
+                      title="Show these expenses"
+                      style={{ ...S.legendRow, ...S.legendRowBtn, ...(drillCat === s.cat.id ? { background: s.cat.color + "1A" } : {}) }}>
                       <span style={{ ...S.dot, background: s.cat.color }} />
                       <IconFor name={s.cat.icon} size={13} style={{ color: s.cat.color, flexShrink: 0 }} />
                       <span style={S.legendName}>{s.cat.name}</span>
                       <span style={S.legendPct}>{Math.round(s.pct)}%</span>
                       <span style={S.legendAmt}>{money(s.amount)}</span>
-                    </div>
+                    </button>
                   ))}
+                  <button onClick={() => setDrillCat((c) => (c === "ALL" ? null : "ALL"))}
+                    title="Show every transaction in this period"
+                    style={{ ...S.legendRow, ...S.legendRowBtn, ...(drillCat === "ALL" ? { background: "var(--hover)" } : {}) }}>
+                    <Tag size={13} style={{ color: "var(--text-2)", flexShrink: 0 }} />
+                    <span style={{ ...S.legendName, fontWeight: 700 }}>All categories</span>
+                    <span style={S.legendAmt}>{money(scopedTotal)}</span>
+                  </button>
                 </div>
               </div>
             )}
+
+            {/* Drill-down: every expense in the clicked category — or all of
+                them — for this period, editable in place. */}
+            {drillCat && (() => {
+              const isAll = drillCat === "ALL";
+              const cat = isAll ? null : catById[drillCat];
+              const catLogs = scopedLogs.filter((l) => isAll || l.category_id === drillCat)
+                .slice().sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
+              const catTotal = catLogs.reduce((n, l) => n + l.amount, 0);
+              return (
+                <div style={S.drillBox}>
+                  <div style={S.drillHead}>
+                    <span style={{ ...S.iconBadge, background: (cat?.color || "#9A968C") + "1A", color: cat?.color || "#9A968C" }}>
+                      {isAll ? <Tag size={15} /> : <IconFor name={cat?.icon} size={15} />}
+                    </span>
+                    <span style={S.drillTitle}>{isAll ? "All categories" : cat?.name || "Category"} · {catLogs.length} transaction{catLogs.length === 1 ? "" : "s"} · {money(catTotal)}</span>
+                    <button onClick={() => setDrillCat(null)} style={S.delBtn} title="Close"><X size={15} /></button>
+                  </div>
+                  {catLogs.length === 0 ? <div style={S.muted}>No expenses in this period.</div> : (
+                    <div style={{ ...S.logList, ...S.drillList }}>
+                      {catLogs.map((l) => {
+                        const rowCat = catById[l.category_id];
+                        return (
+                          <div key={l.id} style={S.logRow}>
+                            {isAll && (
+                              <span style={{ ...S.logIcon, background: (rowCat?.color || "#9A968C") + "1A", color: rowCat?.color || "#9A968C" }}>
+                                <IconFor name={rowCat?.icon} size={14} />
+                              </span>
+                            )}
+                            <button onClick={() => openEdit(l)} style={S.logInfoBtn} title="Edit this expense">
+                              <div style={S.logCat}>
+                                {isAll ? `${rowCat?.name || "Other"} · ` : ""}
+                                {new Date(l.date + "T00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })}
+                              </div>
+                              {l.note && <div style={S.logNote}>{l.note}</div>}
+                            </button>
+                            <span style={S.logAmt}>{money(l.amount)}</span>
+                            <button onClick={() => openEdit(l)} style={S.editBtn} title="Edit"><Pencil size={13} /></button>
+                            <button onClick={() => deleteLog(l.id, rowCat?.name || "Expense")} style={S.delBtn}><X size={14} /></button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
 
           {/* Monthly comparison */}
@@ -517,9 +604,10 @@ export default function ExpensesScreen() {
               <button onClick={() => setEditLog(null)} style={S.iconBtnPlain}><X size={16} /></button>
             </div>
             <label style={S.label}>Category</label>
-            <select value={editLog.category_id} onChange={(e) => setEditLog((f) => ({ ...f, category_id: Number(e.target.value) }))} style={S.input}>
-              {categories.map((cat) => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
-            </select>
+            <Dropdown value={editLog.category_id}
+              options={categories.map((cat) => ({ value: cat.id, label: cat.name }))}
+              onChange={(v) => setEditLog((f) => ({ ...f, category_id: Number(v) }))}
+              style={{ marginBottom: 8 }} />
             <label style={S.label}>Amount *</label>
             <input autoFocus type="number" inputMode="decimal" value={editLog.amount}
               onChange={(e) => setEditLog((f) => ({ ...f, amount: e.target.value }))}
@@ -644,6 +732,7 @@ const S = {
   totalLeft: { display: "flex", alignItems: "center", gap: 12 },
   totalLabel: { fontSize: 12, color: "var(--text-3)", fontWeight: 600 },
   totalVal: { fontSize: 24, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif", marginTop: 2 },
+  budgetLine: { fontSize: 11.5, fontWeight: 600, marginTop: 4 },
   scopeRow: { display: "flex", gap: 6 },
   scopeBtn: { border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-2)", padding: "7px 13px", borderRadius: 8, fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" },
   scopeBtnOn: { background: ACCENT, color: "#fff", borderColor: ACCENT },
@@ -693,6 +782,11 @@ const S = {
   pieHoleLbl: { fontSize: 10, color: "var(--text-3)", fontWeight: 600 },
   pieLegend: { flex: 1, minWidth: 180, display: "flex", flexDirection: "column", gap: 8 },
   legendRow: { display: "flex", alignItems: "center", gap: 7 },
+  legendRowBtn: { width: "100%", border: "none", background: "none", cursor: "pointer", fontFamily: "inherit", padding: "5px 7px", borderRadius: 8, textAlign: "left", color: "var(--text)" },
+  drillBox: { marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--border)" },
+  drillList: { maxHeight: 320, overflowY: "auto", paddingRight: 4 },
+  drillHead: { display: "flex", alignItems: "center", gap: 9, marginBottom: 4 },
+  drillTitle: { flex: 1, fontSize: 13, fontWeight: 700, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   dot: { width: 9, height: 9, borderRadius: 3, flexShrink: 0 },
   legendName: { flex: 1, fontSize: 12.5, fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   legendPct: { fontSize: 11.5, color: "var(--text-3)", fontWeight: 600, width: 34, textAlign: "right" },

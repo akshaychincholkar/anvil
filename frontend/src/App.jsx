@@ -38,6 +38,9 @@ applyTheme(getStoredThemeId(), false);
 
 const DEFAULT_SCREEN_KEY = "anvil_default_screen";
 const getStoredDefault = () => { try { return localStorage.getItem(DEFAULT_SCREEN_KEY); } catch { return null; } };
+// The screen you were on — restored after a refresh so you don't lose your place.
+const LAST_SCREEN_KEY = "anvil_last_screen";
+const getLastScreen = () => { try { return localStorage.getItem(LAST_SCREEN_KEY); } catch { return null; } };
 
 // Registry: screen id → metadata + component.
 const SCREENS = {
@@ -92,6 +95,10 @@ function useIsMobile() {
 
 export default function App() {
   const [active, setActive] = useState(() => {
+    // Refresh keeps you where you were; the default screen only applies on a
+    // fresh visit with no remembered place.
+    const last = getLastScreen();
+    if (last && SCREENS[last]) return last;
     const d = getStoredDefault();
     return d && SCREENS[d] ? d : "habits";
   });
@@ -164,6 +171,7 @@ export default function App() {
   function navigate(id) {
     setActive(id);
     setDrawerOpen(false);
+    try { localStorage.setItem(LAST_SCREEN_KEY, id); } catch { /* ignore */ }
   }
   const logout = () => { clearToken(); setUser(null); };
 

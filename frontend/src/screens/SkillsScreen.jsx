@@ -3,6 +3,7 @@ import { BookOpen, Youtube, FileText, Plus, X, Check, Trophy, ArrowRight, Sparkl
 import { api } from "../api.js";
 import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
 import UndoToast from "../components/UndoToast.jsx";
+import Dropdown from "../components/Dropdown.jsx";
 
 function useIsMobile(bp = 760) {
   const [m, setM] = useState(() => window.innerWidth < bp);
@@ -224,12 +225,10 @@ export default function SkillsScreen() {
                 onKeyDown={(e) => e.key === "Enter" && createSkill()}
                 style={S.input} autoFocus />
               <div style={S.addRow}>
-                <select value={newSkill.type} onChange={(e) => setNewSkill((n) => ({ ...n, type: e.target.value }))} style={S.select}>
-                  {SOURCE_TYPES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
-                </select>
-                <select value={newSkill.pillar} onChange={(e) => setNewSkill((n) => ({ ...n, pillar: e.target.value }))} style={S.select}>
-                  {Object.keys(PILLARS).map((p) => <option key={p}>{p}</option>)}
-                </select>
+                <Dropdown value={newSkill.type} options={SOURCE_TYPES.map((t) => ({ value: t.id, label: t.label }))}
+                  onChange={(v) => setNewSkill((n) => ({ ...n, type: v }))} style={{ flex: 1 }} />
+                <Dropdown value={newSkill.pillar} options={Object.keys(PILLARS)}
+                  onChange={(v) => setNewSkill((n) => ({ ...n, pillar: v }))} style={{ flex: 1 }} />
               </div>
               <input placeholder={newSkill.type === "book" ? "Link (optional)" : `${srcInfo(newSkill.type).label} link (optional) — paste URL to route here`}
                 value={newSkill.link}

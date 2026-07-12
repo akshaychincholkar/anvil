@@ -3,6 +3,7 @@ import { X, Eye, EyeOff, ChevronUp, ChevronDown, Check, LayoutList, Palette, Coi
 import { THEMES } from "../theme.js";
 import { CURRENCIES } from "../currency.js";
 import { api } from "../api.js";
+import Dropdown from "../components/Dropdown.jsx";
 
 const ordinal = (n) => (n % 10 === 1 && n !== 11 ? "st" : n % 10 === 2 && n !== 12 ? "nd" : n % 10 === 3 && n !== 13 ? "rd" : "th");
 
@@ -188,11 +189,10 @@ export default function SettingsModal({ screens, order, hidden, themeId, currenc
               <div style={S.subDivider} />
               <div style={S.fieldLbl}>Month starts on</div>
               <p style={S.hint}>If your salary lands on the 25th, set this to 25 — Wallet and Expenses will treat each "month" as running 25th to 24th instead of calendar month.</p>
-              <select value={monthStartDay} onChange={(e) => onSelectMonthStartDay(Number(e.target.value))} style={S.musicInput}>
-                {Array.from({ length: 28 }, (_, i) => i + 1).map((d) => (
-                  <option key={d} value={d}>{d === 1 ? "1st (calendar month)" : `${d}${ordinal(d)}`}</option>
-                ))}
-              </select>
+              <Dropdown value={monthStartDay}
+                options={Array.from({ length: 28 }, (_, i) => i + 1).map((d) => ({ value: d, label: d === 1 ? "1st (calendar month)" : `${d}${ordinal(d)}` }))}
+                onChange={(v) => onSelectMonthStartDay(Number(v))}
+                style={{ marginBottom: 12 }} />
 
               <div style={S.subDivider} />
               <div style={S.fieldLbl}>Trading capital</div>
