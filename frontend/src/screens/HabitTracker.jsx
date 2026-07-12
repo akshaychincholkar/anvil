@@ -313,6 +313,7 @@ export default function HabitTracker() {
 
       {countPopup && (
         <CountPopup
+          key={`${countPopup.habit.id}:${countPopup.date}`}
           habit={countPopup.habit}
           date={countPopup.date}
           initialCount={countPopup.habit.log_counts?.[countPopup.date] ?? 0}
@@ -499,6 +500,7 @@ function CountPopup({ habit, date, initialCount, initialNote, onSave, onClear, o
   const [count, setCount] = useState(saved);   // staged (local) count
   const [note, setNote] = useState(initialNote ?? "");
   const [now, setNow] = useState(Date.now());
+  const [pastHint, setPastHint] = useState(false); // floating message shown on a past-day increment
   const target = habit.target_count;
   const meets = habit.type === "minimum" ? count >= target : (count > 0 && count <= target);
   const over = habit.type === "maximum" && count > target;
@@ -520,19 +522,35 @@ function CountPopup({ habit, date, initialCount, initialNote, onSave, onClear, o
     return () => window.clearInterval(id);
   }, [gated, waitMs]);
 
+  // Auto-dismiss the floating "gap doesn't apply here" message a few seconds
+  // after it's shown, so it doesn't linger over the counter.
+  useEffect(() => {
+    if (!pastHint) return;
+    const t = setTimeout(() => setPastHint(false), 3200);
+    return () => clearTimeout(t);
+  }, [pastHint]);
+
   // Stage-then-confirm for gated habits: + raises the local count by at most one
   // above the saved value (then disables), - lowers it; Set commits to the server,
   // where the interval gap is enforced on an increase.
   const staged = count - saved;               // +1 means an entry is staged
   const plusLocked = gated && (count >= saved + 1 || waitMs > 0);
   const minusLocked = count <= 0;
-  const inc = () => { if (!plusLocked) setCount((n) => n + 1); };
+  const inc = () => {
+    if (interval > 0 && !isToday) setPastHint(true); // gap only applies to today's logging
+    if (!plusLocked) setCount((n) => n + 1);
+  };
   const dec = () => { if (!minusLocked) setCount((n) => Math.max(0, n - 1)); };
   const dirty = count !== saved || note !== (initialNote ?? "");
 
   return (
     <div style={S.modalOverlay} onClick={onClose}>
-      <div style={S.modal} onClick={(e) => e.stopPropagation()}>
+      <div style={{ ...S.modal, position: "relative" }} onClick={(e) => e.stopPropagation()}>
+        {pastHint && (
+          <div style={S.floatHint}>
+            This {interval}-minute gap only applies to today's entries — past days can be edited freely, with no wait.
+          </div>
+        )}
         <div style={S.modalHead}>{habit.name}<button onClick={onClose} style={S.closeBtn}><X size={16} /></button></div>
         <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 2 }}>
           {date} · {habit.type === "minimum" ? `at least ${target}` : `no more than ${target}`} / {habit.period}
@@ -554,11 +572,6 @@ function CountPopup({ habit, date, initialCount, initialNote, onSave, onClear, o
         {gated && waitMs <= 0 && (
           <div style={{ textAlign: "center", fontSize: 11.5, color: "var(--text-3)", marginBottom: 8 }}>
             {staged > 0 ? "Press Set to confirm this entry" : `Tap + to add an entry (each at least ${interval}m apart)`}
-          </div>
-        )}
-        {interval > 0 && !isToday && (
-          <div style={S.pastEditNote}>
-            Editing a past day — the {interval}-minute gap between entries applies only to today's logging, so you can adjust this freely.
           </div>
         )}
         <div style={{ textAlign: "center", fontSize: 12.5, fontWeight: 700, color: statusColor, marginBottom: 12 }}>{statusText}</div>
@@ -1312,7 +1325,12 @@ const S = {
   cellNoteBubble: { position: "absolute", top: 2, right: "calc(50% - 16px)", width: 5, height: 5, borderRadius: "50%", background: "#3A7CA5" },
   countBadge: { position: "absolute", bottom: 2, right: 2, minWidth: 13, height: 13, padding: "0 2px", borderRadius: 7, color: "#fff", fontSize: 9, fontWeight: 700, display: "grid", placeItems: "center", lineHeight: 1 },
   counterBtn: { width: 44, height: 44, borderRadius: "50%", border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: 24, fontWeight: 700, cursor: "pointer", display: "grid", placeItems: "center", fontFamily: "inherit", lineHeight: 1 },
-  pastEditNote: { textAlign: "center", fontSize: 11.5, fontWeight: 600, color: "#C2773B", background: "rgba(194,119,59,0.10)", borderRadius: 8, padding: "7px 10px", marginBottom: 8, lineHeight: 1.4 },
+  floatHint: {
+    position: "absolute", left: "50%", bottom: "100%", transform: "translateX(-50%)", marginBottom: 10,
+    width: 260, maxWidth: "80vw", textAlign: "center", fontSize: 12, fontWeight: 600, lineHeight: 1.4,
+    color: "#fff", background: "#26241F", borderRadius: 10, padding: "9px 12px",
+    boxShadow: "0 8px 24px rgba(0,0,0,0.28)", zIndex: 10, pointerEvents: "none",
+  },
   inlineCounter: { display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", margin: "2px 0 8px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, flexWrap: "wrap" },
   inlineCount: { fontSize: 20, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif", lineHeight: 1 },
   inlineTarget: { fontSize: 12, fontWeight: 600, color: "var(--text-3)", marginLeft: 1 },

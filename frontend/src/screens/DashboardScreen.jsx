@@ -1,44 +1,43 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import {
-  CheckSquare, LayoutGrid, Trees, ReceiptText, Wallet, RotateCcw, Star,
-  Sparkles, GraduationCap, Rocket, Headphones, Trophy, Clock, Plus,
-  ArrowUpRight, ArrowRight, Flame, ListChecks,
+  CheckSquare, Trees, ReceiptText, Sparkles, Rocket, Headphones,
+  BookOpen, Crown, Target, RotateCcw, ArrowRight, IndianRupee,
 } from "lucide-react";
 import { api } from "../api.js";
 import { useCurrency, fmtMoney2 } from "../currency.js";
+import { useMonthStartDay, cycleRange } from "../monthCycle.js";
 import { TREES, DEFAULT_TREE } from "./grove/trees.jsx";
 
 const FOCUS_COLOR = "#C9A227";
 const USAGE_COLOR = "#3A7CA5";
 const ACH_COLOR = "#C2536B";
-const USAGE_EXCLUDE = new Set(["worth", "achievements"]);
+const CHAL_COLOR = "#4C9A6B";
+const USAGE_EXCLUDE = new Set(["worth"]);
 
-const todayISO = () => { const d = new Date(); const p = (n) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; };
-const TODAY = todayISO();
+const toISO = (d) => { const p = (n) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; };
+const TODAY = toISO(new Date());
+const dayOffISO = (off) => { const d = new Date(); d.setDate(d.getDate() + off); return toISO(d); };
+const DAY_FULL = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const todayName = () => DAY_FULL[(new Date().getDay() + 6) % 7];
 
-const SCREEN_LABELS = {
-  kickstart: "Kickstart", golden: "Golden Book", habits: "Habits", quadrant: "Quadrant",
-  goals: "Goals", grove: "Grove", worth: "Rewards", vault: "Wallet", expenses: "Expenses",
-  journal: "Journal", revision: "Revision", affirmations: "Affirmations", skills: "Skills",
-  spiritual: "Spiritual", mindscape: "Mindscape", achievements: "Achievements", delight: "Delights",
-};
-
+const MOODS = { 1: "😣 Rough", 2: "🙁 Low", 3: "😐 Okay", 4: "🙂 Good", 5: "😄 Great" };
 const fmtMin = (min) => { const m = Math.round(min || 0); const h = Math.floor(m / 60), r = m % 60; return h ? `${h}h ${r}m` : `${r}m`; };
-const fmtSec = (sec) => fmtMin((sec || 0) / 60);
 
-const QUADRANTS = [
-  { id: "Q1", label: "Do Now" }, { id: "Q2", label: "Schedule" },
-  { id: "Q3", label: "Delegate" }, { id: "Q4", label: "Drop" },
-];
-const PILLAR_NAMES = ["Financial", "Academic", "Relationship", "Health", "Spiritual"];
+// Mon–Sun week containing `ds`.
+const weekDatesOf = (ds) => {
+  const dt = new Date(ds + "T00:00:00");
+  const dow = dt.getDay();
+  const mon = new Date(dt); mon.setDate(dt.getDate() + (dow === 0 ? -6 : 1 - dow));
+  return Array.from({ length: 7 }, (_, i) => { const x = new Date(mon); x.setDate(mon.getDate() + i); return toISO(x); });
+};
 
 export default function DashboardScreen({ onNavigate }) {
   const cur = useCurrency();
-  const reward = (n) => fmtMoney2(n, cur.code);
+  const monthStartDay = useMonthStartDay();
+  const money = (n) => fmtMoney2(n, cur.code);
 
   const [loaded, setLoaded] = useState(false);
   const [habits, setHabits] = useState([]);
-  const [tasks, setTasks] = useState([]);
   const [focus, setFocus] = useState({ sessions: [], stats: {} });
   const [screenRows, setScreenRows] = useState([]);
   const [history, setHistory] = useState([]);
@@ -48,14 +47,17 @@ export default function DashboardScreen({ onNavigate }) {
   const [legacyUsage, setLegacyUsage] = useState({});
   const [expCats, setExpCats] = useState([]);
   const [expLogs, setExpLogs] = useState([]);
-  const [investments, setInvestments] = useState([]);
   const [dueToday, setDueToday] = useState([]);
-  const [skills, setSkills] = useState([]);
+  const [challenges, setChallenges] = useState([]);
+  const [goldenGoals, setGoldenGoals] = useState([]);
+  const [scriptures, setScriptures] = useState([]);
+  const [goals, setGoals] = useState([]);
+  const [journal, setJournal] = useState(null);
+  const [kickstart, setKickstart] = useState([]);
 
   const load = useCallback(() => {
     Promise.all([
       api.getHabits().catch(() => []),
-      api.getTasks().catch(() => []),
       api.getFocus().catch(() => ({ sessions: [], stats: {} })),
       api.getScreenTime().catch(() => []),
       api.getRewardRates().catch(() => []),
@@ -64,12 +66,15 @@ export default function DashboardScreen({ onNavigate }) {
       api.getSetting("grove_rates").catch(() => null),
       api.getSetting("reward_rates").catch(() => null),
       api.getExpenses().catch(() => ({ categories: [], logs: [] })),
-      api.getInvestments().catch(() => []),
       api.getDueToday().catch(() => []),
-      api.getSkills().catch(() => []),
-    ]).then(([h, t, fc, st, hist, py, ach, lf, lu, exp, inv, due, sk]) => {
+      api.getChallenges().catch(() => []),
+      api.getGoldenGoals().catch(() => []),
+      api.getScriptures().catch(() => []),
+      api.getGoals().catch(() => []),
+      api.getJournalEntry(TODAY).catch(() => null),
+      api.getKickstart().catch(() => []),
+    ]).then(([h, fc, st, hist, py, ach, lf, lu, exp, due, chal, gg, sc, gl, jr, ks]) => {
       setHabits(h || []);
-      setTasks(t || []);
       setFocus(fc || { sessions: [], stats: {} });
       setScreenRows(Array.isArray(st) ? st : []);
       setHistory(hist || []);
@@ -79,31 +84,103 @@ export default function DashboardScreen({ onNavigate }) {
       setLegacyUsage(lu?.value || {});
       setExpCats(exp?.categories || []);
       setExpLogs(exp?.logs || []);
-      setInvestments(inv || []);
       setDueToday(due || []);
-      setSkills(sk || []);
+      setChallenges(Array.isArray(chal) ? chal : []);
+      setGoldenGoals(Array.isArray(gg) ? gg : []);
+      setScriptures(Array.isArray(sc) ? sc : []);
+      setGoals(Array.isArray(gl) ? gl : []);
+      setJournal(jr);
+      setKickstart(Array.isArray(ks) ? ks : []);
       setLoaded(true);
     }).catch(() => setLoaded(true));
   }, []);
-
   useEffect(() => { load(); }, [load]);
 
-  // ── Habits ──
-  const habitsDoneToday = habits.filter((h) => (h.logs || []).includes(TODAY)).length;
+  /* ── Habits: completion (chain-aware, same rules as the Habits screen) ── */
+  const activeHabits = useMemo(() => habits.filter((h) => h.active !== false), [habits]);
+  const logSet = (h) => new Set(h.logs || []);
+  const actualDone = (h, d) => {
+    if ((h.type === "minimum" || h.type === "maximum") && h.period === "day") {
+      const c = h.log_counts?.[d];
+      if (c === undefined || c === null) return false;
+      return h.type === "minimum" ? c >= (h.target_count || 0) : (c > 0 && c <= (h.target_count || 0));
+    }
+    return logSet(h).has(d);
+  };
+  const weekMet = (h, wk) => h.type === "minimum" && h.period === "week" && wk.filter((d) => logSet(h).has(d)).length >= (h.target_count || 0);
+  const monthMet = (h, ym) => h.type === "minimum" && h.period === "month" && (h.logs || []).filter((d) => d.slice(0, 7) === ym).length >= (h.target_count || 0);
+  const yearMet = (h, y) => h.type === "minimum" && h.period === "year" && (h.logs || []).filter((d) => d.slice(0, 4) === y).length >= (h.target_count || 0);
+  const chainCoversDay = (h, d) => {
+    if (h.type !== "minimum") return false;
+    if (h.period === "week") return weekMet(h, weekDatesOf(d));
+    if (h.period === "month") return monthMet(h, d.slice(0, 7));
+    if (h.period === "year") return yearMet(h, d.slice(0, 4));
+    return false;
+  };
+  const isDoneOn = (h, d) => actualDone(h, d) || chainCoversDay(h, d);
 
-  // ── Quadrant tasks: active tasks scheduled for today, by start_datetime ──
-  const tasksToday = tasks.filter((t) => (t.start_datetime || "").slice(0, 10) === TODAY);
-  const tasksByQuadrant = useMemo(() => {
-    const m = { Q1: 0, Q2: 0, Q3: 0, Q4: 0 };
-    tasks.forEach((t) => { if (m[t.quadrant] !== undefined) m[t.quadrant]++; });
-    return m;
-  }, [tasks]);
+  const weekDates = weekDatesOf(TODAY);
+  const habitsDoneToday = activeHabits.filter((h) => isDoneOn(h, TODAY)).length;
+  const dailyPct = activeHabits.length ? Math.round((habitsDoneToday / activeHabits.length) * 100) : 0;
+  const weeklyProgress = (h) => {
+    if (h.type === "minimum" && h.period === "month" && monthMet(h, weekDates[0].slice(0, 7))) return 1;
+    if (h.type === "minimum" && h.period === "year" && yearMet(h, weekDates[0].slice(0, 4))) return 1;
+    if (h.type === "minimum" && h.period === "week" && weekMet(h, weekDates)) return 1;
+    if ((h.type === "minimum" || h.type === "maximum") && h.period === "day") {
+      return Math.min(1, weekDates.filter((d) => actualDone(h, d)).length / 7);
+    }
+    const logs = logSet(h);
+    const doneDays = weekDates.filter((d) => logs.has(d)).length;
+    const target = (h.type === "minimum" && h.period === "week") ? (h.target_count || 1) : (h.target_per_week || 7);
+    return target > 0 ? Math.min(1, doneDays / target) : 0;
+  };
+  const weeklyPct = activeHabits.length ? Math.round((activeHabits.reduce((s, h) => s + weeklyProgress(h), 0) / activeHabits.length) * 100) : 0;
+  const mYM = TODAY.slice(0, 7);
+  const mDays = new Date(Number(TODAY.slice(0, 4)), Number(TODAY.slice(5, 7)), 0).getDate();
+  const monthlyProgress = (h) => {
+    if (h.type === "minimum" && h.period === "month" && monthMet(h, mYM)) return 1;
+    if (h.type === "minimum" && h.period === "year" && yearMet(h, mYM.slice(0, 4))) return 1;
+    if ((h.type === "minimum" || h.type === "maximum") && h.period === "day") {
+      let met = 0;
+      for (let day = 1; day <= mDays; day++) { if (actualDone(h, `${mYM}-${String(day).padStart(2, "0")}`)) met++; }
+      return Math.min(1, met / mDays);
+    }
+    const doneMonth = (h.logs || []).filter((d) => d.slice(0, 7) === mYM).length;
+    let target;
+    if (h.type === "minimum" && h.period === "week") target = (h.target_count || 1) * (mDays / 7);
+    else if (h.type === "minimum" && h.period === "month") target = (h.target_count || 1);
+    else if (h.type === "minimum" && h.period === "year") target = (h.target_count || 1) / 12;
+    else target = (h.target_per_week || 7) * (mDays / 7);
+    return target > 0 ? Math.min(1, doneMonth / target) : 0;
+  };
+  const monthlyPct = activeHabits.length ? Math.round((activeHabits.reduce((s, h) => s + monthlyProgress(h), 0) / activeHabits.length) * 100) : 0;
+  const habitThreeDay = [0, -1, -2].map((off, i) => ({
+    label: i === 0 ? "Today" : i === 1 ? "Yesterday" : "Day before",
+    value: activeHabits.filter((h) => isDoneOn(h, dayOffISO(off))).length,
+    color: i === 0 ? "#4C9A6B" : "var(--text-3)",
+  }));
 
-  // ── Grove focus (backend already computes today's totals) ──
-  const groveToday = focus.stats?.today_minutes || 0;
-  const groveTrees = focus.stats?.today_trees || 0;
+  /* ── Expenses: spent today + comparison + this-cycle category donut ── */
+  const expTodayTotal = expLogs.filter((l) => l.date === TODAY).reduce((n, l) => n + l.amount, 0);
+  const expThreeDay = [0, -1, -2].map((off, i) => ({
+    label: i === 0 ? "Today" : i === 1 ? "Yesterday" : "Day before",
+    value: expLogs.filter((l) => l.date === dayOffISO(off)).reduce((n, l) => n + l.amount, 0),
+    color: i === 0 ? "#C9772E" : "var(--text-3)",
+  }));
+  const catById = useMemo(() => Object.fromEntries(expCats.map((c) => [c.id, c])), [expCats]);
+  const expCycle = useMemo(() => {
+    const [lo, hi] = cycleRange(new Date(), monthStartDay);
+    const m = {};
+    expLogs.forEach((l) => { if (l.date >= lo && l.date <= hi) m[l.category_id] = (m[l.category_id] || 0) + l.amount; });
+    const rows = Object.entries(m).map(([cid, amount]) => ({ cat: catById[cid], amount })).filter((x) => x.cat).sort((a, b) => b.amount - a.amount);
+    const total = rows.reduce((n, r) => n + r.amount, 0);
+    let acc = 0;
+    const segs = rows.map((r) => { const s = total > 0 ? (acc / total) * 100 : 0; acc += r.amount; return { ...r, start: s, end: total > 0 ? (acc / total) * 100 : 0, pct: total > 0 ? (r.amount / total) * 100 : 0 }; });
+    return { segs, total };
+  }, [expLogs, catById, monthStartDay]);
+  const expGradient = expCycle.segs.length ? `conic-gradient(${expCycle.segs.map((s) => `${s.cat.color} ${s.start}% ${s.end}%`).join(", ")})` : "var(--surface-2)";
 
-  // ── Rewards (replicate WorthScreen's "today" period exactly) ──
+  /* ── Rewards: today's earned split + all-time pending (mirrors Rewards screen) ── */
   const ratesByKey = {};
   history.forEach((r) => { (ratesByKey[`${r.kind}:${r.rkey}`] ||= []).push({ eff: r.eff_date, rate: r.rate }); });
   Object.values(ratesByKey).forEach((arr) => arr.sort((a, b) => a.eff.localeCompare(b.eff)));
@@ -112,98 +189,64 @@ export default function DashboardScreen({ onNavigate }) {
     if (arr) { let r = null; for (const seg of arr) { if (seg.eff <= day) r = seg.rate; else break; } if (r !== null) return r; }
     return (kind === "focus" ? legacyFocus[key] : legacyUsage[key]) || 0;
   };
-  let totalFocus = 0, totalUsage = 0;
-  (focus.sessions || []).filter((s) => s.completed).forEach((s) => {
-    const day = (s.started_at || s.created_at || "").slice(0, 10);
-    if (day !== TODAY) return;
-    const p = TREES[s.tree] ? s.tree : DEFAULT_TREE;
-    totalFocus += ((s.actual_min || 0) / 60) * rateOn("focus", p, day);
-  });
-  screenRows.forEach((r) => { if (!USAGE_EXCLUDE.has(r.screen) && r.date === TODAY) totalUsage += (r.seconds / 60) * rateOn("usage", r.screen, r.date); });
-  const achToday = achievements.filter((a) => a.date === TODAY && (a.reward || 0) > 0);
-  const totalAch = achToday.reduce((n, a) => n + (a.reward || 0), 0);
-  const periodEarned = totalFocus + totalUsage + totalAch;
-  const focusPct = periodEarned > 0 ? (totalFocus / periodEarned) * 100 : 0;
-  const usagePct = periodEarned > 0 ? (totalUsage / periodEarned) * 100 : 0;
-  const achPct = periodEarned > 0 ? (totalAch / periodEarned) * 100 : 0;
-  // All-time pending, same as WorthScreen's hero figure.
-  let allFocus = 0, allUsage = 0;
+  let focusToday = 0, usageToday = 0, allFocus = 0, allUsage = 0;
   (focus.sessions || []).filter((s) => s.completed).forEach((s) => {
     const day = (s.started_at || s.created_at || "").slice(0, 10);
     const p = TREES[s.tree] ? s.tree : DEFAULT_TREE;
-    allFocus += ((s.actual_min || 0) / 60) * rateOn("focus", p, day);
+    const earned = ((s.actual_min || 0) / 60) * rateOn("focus", p, day);
+    allFocus += earned;
+    if (day === TODAY) focusToday += earned;
   });
-  screenRows.forEach((r) => { if (!USAGE_EXCLUDE.has(r.screen)) allUsage += (r.seconds / 60) * rateOn("usage", r.screen, r.date); });
+  screenRows.forEach((r) => {
+    if (USAGE_EXCLUDE.has(r.screen)) return;
+    const earned = (r.seconds / 60) * rateOn("usage", r.screen, r.date);
+    allUsage += earned;
+    if (r.date === TODAY) usageToday += earned;
+  });
+  const achToday = achievements.filter((a) => a.date === TODAY).reduce((n, a) => n + (a.reward || 0), 0);
   const allAch = achievements.reduce((n, a) => n + (a.reward || 0), 0);
+  const doneChallenges = challenges.filter((c) => c.status === "done");
+  const chalToday = doneChallenges.filter((c) => !c.end_date || c.end_date === TODAY).reduce((n, c) => n + (c.reward_earned || 0), 0);
+  const allChal = doneChallenges.reduce((n, c) => n + (c.reward_earned || 0), 0);
+  const earnedToday = focusToday + usageToday + achToday + chalToday;
+  const pct = (v) => (earnedToday > 0 ? (v / earnedToday) * 100 : 0);
+  const fPct = pct(focusToday), uPct = pct(usageToday), aPct = pct(achToday), cPct = pct(chalToday);
   const totalTaken = payouts.reduce((n, p) => n + p.amount, 0);
-  const pending = Math.max(0, allFocus + allUsage + allAch - totalTaken);
+  const pending = Math.max(0, allFocus + allUsage + allAch + allChal - totalTaken);
 
-  // ── Expenses today ──
-  const expToday = expLogs.filter((l) => l.date === TODAY);
-  const expTodayTotal = expToday.reduce((n, l) => n + l.amount, 0);
-  const catById = useMemo(() => Object.fromEntries(expCats.map((c) => [c.id, c])), [expCats]);
+  /* ── Grove ── */
+  const groveToday = focus.stats?.today_minutes || 0;
+  const groveTrees = focus.stats?.today_trees || 0;
 
-  // ── Wallet (income + expense + investment, today) ──
-  const invToday = investments.filter((i) => i.date === TODAY || i.start_date === TODAY);
-  const investedToday = invToday.reduce((n, i) => n + (i.invested || 0), 0);
+  /* ── Spiritual: chapters read ── */
+  const chaptersAll = useMemo(() => scriptures.flatMap((s) => (s.chapters || []).map((c) => ({ ...c, scripture: s.name, color: s.color }))), [scriptures]);
+  const chaptersToday = chaptersAll.filter((c) => c.read_date === TODAY);
 
-  // ── Sections opened today (screen time) ──
-  const screenTimeToday = useMemo(() => {
-    const m = {};
-    screenRows.forEach((r) => { if (r.date === TODAY) m[r.screen] = (m[r.screen] || 0) + r.seconds; });
-    return Object.entries(m).filter(([, s]) => s > 0).sort((a, b) => b[1] - a[1]);
-  }, [screenRows]);
+  /* ── Kickstart: today's lineup + watched time ── */
+  const videosToday = kickstart.filter((v) => (v.days || []).includes(todayName()));
+  const secToday = (screen) => screenRows.filter((r) => r.screen === screen && r.date === TODAY).reduce((n, r) => n + r.seconds, 0);
+  const kickstartSec = secToday("kickstart");
+  const affirmSec = secToday("affirmations");
+  const mindscapeSec = secToday("mindscape");
 
-  // ── Proxy flags for sections with no first-class "today" tracking ──
-  const usedToday = (screen) => screenRows.some((r) => r.screen === screen && r.date === TODAY && r.seconds > 0);
-  const spiritualToday = usedToday("spiritual");
-  const affirmationsToday = usedToday("affirmations");
-  const skillsNotesToday = useMemo(() => {
-    const rows = [];
-    skills.forEach((sk) => Object.values(sk.notes || {}).forEach((arr) => arr.forEach((n) => {
-      if ((n.created_at || "").slice(0, 10) === TODAY) rows.push({ ...n, skill: sk.title });
-    })));
-    return rows;
-  }, [skills]);
-  const kickstartToday = usedToday("kickstart");
-  const mindscapeToday = usedToday("mindscape");
-  const achievementsToday = achievements.filter((a) => a.date === TODAY);
+  /* ── Golden Book: per active dream, written today or pending ── */
+  const activeDreams = goldenGoals.filter((g) => !g.achieved);
+  const dreamDone = (g) => (g.t369_enabled ? !!g.t369?.day_complete : !!g.today_done);
 
-  // ── Quick-log widget state ──
-  const [taskForm, setTaskForm] = useState(null);
-  const [focusForm, setFocusForm] = useState(null);
-  const [expForm, setExpForm] = useState(null);
-  const [invForm, setInvForm] = useState(null);
-
-  const toggleHabit = (h) => api.toggleHabitLog(h.id, TODAY).then(load).catch(() => {});
-
-  const saveTask = async () => {
-    const title = taskForm.title.trim();
-    if (!title) return;
-    await api.createTask({ pillar: taskForm.pillar, title, quadrant: taskForm.quadrant, time_estimate_min: Number(taskForm.time_estimate_min) || 30, start_datetime: null, goal_id: null });
-    setTaskForm(null);
-    load();
+  /* ── Challenges status ── */
+  const chalCounts = {
+    active: challenges.filter((c) => c.status === "active").length,
+    done: doneChallenges.length,
+    failed: challenges.filter((c) => c.status === "failed").length,
   };
-  const startFocus = async () => {
-    await api.createFocus({ label: focusForm.label.trim() || null, tree: focusForm.tree, duration_min: Number(focusForm.duration_min) || 25 });
-    setFocusForm(null);
-    load();
-  };
-  const saveExp = async () => {
-    const amt = parseFloat(expForm.amount) || 0;
-    if (amt <= 0 || !expForm.category_id) return;
-    await api.createExpenseLog({ category_id: Number(expForm.category_id), amount: amt, note: expForm.note.trim(), date: TODAY });
-    setExpForm(null);
-    load();
-  };
-  const saveInv = async () => {
-    const name = invForm.name.trim();
-    const invested = parseFloat(invForm.invested) || 0;
-    if (!name || invested <= 0) return;
-    await api.createInvestment({ name, kind: invForm.kind, invested, current_value: invested, note: invForm.note.trim(), date: TODAY });
-    setInvForm(null);
-    load();
-  };
+  const activeChals = challenges.filter((c) => c.status === "active").slice(0, 3);
+
+  /* ── Goals for the current week ── */
+  const weeklyGoals = goals.filter((g) => g.horizon === "Weekly" && g.start_date <= TODAY && g.end_date >= TODAY);
+
+  /* ── Journal ── */
+  const journalBullets = journal ? Object.values(journal.bullets || {}).reduce((n, arr) => n + arr.length, 0) : 0;
+  const journalDone = !!(journal && (journal.mood != null || journalBullets > 0));
 
   const go = (id) => onNavigate && onNavigate(id);
 
@@ -217,220 +260,204 @@ export default function DashboardScreen({ onNavigate }) {
         <div style={S.subhead}>{new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</div>
       </div>
 
-      {/* Sections used today */}
-      <Card title="Used today" onClick={() => {}}>
-        {screenTimeToday.length === 0 ? <Muted>Nothing opened yet today.</Muted> : (
-          <div style={S.chipWrap}>
-            {screenTimeToday.map(([s, sec]) => (
-              <button key={s} onClick={() => go(s)} style={S.usedChip}>
-                {SCREEN_LABELS[s] || s} <span style={S.usedChipTime}>{fmtSec(sec)}</span>
-              </button>
-            ))}
+      {/* Top stats */}
+      <div style={S.statGrid}>
+        <StatTile icon={CheckSquare} color="#4C9A6B" label="Habits done" value={`${habitsDoneToday}/${activeHabits.length}`} onClick={() => go("habits")} />
+        <StatTile icon={Trees} color={FOCUS_COLOR} label={groveTrees ? `Grove · ${groveTrees} tree${groveTrees === 1 ? "" : "s"}` : "Grove today"} value={fmtMin(groveToday)} onClick={() => go("grove")} />
+        <StatTile icon={ReceiptText} color="#C9772E" label="Spent today" value={money(expTodayTotal)} onClick={() => go("expenses")} />
+        <StatTile icon={IndianRupee} color="#C9A227" label="Rewards pending" value={money(pending)} onClick={() => go("worth")} />
+      </div>
+
+      {/* Habits: comparison + rings */}
+      <Card title="Habits" eyebrow={`${habitsDoneToday}/${activeHabits.length} done today`} onClick={() => go("habits")}>
+        {activeHabits.length === 0 ? <Muted>No habits yet.</Muted> : (
+          <>
+            <TrendBars items={habitThreeDay} fmt={(v) => `${v}/${activeHabits.length}`} max={activeHabits.length} />
+            <div style={S.ringRow}>
+              <RingStat pct={dailyPct} label="Today" sub={`${habitsDoneToday}/${activeHabits.length} done`} color="#4C9A6B" />
+              <RingStat pct={weeklyPct} label="This week" sub="of weekly targets" color="#3A7CA5" />
+              <RingStat pct={monthlyPct} label="This month" sub="of monthly targets" color="#8268B0" />
+            </div>
+          </>
+        )}
+      </Card>
+
+      {/* Expenses: comparison + category donut */}
+      <Card title="Expenses" eyebrow={`${money(expTodayTotal)} today`} onClick={() => go("expenses")}>
+        <TrendBars items={expThreeDay} fmt={(v) => money(v)} />
+        {expCycle.segs.length > 0 && (
+          <div style={{ ...S.pieWrap, marginTop: 14 }}>
+            <div style={S.pieChart}>
+              <div style={{ ...S.pieDisc, background: expGradient }} />
+              <div style={S.pieHole}>
+                <span style={S.pieHoleVal}>{money(expCycle.total)}</span>
+                <span style={S.pieHoleLbl}>this month</span>
+              </div>
+            </div>
+            <div style={S.pieLegend}>
+              {expCycle.segs.slice(0, 6).map((s) => (
+                <LegendRow key={s.cat.id} color={s.cat.color} label={s.cat.name} pct={s.pct} val={money(s.amount)} />
+              ))}
+            </div>
           </div>
         )}
       </Card>
 
-      {/* Top stat row */}
-      <div style={S.statGrid}>
-        <StatTile icon={CheckSquare} color="#4C9A6B" label="Habits done" value={`${habitsDoneToday}/${habits.length}`} onClick={() => go("habits")} />
-        <StatTile icon={Trees} color={FOCUS_COLOR} label={groveTrees ? `Focus · ${groveTrees} tree${groveTrees === 1 ? "" : "s"}` : "Focus time"} value={fmtMin(groveToday)} onClick={() => go("grove")} />
-        <StatTile icon={ReceiptText} color="#C9772E" label="Spent today" value={fmtMoney2(expTodayTotal, cur.code)} onClick={() => go("expenses")} />
-        <StatTile icon={Wallet} color="#8268B0" label="Invested today" value={fmtMoney2(investedToday, cur.code)} onClick={() => go("vault")} />
-      </div>
-
-      {/* Rewards + breakdown */}
-      <Card title="Rewards" eyebrow={`Pending ${reward(pending)}`} onClick={() => go("worth")}>
-        {periodEarned > 0 ? (
+      {/* Rewards: pending + today's split donut */}
+      <Card title="Rewards" eyebrow={`Pending ${money(pending)}`} onClick={() => go("worth")}>
+        {earnedToday > 0 ? (
           <div style={S.pieWrap}>
             <div style={S.pieChart}>
-              <div style={{ ...S.pieDisc, background: `conic-gradient(${FOCUS_COLOR} 0 ${focusPct}%, ${USAGE_COLOR} ${focusPct}% ${focusPct + usagePct}%, ${ACH_COLOR} ${focusPct + usagePct}% 100%)` }} />
+              <div style={{ ...S.pieDisc, background: `conic-gradient(${FOCUS_COLOR} 0 ${fPct}%, ${USAGE_COLOR} ${fPct}% ${fPct + uPct}%, ${ACH_COLOR} ${fPct + uPct}% ${fPct + uPct + aPct}%, ${CHAL_COLOR} ${fPct + uPct + aPct}% 100%)` }} />
               <div style={S.pieHole}>
-                <span style={S.pieHoleVal}>{reward(periodEarned)}</span>
+                <span style={S.pieHoleVal}>{money(earnedToday)}</span>
                 <span style={S.pieHoleLbl}>today</span>
               </div>
             </div>
             <div style={S.pieLegend}>
-              <LegendRow color={FOCUS_COLOR} label="Focus" pct={focusPct} val={reward(totalFocus)} />
-              <LegendRow color={USAGE_COLOR} label="Usage" pct={usagePct} val={reward(totalUsage)} />
-              <LegendRow color={ACH_COLOR} label="Achievement" pct={achPct} val={reward(totalAch)} />
+              <LegendRow color={FOCUS_COLOR} label="Focus" pct={fPct} val={money(focusToday)} />
+              <LegendRow color={USAGE_COLOR} label="Usage" pct={uPct} val={money(usageToday)} />
+              <LegendRow color={ACH_COLOR} label="Achievement" pct={aPct} val={money(achToday)} />
+              <LegendRow color={CHAL_COLOR} label="Challenges" pct={cPct} val={money(chalToday)} />
             </div>
           </div>
         ) : <Muted>No rewards earned yet today.</Muted>}
       </Card>
 
       {/* Revision due */}
-      {dueToday.length > 0 && (
-        <Card title="Revision due" eyebrow={`${dueToday.length} pending`} onClick={() => go("revision")}>
+      <Card title="Revision" eyebrow={dueToday.length ? `${dueToday.length} due` : "Nothing due"} onClick={() => go("revision")}>
+        {dueToday.length === 0 ? <Muted>No topics due for revision today. 🎉</Muted> : (
           <div style={S.rows}>
-            {dueToday.slice(0, 5).map((r) => (
+            {dueToday.slice(0, 6).map((r) => (
               <div key={r.review_id} style={S.row}>
                 <span style={{ ...S.dot, background: r.is_missed ? "#C2536B" : "#C9A227" }} />
                 <span style={S.rowName}>{r.topic}</span>
-                <span style={S.rowMeta}>Stage {r.stage}</span>
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
-
-      {/* Spiritual / Affirmations / Skills / Kickstart / Mindscape — today's engagement */}
-      <div style={S.cardGrid}>
-        <MiniStatusCard icon={Star} color="#8268B0" label="Spiritual" done={spiritualToday} doneText="Read today" idleText="Not opened yet" onClick={() => go("spiritual")} />
-        <MiniStatusCard icon={Sparkles} color="#C9A227" label="Affirmations" done={affirmationsToday} doneText="Read today" idleText="Not opened yet" onClick={() => go("affirmations")} />
-        <MiniStatusCard icon={Rocket} color="#C9772E" label="Kickstart" done={kickstartToday} doneText="Watched today" idleText="Not watched yet" onClick={() => go("kickstart")} />
-        <MiniStatusCard icon={Headphones} color="#3A7CA5" label="Mindscape" done={mindscapeToday} doneText="Listened today" idleText="Not listened yet" onClick={() => go("mindscape")} />
-      </div>
-
-      {/* Skills enhanced today */}
-      <Card title="Skills enhanced" eyebrow={skillsNotesToday.length ? `${skillsNotesToday.length} note${skillsNotesToday.length === 1 ? "" : "s"}` : null} onClick={() => go("skills")}>
-        {skillsNotesToday.length === 0 ? <Muted>No skill notes added today.</Muted> : (
-          <div style={S.rows}>
-            {skillsNotesToday.slice(0, 5).map((n) => (
-              <div key={n.id} style={S.row}>
-                <span style={{ ...S.dot, background: "#4C9A6B" }} />
-                <span style={S.rowName}>{n.text}</span>
-                <span style={S.rowMeta}>{n.skill}</span>
+                <span style={S.rowMeta}>Stage {r.stage}{r.is_missed ? " · missed" : ""}</span>
               </div>
             ))}
           </div>
         )}
       </Card>
 
-      {/* Achievements recorded today */}
-      {achievementsToday.length > 0 && (
-        <Card title="Achievements today" eyebrow={`${achievementsToday.length}`} onClick={() => go("achievements")}>
-          <div style={S.rows}>
-            {achievementsToday.map((a) => (
-              <div key={a.id} style={S.row}>
-                <span style={{ ...S.dot, background: "#C2536B" }} />
-                <span style={S.rowName}>{a.title}</span>
-                {a.reward > 0 && <span style={S.rowAmt}>{reward(a.reward)}</span>}
-              </div>
-            ))}
-          </div>
+      {/* Golden Book + Challenges + Goals + Journal */}
+      <div style={S.twoCol}>
+        <Card title="Golden Book" eyebrow={activeDreams.length ? `${activeDreams.filter(dreamDone).length}/${activeDreams.length} written` : null} onClick={() => go("golden")}>
+          {activeDreams.length === 0 ? <Muted>No active dreams.</Muted> : (
+            <div style={S.rows}>
+              {activeDreams.slice(0, 5).map((g) => (
+                <div key={g.id} style={S.row}>
+                  <Crown size={13} color="#C9A227" style={{ flexShrink: 0 }} />
+                  <span style={S.rowName}>{g.title}</span>
+                  <DoneBadge done={dreamDone(g)} doneText={g.t369_enabled ? "369 done" : "Written"} pendingText="Pending" />
+                </div>
+              ))}
+            </div>
+          )}
         </Card>
-      )}
 
-      {/* Wallet status */}
-      <Card title="Wallet status" onClick={() => go("vault")}>
-        <div style={S.walletRow}>
-          <div style={S.walletStat}><div style={{ ...S.walletVal, color: "#C9772E" }}>{fmtMoney2(expTodayTotal, cur.code)}</div><div style={S.walletLbl}>Spent today</div></div>
-          <div style={S.walletStat}><div style={{ ...S.walletVal, color: "#8268B0" }}>{fmtMoney2(investedToday, cur.code)}</div><div style={S.walletLbl}>Invested today</div></div>
-          <div style={S.walletStat}><div style={S.walletVal}>{fmtMoney2(pending, cur.code)}</div><div style={S.walletLbl}>Rewards pending</div></div>
-        </div>
-      </Card>
-
-      {/* ── Quick log widgets ── */}
-      <div style={S.quickHead}>Quick log</div>
-      <div style={S.cardGrid}>
-        {/* Habits quick toggle */}
-        <div style={S.quickCard}>
-          <div style={S.quickTitle}><CheckSquare size={15} color="#4C9A6B" /> Habits</div>
-          {habits.length === 0 ? <Muted>No habits yet.</Muted> : (
-            <div style={S.habitList}>
-              {habits.slice(0, 6).map((h) => {
-                const done = (h.logs || []).includes(TODAY);
+        <Card title="Challenges" eyebrow={`${chalCounts.active} active · ${chalCounts.done} done${chalCounts.failed ? ` · ${chalCounts.failed} missed` : ""}`} onClick={() => go("challenges")}>
+          {challenges.length === 0 ? <Muted>No challenges yet.</Muted> : activeChals.length === 0 ? <Muted>No active challenges.</Muted> : (
+            <div style={S.rows}>
+              {activeChals.map((c) => {
+                const p = c.target > 0 ? Math.min(100, Math.max(0, (c.completed / c.target) * 100)) : 0;
+                const neg = (c.completed || 0) < 0;
                 return (
-                  <button key={h.id} onClick={() => toggleHabit(h)} style={{ ...S.habitChip, ...(done ? S.habitChipOn : {}) }}>
-                    {done && <Flame size={12} />} {h.name}
-                  </button>
+                  <div key={c.id} style={{ padding: "6px 0", borderBottom: "1px solid var(--border)" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                      <span style={S.rowName}>{c.name}</span>
+                      <span style={{ ...S.rowMeta, color: neg ? "#C2536B" : "var(--text-3)" }}>{neg ? "-" : ""}{Math.round(neg ? Math.abs((c.completed / (c.target || 1)) * 100) : p)}%</span>
+                    </div>
+                    <div style={S.miniTrack}>
+                      <div style={{ ...S.miniBar, width: `${neg ? Math.min(100, Math.abs((c.completed / (c.target || 1)) * 100)) : p}%`, background: neg ? "#C2536B" : CHAL_COLOR }} />
+                    </div>
+                  </div>
                 );
               })}
             </div>
           )}
-        </div>
+        </Card>
 
-        {/* Quadrant quick add */}
-        <div style={S.quickCard}>
-          <div style={S.quickTitle}><LayoutGrid size={15} color="#3A7CA5" /> Quadrant</div>
-          <div style={S.quadGrid}>
-            {QUADRANTS.map((q) => (
-              <div key={q.id} style={S.quadCell}>
-                <span style={S.quadLabel}>{q.label}</span>
-                <span style={S.quadCount}>{tasksByQuadrant[q.id]}</span>
+        <Card title="Goals this week" eyebrow={weeklyGoals.length ? `${weeklyGoals.length}` : null} onClick={() => go("goals")}>
+          {weeklyGoals.length === 0 ? <Muted>No weekly goals running.</Muted> : (
+            <div style={S.rows}>
+              {weeklyGoals.slice(0, 5).map((g) => (
+                <div key={g.id} style={S.row}>
+                  <Target size={13} color="#3A7CA5" style={{ flexShrink: 0 }} />
+                  <span style={S.rowName}>{g.title}</span>
+                  <span style={S.rowMeta}>{g.pillar}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+
+        <Card title="Journal" eyebrow={journalDone ? "Done today" : "Not yet"} onClick={() => go("journal")}>
+          <div style={S.journalRow}>
+            <BookOpen size={18} color={journalDone ? "#4C9A6B" : "var(--text-3)"} />
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: journalDone ? "#4C9A6B" : "var(--text-2)" }}>
+                {journalDone ? "Journaled today" : "Not journaled yet"}
               </div>
-            ))}
+              <div style={S.rowMeta}>
+                {journal?.mood != null ? `Mood: ${MOODS[journal.mood] || journal.mood}` : "No mood set"}
+                {journalBullets > 0 ? ` · ${journalBullets} bullet${journalBullets === 1 ? "" : "s"}` : ""}
+              </div>
+            </div>
           </div>
-          <button onClick={() => setTaskForm({ title: "", pillar: PILLAR_NAMES[0], quadrant: "Q1", time_estimate_min: 30 })} style={S.quickAddBtn}>
-            <Plus size={14} /> Add task
-          </button>
-        </div>
-
-        {/* Grove quick start */}
-        <div style={S.quickCard}>
-          <div style={S.quickTitle}><Trees size={15} color={FOCUS_COLOR} /> Grove focus</div>
-          <div style={S.quickStat}>{fmtMin(groveToday)} today</div>
-          <button onClick={() => setFocusForm({ label: "", tree: DEFAULT_TREE, duration_min: 25 })} style={S.quickAddBtn}>
-            <Plus size={14} /> Start session
-          </button>
-        </div>
-
-        {/* Expense / investment quick log */}
-        <div style={S.quickCard}>
-          <div style={S.quickTitle}><ReceiptText size={15} color="#C9772E" /> Expense / Investment</div>
-          <div style={S.quickStat}>{fmtMoney2(expTodayTotal, cur.code)} spent today</div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={() => setExpForm({ category_id: expCats[0]?.id || "", amount: "", note: "" })} style={{ ...S.quickAddBtn, flex: 1 }}>
-              <Plus size={14} /> Expense
-            </button>
-            <button onClick={() => setInvForm({ name: "", kind: "Stocks", invested: "", note: "" })} style={{ ...S.quickAddBtn, flex: 1 }}>
-              <Plus size={14} /> Invest
-            </button>
-          </div>
-        </div>
+        </Card>
       </div>
 
-      {/* ── Modals ── */}
-      {taskForm && (
-        <Modal title="Add task" onClose={() => setTaskForm(null)}>
-          <input autoFocus placeholder="Task title" value={taskForm.title} onChange={(e) => setTaskForm((f) => ({ ...f, title: e.target.value }))} style={S.input} />
-          <select value={taskForm.pillar} onChange={(e) => setTaskForm((f) => ({ ...f, pillar: e.target.value }))} style={S.input}>
-            {PILLAR_NAMES.map((p) => <option key={p} value={p}>{p}</option>)}
-          </select>
-          <select value={taskForm.quadrant} onChange={(e) => setTaskForm((f) => ({ ...f, quadrant: e.target.value }))} style={S.input}>
-            {QUADRANTS.map((q) => <option key={q.id} value={q.id}>{q.id} · {q.label}</option>)}
-          </select>
-          <input type="number" min="1" placeholder="Estimate (min)" value={taskForm.time_estimate_min} onChange={(e) => setTaskForm((f) => ({ ...f, time_estimate_min: e.target.value }))} style={S.input} />
-          <ModalActions onCancel={() => setTaskForm(null)} onSave={saveTask} disabled={!taskForm.title.trim()} />
-        </Modal>
-      )}
+      {/* Spiritual reading */}
+      <Card title="Spiritual" eyebrow={`${chaptersAll.length} chapter${chaptersAll.length === 1 ? "" : "s"} read overall`} onClick={() => go("spiritual")}>
+        {scriptures.length === 0 ? <Muted>No scriptures yet.</Muted> : (
+          <>
+            {chaptersToday.length > 0 && (
+              <div style={S.rows}>
+                {chaptersToday.map((c) => (
+                  <div key={c.id} style={S.row}>
+                    <span style={{ ...S.dot, background: c.color || "#8268B0" }} />
+                    <span style={S.rowName}>{c.title}</span>
+                    <span style={S.rowMeta}>read today · {c.scripture}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ ...S.chipWrap, marginTop: chaptersToday.length ? 10 : 0 }}>
+              {scriptures.map((s) => (
+                <span key={s.id} style={{ ...S.scripChip, borderColor: (s.color || "#8268B0") + "66", color: s.color || "#8268B0" }}>
+                  {s.name} · {(s.chapters || []).length}
+                </span>
+              ))}
+            </div>
+            {chaptersToday.length === 0 && <div style={{ ...S.muted, paddingTop: 8 }}>Nothing read today yet.</div>}
+          </>
+        )}
+      </Card>
 
-      {focusForm && (
-        <Modal title="Start focus session" onClose={() => setFocusForm(null)}>
-          <input autoFocus placeholder="Label (optional)" value={focusForm.label} onChange={(e) => setFocusForm((f) => ({ ...f, label: e.target.value }))} style={S.input} />
-          <select value={focusForm.tree} onChange={(e) => setFocusForm((f) => ({ ...f, tree: e.target.value }))} style={S.input}>
-            {Object.entries(TREES).map(([id, t]) => <option key={id} value={id}>{t.label}</option>)}
-          </select>
-          <input type="number" min="1" placeholder="Duration (min)" value={focusForm.duration_min} onChange={(e) => setFocusForm((f) => ({ ...f, duration_min: e.target.value }))} style={S.input} />
-          <ModalActions onCancel={() => setFocusForm(null)} onSave={startFocus} disabled={!Number(focusForm.duration_min)} />
-        </Modal>
-      )}
-
-      {expForm && (
-        <Modal title="Log expense" onClose={() => setExpForm(null)}>
-          <select value={expForm.category_id} onChange={(e) => setExpForm((f) => ({ ...f, category_id: e.target.value }))} style={S.input}>
-            {expCats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-          <input autoFocus type="number" min="0" step="0.01" placeholder={`Amount (${cur.symbol})`} value={expForm.amount} onChange={(e) => setExpForm((f) => ({ ...f, amount: e.target.value }))} style={S.input} />
-          <input placeholder="Note (optional)" value={expForm.note} onChange={(e) => setExpForm((f) => ({ ...f, note: e.target.value }))} style={S.input} />
-          <ModalActions onCancel={() => setExpForm(null)} onSave={saveExp} disabled={!(parseFloat(expForm.amount) > 0 && expForm.category_id)} />
-        </Modal>
-      )}
-
-      {invForm && (
-        <Modal title="Log investment" onClose={() => setInvForm(null)}>
-          <input autoFocus placeholder="Name" value={invForm.name} onChange={(e) => setInvForm((f) => ({ ...f, name: e.target.value }))} style={S.input} />
-          <select value={invForm.kind} onChange={(e) => setInvForm((f) => ({ ...f, kind: e.target.value }))} style={S.input}>
-            {["Stocks", "Mutual Fund", "Gold", "Real Estate", "Fixed Deposit", "Crypto", "Other"].map((k) => <option key={k} value={k}>{k}</option>)}
-          </select>
-          <input type="number" min="0" step="0.01" placeholder={`Invested (${cur.symbol})`} value={invForm.invested} onChange={(e) => setInvForm((f) => ({ ...f, invested: e.target.value }))} style={S.input} />
-          <input placeholder="Note (optional)" value={invForm.note} onChange={(e) => setInvForm((f) => ({ ...f, note: e.target.value }))} style={S.input} />
-          <ModalActions onCancel={() => setInvForm(null)} onSave={saveInv} disabled={!(invForm.name.trim() && parseFloat(invForm.invested) > 0)} />
-        </Modal>
-      )}
+      {/* Kickstart / Affirmations / Mindscape */}
+      <div style={S.miniGrid}>
+        <MiniCard icon={Rocket} color="#C9772E" label="Kickstart" onClick={() => go("kickstart")}
+          main={kickstartSec > 0 ? `Watched ${fmtMin(kickstartSec / 60)}` : "Not watched yet"}
+          done={kickstartSec > 0}
+          sub={`${videosToday.length} video${videosToday.length === 1 ? "" : "s"} lined up for ${todayName()}`} />
+        <MiniCard icon={Sparkles} color="#C9A227" label="Affirmations" onClick={() => go("affirmations")}
+          main={affirmSec > 0 ? `Read for ${fmtMin(affirmSec / 60)}` : "Not read yet"}
+          done={affirmSec > 0}
+          sub={affirmSec > 0 ? "Nice — keep affirming daily" : "Open a card and read it aloud"} />
+        <MiniCard icon={Headphones} color="#3A7CA5" label="Meditation / Visualization" onClick={() => go("mindscape")}
+          main={mindscapeSec > 0 ? `Practiced ${fmtMin(mindscapeSec / 60)}` : "Not done yet"}
+          done={mindscapeSec > 0}
+          sub={mindscapeSec > 0 ? "Session logged for today" : "A few minutes still counts"} />
+        <MiniCard icon={RotateCcw} color="#8268B0" label="Revision" onClick={() => go("revision")}
+          main={dueToday.length ? `${dueToday.length} topic${dueToday.length === 1 ? "" : "s"} due` : "All clear"}
+          done={dueToday.length === 0}
+          sub={dueToday.length ? "Review them before the day ends" : "No reviews pending today"} />
+      </div>
     </div>
   );
 }
+
+/* ── Small building blocks ── */
 
 function Card({ title, eyebrow, onClick, children }) {
   return (
@@ -444,6 +471,43 @@ function Card({ title, eyebrow, onClick, children }) {
   );
 }
 function Muted({ children }) { return <div style={S.muted}>{children}</div>; }
+
+function TrendBars({ items, fmt, max }) {
+  const top = Math.max(1, max || 0, ...items.map((i) => i.value));
+  return (
+    <div style={S.tbWrap}>
+      {items.map((it, i) => (
+        <div key={i} style={S.tbRow}>
+          <div style={S.tbLbl}>{it.label}</div>
+          <div style={S.tbTrack}><div style={{ ...S.tbBar, width: `${(it.value / top) * 100}%`, background: it.color }} /></div>
+          <div style={S.tbVal}>{fmt(it.value)}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function RingStat({ pct, label, sub, color }) {
+  const R = 24, C = 2 * Math.PI * R;
+  const off = C * (1 - Math.max(0, Math.min(100, pct)) / 100);
+  return (
+    <div style={S.ringStat}>
+      <div style={S.ringBox}>
+        <svg width="64" height="64" viewBox="0 0 64 64">
+          <circle cx="32" cy="32" r={R} fill="none" stroke="var(--border)" strokeWidth="6" />
+          <circle cx="32" cy="32" r={R} fill="none" stroke={color} strokeWidth="6" strokeLinecap="round"
+            strokeDasharray={C} strokeDashoffset={off} transform="rotate(-90 32 32)" style={{ transition: "stroke-dashoffset 0.5s ease" }} />
+        </svg>
+        <div style={{ ...S.ringPct, color }}>{pct}%</div>
+      </div>
+      <div>
+        <div style={S.ringLabel}>{label}</div>
+        <div style={S.ringSub}>{sub}</div>
+      </div>
+    </div>
+  );
+}
+
 function LegendRow({ color, label, pct, val }) {
   return (
     <div style={S.pieLegRow}>
@@ -454,56 +518,45 @@ function LegendRow({ color, label, pct, val }) {
     </div>
   );
 }
-function StatTile({ icon: Icon, color, label, value, sub, onClick }) {
+
+function StatTile({ icon: Icon, color, label, value, onClick }) {
   return (
     <button onClick={onClick} style={S.statTile}>
       <div style={{ ...S.statIcon, background: `${color}1A`, color }}><Icon size={17} /></div>
       <div style={{ minWidth: 0 }}>
         <div style={S.statVal}>{value}</div>
-        <div style={S.statLbl}>{label}{sub ? ` · ${sub}` : ""}</div>
+        <div style={S.statLbl}>{label}</div>
       </div>
     </button>
   );
 }
-function MiniStatusCard({ icon: Icon, color, label, done, doneText, idleText, onClick }) {
+
+function DoneBadge({ done, doneText = "Done", pendingText = "Pending" }) {
+  return (
+    <span style={{ ...S.badge, color: done ? "#4C9A6B" : "#C2773B", background: done ? "rgba(76,154,107,0.12)" : "rgba(194,119,59,0.12)" }}>
+      {done ? doneText : pendingText}
+    </span>
+  );
+}
+
+function MiniCard({ icon: Icon, color, label, main, sub, done, onClick }) {
   return (
     <button onClick={onClick} style={S.miniCard}>
       <div style={{ ...S.statIcon, background: `${color}1A`, color }}><Icon size={16} /></div>
       <div style={S.miniLabel}>{label}</div>
-      <div style={{ ...S.miniStatus, color: done ? "#4C9A6B" : "var(--text-3)" }}>{done ? doneText : idleText}</div>
+      <div style={{ ...S.miniMain, color: done ? "#4C9A6B" : "var(--text-2)" }}>{main}</div>
+      <div style={S.miniSub}>{sub}</div>
     </button>
-  );
-}
-function Modal({ title, onClose, children }) {
-  return (
-    <div style={S.modalOverlay} onClick={onClose}>
-      <div style={S.modalCard} onClick={(e) => e.stopPropagation()}>
-        <div style={S.modalTitle}>{title}</div>
-        <div style={S.modalBody}>{children}</div>
-      </div>
-    </div>
-  );
-}
-function ModalActions({ onCancel, onSave, disabled }) {
-  return (
-    <div style={S.modalActions}>
-      <button onClick={onCancel} style={S.modalCancel}>Cancel</button>
-      <button onClick={onSave} disabled={disabled} style={{ ...S.modalConfirm, ...(disabled ? { opacity: 0.5, cursor: "not-allowed" } : {}) }}>Save</button>
-    </div>
   );
 }
 
 const S = {
   loading: { padding: 40, textAlign: "center", color: "var(--text-3)", fontFamily: "'Inter',system-ui,sans-serif" },
-  page: { fontFamily: "'Inter',system-ui,sans-serif", background: "var(--bg)", minHeight: "100%", padding: "28px 20px 40px", color: "var(--text)", boxSizing: "border-box", maxWidth: 760, margin: "0 auto" },
+  page: { fontFamily: "'Inter',system-ui,sans-serif", background: "var(--bg)", minHeight: "100%", padding: "28px 20px 40px", color: "var(--text)", boxSizing: "border-box", maxWidth: 820, margin: "0 auto" },
   head: { marginBottom: 18 },
   eyebrow: { fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--text-3)", fontWeight: 600, marginBottom: 4 },
   h1: { fontSize: 28, fontWeight: 700, margin: 0, letterSpacing: "-0.02em", fontFamily: "'Fraunces',Georgia,serif" },
   subhead: { fontSize: 13, color: "var(--text-3)", marginTop: 4 },
-
-  chipWrap: { display: "flex", gap: 8, flexWrap: "wrap" },
-  usedChip: { border: "1px solid var(--border)", background: "var(--surface-2)", color: "var(--text-2)", padding: "6px 12px", borderRadius: 18, fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6 },
-  usedChipTime: { color: "var(--text-3)", fontWeight: 600, fontSize: 11.5 },
 
   statGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 14 },
   statTile: { display: "flex", alignItems: "center", gap: 10, border: "1px solid var(--border)", background: "var(--surface)", borderRadius: 14, padding: "12px 14px", cursor: "pointer", fontFamily: "inherit", textAlign: "left", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
@@ -512,62 +565,58 @@ const S = {
   statLbl: { fontSize: 11, color: "var(--text-3)", fontWeight: 600, marginTop: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
 
   card: { background: "var(--surface)", borderRadius: 16, padding: "16px 18px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", marginBottom: 14 },
-  cardTitleRow: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 10 },
+  cardTitleRow: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" },
   cardTitleBtn: { display: "flex", alignItems: "center", gap: 6, border: "none", background: "none", cursor: "pointer", padding: 0, fontFamily: "'Fraunces',Georgia,serif", fontSize: 16, fontWeight: 700, color: "var(--text)" },
   cardEyebrow: { fontSize: 12, fontWeight: 700, color: "var(--text-3)" },
   muted: { fontSize: 13, color: "var(--text-3)", textAlign: "center", padding: "10px 0" },
+
+  twoCol: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14, marginBottom: 0 },
 
   rows: { display: "flex", flexDirection: "column", gap: 2 },
   row: { display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderBottom: "1px solid var(--border)" },
   dot: { width: 10, height: 10, borderRadius: 3, flexShrink: 0 },
   rowName: { flex: 1, fontSize: 13.5, fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   rowMeta: { fontSize: 11.5, color: "var(--text-3)", fontWeight: 600, flexShrink: 0 },
-  rowAmt: { fontSize: 13.5, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif", flexShrink: 0 },
+  badge: { fontSize: 10.5, fontWeight: 700, padding: "3px 9px", borderRadius: 12, flexShrink: 0, whiteSpace: "nowrap" },
+
+  tbWrap: { display: "flex", flexDirection: "column", gap: 7 },
+  tbRow: { display: "flex", alignItems: "center", gap: 8 },
+  tbLbl: { width: 78, fontSize: 11.5, color: "var(--text-2)", fontWeight: 600, flexShrink: 0, whiteSpace: "nowrap" },
+  tbTrack: { flex: 1, height: 13, background: "var(--surface-2)", borderRadius: 7, overflow: "hidden" },
+  tbBar: { height: "100%", borderRadius: 7, transition: "width 0.3s" },
+  tbVal: { width: 70, fontSize: 11.5, color: "var(--text-2)", fontWeight: 700, flexShrink: 0, textAlign: "right" },
+
+  ringRow: { display: "flex", gap: 14, flexWrap: "wrap", marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--border)" },
+  ringStat: { display: "flex", alignItems: "center", gap: 10, flex: "1 1 150px" },
+  ringBox: { position: "relative", width: 64, height: 64, display: "grid", placeItems: "center", flexShrink: 0 },
+  ringPct: { position: "absolute", inset: 0, display: "grid", placeItems: "center", fontSize: 14, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif" },
+  ringLabel: { fontSize: 13, fontWeight: 700, color: "var(--text)" },
+  ringSub: { fontSize: 11, color: "var(--text-3)", fontWeight: 500, marginTop: 1 },
 
   pieWrap: { display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" },
   pieChart: { position: "relative", width: 110, height: 110, flexShrink: 0, margin: "0 auto" },
   pieDisc: { width: "100%", height: "100%", borderRadius: "50%" },
   pieHole: { position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: 66, height: 66, borderRadius: "50%", background: "var(--surface)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" },
-  pieHoleVal: { fontSize: 12.5, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif" },
+  pieHoleVal: { fontSize: 12, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif", maxWidth: 62, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   pieHoleLbl: { fontSize: 9.5, color: "var(--text-3)", fontWeight: 600 },
-  pieLegend: { flex: 1, minWidth: 160, display: "flex", flexDirection: "column", gap: 8 },
+  pieLegend: { flex: 1, minWidth: 170, display: "flex", flexDirection: "column", gap: 7 },
   pieLegRow: { display: "flex", alignItems: "center", gap: 8 },
   legendDot: { width: 10, height: 10, borderRadius: 3, flexShrink: 0 },
-  pieLegName: { flex: 1, fontSize: 13, fontWeight: 600 },
-  pieLegPct: { fontSize: 12.5, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif", width: 40, textAlign: "right" },
+  pieLegName: { flex: 1, fontSize: 12.5, fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  pieLegPct: { fontSize: 12, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif", width: 38, textAlign: "right" },
   pieLegMin: { fontSize: 11.5, color: "var(--text-3)", fontWeight: 600, minWidth: 58, textAlign: "right" },
 
-  cardGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, marginBottom: 14 },
-  miniCard: { display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6, border: "1px solid var(--border)", background: "var(--surface)", borderRadius: 14, padding: "12px 14px", cursor: "pointer", fontFamily: "inherit", textAlign: "left", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
-  miniLabel: { fontSize: 13, fontWeight: 700, color: "var(--text)" },
-  miniStatus: { fontSize: 11.5, fontWeight: 600 },
+  miniTrack: { height: 8, background: "var(--surface-2)", borderRadius: 4, overflow: "hidden", marginTop: 5 },
+  miniBar: { height: "100%", borderRadius: 4, transition: "width 0.3s" },
 
-  walletRow: { display: "flex", gap: 10 },
-  walletStat: { flex: 1, textAlign: "center" },
-  walletVal: { fontSize: 17, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif" },
-  walletLbl: { fontSize: 11, color: "var(--text-3)", fontWeight: 600, marginTop: 2 },
+  journalRow: { display: "flex", alignItems: "center", gap: 12, padding: "4px 0" },
 
-  quickHead: { fontSize: 13, fontWeight: 700, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.06em", margin: "6px 0 10px" },
-  quickCard: { border: "1px solid var(--border)", background: "var(--surface)", borderRadius: 14, padding: "14px 16px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", display: "flex", flexDirection: "column", gap: 10 },
-  quickTitle: { display: "flex", alignItems: "center", gap: 7, fontSize: 13.5, fontWeight: 700, color: "var(--text)" },
-  quickStat: { fontSize: 13, color: "var(--text-2)", fontWeight: 600 },
-  quickAddBtn: { display: "flex", alignItems: "center", justifyContent: "center", gap: 5, border: "1px solid var(--border)", background: "var(--surface-2)", color: "var(--text)", padding: "8px 10px", borderRadius: 9, fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" },
+  chipWrap: { display: "flex", gap: 7, flexWrap: "wrap" },
+  scripChip: { border: "1px solid", borderRadius: 14, padding: "4px 11px", fontSize: 12, fontWeight: 700, background: "var(--surface)" },
 
-  habitList: { display: "flex", flexWrap: "wrap", gap: 6 },
-  habitChip: { border: "1px solid var(--border)", background: "var(--surface-2)", color: "var(--text-2)", padding: "5px 10px", borderRadius: 14, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 4 },
-  habitChipOn: { background: "#4C9A6B", color: "#fff", borderColor: "#4C9A6B" },
-
-  quadGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 },
-  quadCell: { display: "flex", justifyContent: "space-between", alignItems: "center", border: "1px solid var(--border)", borderRadius: 8, padding: "5px 8px", fontSize: 11.5 },
-  quadLabel: { color: "var(--text-3)", fontWeight: 600 },
-  quadCount: { fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif", fontSize: 13 },
-
-  modalOverlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 200, display: "grid", placeItems: "center", padding: 16 },
-  modalCard: { background: "var(--surface)", color: "var(--text)", borderRadius: 16, padding: "20px 20px 16px", width: 340, maxWidth: "100%", boxShadow: "0 12px 48px rgba(0,0,0,0.3)", border: "1px solid var(--border)" },
-  modalTitle: { fontSize: 17, fontWeight: 700, fontFamily: "'Fraunces',Georgia,serif", marginBottom: 12 },
-  modalBody: { display: "flex", flexDirection: "column", gap: 8 },
-  input: { width: "100%", boxSizing: "border-box", border: "1px solid var(--border)", borderRadius: 9, padding: "9px 11px", fontSize: 13.5, fontFamily: "inherit", color: "var(--text)", background: "var(--surface-2)", outline: "none" },
-  modalActions: { display: "flex", gap: 8, marginTop: 6 },
-  modalCancel: { border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-2)", padding: "9px 14px", borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" },
-  modalConfirm: { flex: 1, border: "none", background: "var(--accent-strong)", color: "#fff", padding: "9px 14px", borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" },
+  miniGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10, marginTop: 14 },
+  miniCard: { display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 5, border: "1px solid var(--border)", background: "var(--surface)", borderRadius: 14, padding: "12px 14px", cursor: "pointer", fontFamily: "inherit", textAlign: "left", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
+  miniLabel: { fontSize: 12.5, fontWeight: 700, color: "var(--text)" },
+  miniMain: { fontSize: 13, fontWeight: 700 },
+  miniSub: { fontSize: 11, color: "var(--text-3)", fontWeight: 500, lineHeight: 1.35 },
 };

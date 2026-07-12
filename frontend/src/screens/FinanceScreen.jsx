@@ -293,8 +293,8 @@ function ForecastBlock({ invested, investments, money, cur }) {
     }
     return { value: corpus, putIn };
   };
-  // A bar every 2 years across the 20-year horizon.
-  const milestones = Array.from({ length: 10 }, (_, k) => (k + 1) * 24);
+  // A bar every year across the 20-year horizon.
+  const milestones = Array.from({ length: 20 }, (_, k) => (k + 1) * 12);
   const bars = milestones.map((mo) => ({ mo, ...fv(mo) }));
   const max = Math.max(...bars.map((b) => b.value), 1);
   const last = bars[bars.length - 1];
@@ -329,16 +329,18 @@ function ForecastBlock({ invested, investments, money, cur }) {
         </div>
       </div>
 
-      <div style={S.forecastBars}>
-        {bars.map((b, idx) => (
-          <div key={b.mo} style={S.fBarCol}>
-            <div style={S.fBarVal}>{fmtCompact(b.value, cur.code)}</div>
-            <div style={S.fBarTrack}>
-              <div style={{ ...S.fBar, height: `${Math.max(6, (b.value / max) * 100)}%`, opacity: 0.45 + 0.55 * (idx / (bars.length - 1)) }} />
+      <div style={S.forecastBarsWrap}>
+        <div style={S.forecastBars}>
+          {bars.map((b, idx) => (
+            <div key={b.mo} style={S.fBarCol}>
+              <div style={S.fBarVal}>{fmtCompact(b.value, cur.code)}</div>
+              <div style={S.fBarTrack}>
+                <div style={{ ...S.fBar, height: `${Math.max(6, (b.value / max) * 100)}%`, opacity: 0.4 + 0.6 * (idx / (bars.length - 1)) }} />
+              </div>
+              <div style={S.fBarLbl}>{b.mo / 12}y</div>
             </div>
-            <div style={S.fBarLbl}>{b.mo / 12}y</div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
       <div style={S.forecastNote}>
         In 20 years at {pct}% p.a. → <b>{money(last.value)}</b> (you'd put in {money(last.putIn)}, growth adds {money(Math.max(0, last.value - last.putIn))})
@@ -1176,8 +1178,9 @@ const S = {
   rateWrap: { display: "inline-flex", alignItems: "center", gap: 4, border: "1px solid var(--border)", borderRadius: 9, padding: "5px 10px", background: "var(--surface-2)" },
   rateInput: { border: "none", background: "none", outline: "none", width: 52, fontSize: 14, fontWeight: 800, fontFamily: "'Fraunces',Georgia,serif", color: "var(--text)", textAlign: "right" },
   rateUnit: { fontSize: 11.5, color: "var(--text-3)", fontWeight: 600 },
-  forecastBars: { display: "flex", alignItems: "stretch", gap: 8 },
-  fBarCol: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, minWidth: 0 },
+  forecastBarsWrap: { overflowX: "auto", paddingBottom: 4 },
+  forecastBars: { display: "flex", alignItems: "stretch", gap: 8, minWidth: "min-content" },
+  fBarCol: { flex: "0 0 40px", display: "flex", flexDirection: "column", alignItems: "center", gap: 4, minWidth: 0 },
   fBarVal: { fontSize: 10.5, fontWeight: 700, color: "var(--text-2)", whiteSpace: "nowrap" },
   fBarTrack: { width: "100%", maxWidth: 44, height: 110, display: "flex", alignItems: "flex-end" },
   fBar: { width: "100%", background: "#3A7CA5", borderRadius: "6px 6px 2px 2px", transition: "height 0.35s ease" },

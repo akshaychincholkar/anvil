@@ -58,7 +58,18 @@ export default function ExpensesScreen() {
   const [calMonth, setCalMonth] = useState(() => new Date());
   const [addCat, setAddCat] = useState(null);     // category clicked → opens amount entry
   const [editLog, setEditLog] = useState(null);   // existing log clicked → opens edit modal
-  const [drillCat, setDrillCat] = useState(null); // donut category clicked → lists its expenses
+  // Donut category filter — multi-select. "ALL" shows every transaction in the
+  // period; otherwise it's a Set of selected category ids (empty = closed).
+  const [drillCats, setDrillCats] = useState(new Set());
+  const [drillAll, setDrillAll] = useState(false);
+  const toggleDrillCat = (id) => setDrillCats((prev) => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+  const toggleDrillAll = () => { setDrillAll((v) => !v); setDrillCats(new Set()); };
+  const drillOpen = drillAll || drillCats.size > 0;
+  const closeDrill = () => { setDrillAll(false); setDrillCats(new Set()); };
   const [catForm, setCatForm] = useState(null);   // add/edit category modal
   const [manageOpen, setManageOpen] = useState(false);
   const [scope, setScope] = useState("day");       // "day" | "month" | "year" | "all" — drives totals + pie chart
@@ -418,21 +429,25 @@ export default function ExpensesScreen() {
                   </div>
                 </div>
                 <div style={S.pieLegend}>
-                  {segs.map((s) => (
-                    <button key={s.cat.id}
-                      onClick={() => setDrillCat((c) => (c === s.cat.id ? null : s.cat.id))}
-                      title="Show these expenses"
-                      style={{ ...S.legendRow, ...S.legendRowBtn, ...(drillCat === s.cat.id ? { background: s.cat.color + "1A" } : {}) }}>
-                      <span style={{ ...S.dot, background: s.cat.color }} />
-                      <IconFor name={s.cat.icon} size={13} style={{ color: s.cat.color, flexShrink: 0 }} />
-                      <span style={S.legendName}>{s.cat.name}</span>
-                      <span style={S.legendPct}>{Math.round(s.pct)}%</span>
-                      <span style={S.legendAmt}>{money(s.amount)}</span>
-                    </button>
-                  ))}
-                  <button onClick={() => setDrillCat((c) => (c === "ALL" ? null : "ALL"))}
+                  {segs.map((s) => {
+                    const on = drillCats.has(s.cat.id);
+                    return (
+                      <button key={s.cat.id}
+                        onClick={() => { setDrillAll(false); toggleDrillCat(s.cat.id); }}
+                        title="Show these expenses"
+                        style={{ ...S.legendRow, ...S.legendRowBtn, ...(on ? { background: s.cat.color + "1A" } : {}) }}>
+                        <span style={{ ...S.dot, background: s.cat.color }} />
+                        <IconFor name={s.cat.icon} size={13} style={{ color: s.cat.color, flexShrink: 0 }} />
+                        <span style={S.legendName}>{s.cat.name}</span>
+                        <span style={S.legendPct}>{Math.round(s.pct)}%</span>
+                        <span style={S.legendAmt}>{money(s.amount)}</span>
+                        {on && <Check size={13} style={{ color: s.cat.color, flexShrink: 0 }} />}
+                      </button>
+                    );
+                  })}
+                  <button onClick={toggleDrillAll}
                     title="Show every transaction in this period"
-                    style={{ ...S.legendRow, ...S.legendRowBtn, ...(drillCat === "ALL" ? { background: "var(--hover)" } : {}) }}>
+                    style={{ ...S.legendRow, ...S.legendRowBtn, ...(drillAll ? { background: "var(--hover)" } : {}) }}>
                     <Tag size={13} style={{ color: "var(--text-2)", flexShrink: 0 }} />
                     <span style={{ ...S.legendName, fontWeight: 700 }}>All categories</span>
                     <span style={S.legendAmt}>{money(scopedTotal)}</span>
@@ -441,22 +456,23 @@ export default function ExpensesScreen() {
               </div>
             )}
 
-            {/* Drill-down: every expense in the clicked category — or all of
-                them — for this period, editable in place. */}
-            {drillCat && (() => {
-              const isAll = drillCat === "ALL";
-              const cat = isAll ? null : catById[drillCat];
-              const catLogs = scopedLogs.filter((l) => isAll || l.category_id === drillCat)
+            {/* Drill-down: every expense in the selected category/categories —
+                or all of them — for this period, editable in place. */}
+            {drillOpen && (() => {
+              const catLogs = scopedLogs.filter((l) => drillAll || drillCats.has(l.category_id))
                 .slice().sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
               const catTotal = catLogs.reduce((n, l) => n + l.amount, 0);
+              const selCats = drillAll ? [] : [...drillCats].map((id) => catById[id]).filter(Boolean);
+              const heading = drillAll ? "All categories" : selCats.map((c) => c.name).join(", ") || "Category";
+              const showCatIcon = drillAll || selCats.length > 1;
               return (
                 <div style={S.drillBox}>
                   <div style={S.drillHead}>
-                    <span style={{ ...S.iconBadge, background: (cat?.color || "#9A968C") + "1A", color: cat?.color || "#9A968C" }}>
-                      {isAll ? <Tag size={15} /> : <IconFor name={cat?.icon} size={15} />}
+                    <span style={{ ...S.iconBadge, background: (!drillAll && selCats.length === 1 ? selCats[0].color : "#9A968C") + "1A", color: !drillAll && selCats.length === 1 ? selCats[0].color : "#9A968C" }}>
+                      {drillAll || selCats.length !== 1 ? <Tag size={15} /> : <IconFor name={selCats[0].icon} size={15} />}
                     </span>
-                    <span style={S.drillTitle}>{isAll ? "All categories" : cat?.name || "Category"} · {catLogs.length} transaction{catLogs.length === 1 ? "" : "s"} · {money(catTotal)}</span>
-                    <button onClick={() => setDrillCat(null)} style={S.delBtn} title="Close"><X size={15} /></button>
+                    <span style={S.drillTitle}>{heading} · {catLogs.length} transaction{catLogs.length === 1 ? "" : "s"} · {money(catTotal)}</span>
+                    <button onClick={closeDrill} style={S.delBtn} title="Close"><X size={15} /></button>
                   </div>
                   {catLogs.length === 0 ? <div style={S.muted}>No expenses in this period.</div> : (
                     <div style={{ ...S.logList, ...S.drillList }}>
@@ -464,14 +480,14 @@ export default function ExpensesScreen() {
                         const rowCat = catById[l.category_id];
                         return (
                           <div key={l.id} style={S.logRow}>
-                            {isAll && (
+                            {showCatIcon && (
                               <span style={{ ...S.logIcon, background: (rowCat?.color || "#9A968C") + "1A", color: rowCat?.color || "#9A968C" }}>
                                 <IconFor name={rowCat?.icon} size={14} />
                               </span>
                             )}
                             <button onClick={() => openEdit(l)} style={S.logInfoBtn} title="Edit this expense">
                               <div style={S.logCat}>
-                                {isAll ? `${rowCat?.name || "Other"} · ` : ""}
+                                {showCatIcon ? `${rowCat?.name || "Other"} · ` : ""}
                                 {new Date(l.date + "T00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })}
                               </div>
                               {l.note && <div style={S.logNote}>{l.note}</div>}
@@ -560,6 +576,48 @@ export default function ExpensesScreen() {
                 </div>
               </div>
             )}
+
+            {/* Transactions for the selected categories (all when none picked),
+                listed under the donut — editable in place. */}
+            {(() => {
+              const [tLo, tHi] = cycleRange(new Date(cmpMonth + "T00:00"), monthStartDay);
+              const trendLogs = logs.filter((l) => l.date >= tLo && l.date <= tHi && cmpFilter(l))
+                .slice().sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
+              if (trendLogs.length === 0) return null;
+              const selNames = cmpCats.size === 0
+                ? "All categories"
+                : [...cmpCats].map((id) => catById[id]?.name).filter(Boolean).join(", ");
+              const trendTotal = trendLogs.reduce((n, l) => n + l.amount, 0);
+              return (
+                <div style={S.drillBox}>
+                  <div style={S.drillHead}>
+                    <span style={{ ...S.iconBadge, background: "#9A968C1A", color: "#9A968C" }}><Tag size={15} /></span>
+                    <span style={S.drillTitle}>{selNames} · {monthLabelOf(cmpMonth)} · {trendLogs.length} transaction{trendLogs.length === 1 ? "" : "s"} · {money(trendTotal)}</span>
+                  </div>
+                  <div style={{ ...S.logList, ...S.drillList }}>
+                    {trendLogs.map((l) => {
+                      const rowCat = catById[l.category_id];
+                      return (
+                        <div key={l.id} style={S.logRow}>
+                          <span style={{ ...S.logIcon, background: (rowCat?.color || "#9A968C") + "1A", color: rowCat?.color || "#9A968C" }}>
+                            <IconFor name={rowCat?.icon} size={14} />
+                          </span>
+                          <button onClick={() => openEdit(l)} style={S.logInfoBtn} title="Edit this expense">
+                            <div style={S.logCat}>
+                              {rowCat?.name || "Other"} · {new Date(l.date + "T00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })}
+                            </div>
+                            {l.note && <div style={S.logNote}>{l.note}</div>}
+                          </button>
+                          <span style={S.logAmt}>{money(l.amount)}</span>
+                          <button onClick={() => openEdit(l)} style={S.editBtn} title="Edit"><Pencil size={13} /></button>
+                          <button onClick={() => deleteLog(l.id, rowCat?.name || "Expense")} style={S.delBtn}><X size={14} /></button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
       </div>

@@ -2312,10 +2312,15 @@ def _golden_summary(conn, r) -> dict:
         except Exception:
             days_to = None
     t369_on = bool(r["t369_enabled"])
+    today_done = conn.execute(
+        "SELECT 1 FROM golden_entry WHERE goal_id=? AND entry_date=? AND text<>''",
+        (gid, _user_now().date().isoformat())
+    ).fetchone() is not None
     out = {
         "id": gid, "title": r["title"], "image": r["image"], "created_date": r["created_date"],
         "achieved": bool(r["achieved"]), "achieved_date": r["achieved_date"],
         "streak": _golden_streak(conn, gid), "total_days": total, "days_to_manifest": days_to,
+        "today_done": today_done,
         "t369_enabled": t369_on, "t369_affirmation": r["t369_affirmation"] or "",
     }
     if t369_on:
