@@ -280,22 +280,22 @@ function ForecastBlock({ invested, investments, money, cur }) {
   const pct = !isNaN(r) && r > 0 ? r : 10;
   const m = Math.max(0, parseFloat(monthly) || 0);
   const sPct = Math.max(0, parseFloat(stepUp) || 0);
-  const i = pct / 100 / 12; // monthly compounding, standard SIP maths
 
-  // Simulate month by month (annuity-due: each installment compounds the month
-  // it's invested). After every 12 months the contribution steps up by sPct%.
-  const fv = (totalMonths) => {
-    let corpus = invested, contrib = m, putIn = invested;
-    for (let t = 1; t <= totalMonths; t++) {
-      corpus = (corpus + contrib) * (1 + i);
-      putIn += contrib;
-      if (t % 12 === 0) contrib *= 1 + sPct / 100;
+  // Simple ANNUAL compounding, matching a standard calculator: each year you
+  // add 12× the monthly amount, then the whole pot grows by the rate. The
+  // contribution steps up by sPct% every year.
+  const fv = (years) => {
+    let corpus = invested, yearly = m * 12, putIn = invested;
+    for (let y = 1; y <= years; y++) {
+      corpus = (corpus + yearly) * (1 + pct / 100);
+      putIn += yearly;
+      yearly *= 1 + sPct / 100;
     }
     return { value: corpus, putIn };
   };
   // A bar every year across the 20-year horizon.
-  const milestones = Array.from({ length: 20 }, (_, k) => (k + 1) * 12);
-  const bars = milestones.map((mo) => ({ mo, ...fv(mo) }));
+  const milestones = Array.from({ length: 20 }, (_, k) => k + 1);
+  const bars = milestones.map((y) => ({ mo: y * 12, ...fv(y) }));
   const max = Math.max(...bars.map((b) => b.value), 1);
   const last = bars[bars.length - 1];
 

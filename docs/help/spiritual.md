@@ -1,0 +1,67 @@
+# Spiritual — Help
+
+*Screenshot folder: `docs/help/screenshots/spiritual/` — see numbering convention in [README.md](README.md).*
+
+## What it is
+
+Spiritual is a reading library for devotional practice — aartis, stotras, and
+chants, plus any personal "decks" of scripture text or images you add
+yourself. It isn't a habit tracker with checkboxes or completion state; it's
+a quiet shelf of texts you open and read, the way you'd reach for a physical
+book of prayers.
+
+## How to use it
+
+1. **Browse the library.** The left sidebar lists every item — built-in
+   scriptures alongside any decks you've created. Click one to open it.
+   Built-in items include Aarti (a multi-hymn collection), Ganesh
+   Sahastranaam, Ganpati Atharvashirsh, Ramraksha, Hanuman Chalisa, Shree Ram
+   Stuti, and Hanuman Aarti (the last four each have an embedded YouTube
+   video alongside the text), plus Durga Saptashati (a 19-page swipeable
+   image carousel), Aigiri Nandini, Siddha Kunjika Stotram, and Jai Ambe
+   Gauri.
+   ![Spiritual library sidebar](../../frontend/public/help/spiritual/01-library-sidebar.png)
+2. **Create your own deck.** Click **New deck**, give it a title, and choose
+   a type: **Text** (paste or write scripture directly into a textarea) or
+   **Images** (upload multiple images — they're auto-compressed and shown as
+   a swipeable carousel, just like Durga Saptashati). Decks can be deleted
+   any time.
+   ![New deck form](../../frontend/public/help/spiritual/02-new-deck.png)
+3. **Navigate an image carousel.** For image-based items, use Prev/Next to
+   move through pages; a page counter (e.g. "3/19") shows where you are.
+   ![Image carousel with page counter](../../frontend/public/help/spiritual/03-carousel.png)
+4. **Use edit mode to organize.** Tap the pencil icon to reorder items with
+   up/down arrows, and to mark one item as your **default** (★) — it opens
+   automatically the next time you visit the section, so your most-used text
+   is always one click away.
+
+## Why it matters
+
+Not everything benefits from being turned into a metric. Spiritual is built
+around a deliberate refusal to gamify:
+
+- **No streak, no checkbox, no "read today" state — on purpose.** Every other
+  section in Anvil measures something. This one doesn't, because devotional
+  reading corrupted into a streak stops being devotional — it becomes
+  another box to tick before bed, performed for the tracker instead of for
+  its own sake. The moment reading an aarti earns you a flame icon, some
+  part of the act starts optimizing for the flame instead of the words.
+- **A frictionless library respects that this practice already has its own
+  reward structure.** Faith and ritual don't need an app to manufacture
+  motivation the way a new gym habit does — the pull to read is either there
+  or it isn't, and Anvil's job is only to remove friction (have the text
+  ready, remember your default, keep the video embedded) not to manufacture
+  urgency that wasn't there.
+- **The default-item star is a small mercy, not a feature for its own sake.**
+  Devotional practice is often habitual in the truest sense — the same
+  aarti, the same time, for years. Letting one item open automatically means
+  the app gets out of the way faster for the text you return to most, rather
+  than making you re-navigate a list every single time.
+- **User-created decks put your own material on equal footing with the
+  built-ins.** A family prayer, a text passed down that isn't in any
+  standard collection, or your own photographed pages of a book belong in
+  the same shelf as Ramraksha or Hanuman Chalisa — spiritual practice isn't
+  only the canonical texts, it's whatever *you* actually read.
+
+Used as intended, Spiritual is meant to be the one section of Anvil you open
+without the app measuring you back — a shelf, not a scoreboard.

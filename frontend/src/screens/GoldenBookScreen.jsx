@@ -5,11 +5,12 @@ import {
   Sunrise, Sun, Moon, Bell, BellOff, Undo2, Zap
 } from "lucide-react";
 import { api } from "../api.js";
+import { effectiveTodayISO } from "../dayStart.js";
 import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
 import UndoToast from "../components/UndoToast.jsx";
 
 const isoL = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-const todayISO = () => isoL(new Date());
+const todayISO = () => effectiveTodayISO(); // honours the start-of-day hour (Settings)
 const addDays = (iso, n) => { const d = new Date(iso + "T00:00:00"); d.setDate(d.getDate() + n); return isoL(d); };
 const fmtNice = (iso) => new Date(iso + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
 
@@ -50,9 +51,16 @@ export default function GoldenBookScreen() {
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState({ title: "", image: "" });
   const [musicId, setMusicId] = useState("");
-  // Soft tunes always start OFF on entry — navigating away and back (or to any
-  // other module) must not leave music silently playing/re-enabled.
-  const [musicOn, setMusicOn] = useState(false);
+  // Soft tunes on/off is a persisted preference — whatever you set it to stays
+  // that way across navigation and sessions until you toggle it again.
+  const [musicOn, setMusicOnState] = useState(false);
+  const setMusicOn = useCallback((updater) => {
+    setMusicOnState((prev) => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      api.setSetting("golden_music_on", !!next).catch(() => {});
+      return next;
+    });
+  }, []);
   const [celebrate, setCelebrate] = useState(null); // { title, days }
 
   const load = useCallback(async () => {
@@ -65,9 +73,13 @@ export default function GoldenBookScreen() {
     api.deleteGolden, api.restoreGolden, load
   );
 
-  // Read the track configured in Settings → Music. Re-read when the window
-  // regains focus so a change made in Settings is picked up without a reload.
+  // Read the track configured in Settings, plus the saved on/off preference.
+  // Re-read the track when the window regains focus so a change made in
+  // Settings is picked up without a reload.
   useEffect(() => {
+    api.getSetting("golden_music_on").then((r) => {
+      if (typeof r?.value === "boolean") setMusicOnState(r.value);
+    }).catch(() => {});
     const refresh = () => api.getSetting("golden_music").then((r) => setMusicId(ytId(r?.value || ""))).catch(() => {});
     refresh();
     window.addEventListener("focus", refresh);

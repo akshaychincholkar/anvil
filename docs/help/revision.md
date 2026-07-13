@@ -1,0 +1,88 @@
+# Revision — Help
+
+*Screenshot folder: `docs/help/screenshots/revision/` — see numbering convention in [README.md](README.md).*
+
+## What it is
+
+Revision is a spaced-repetition tool for scheduling review reminders on
+things you've learned, using fixed, user-defined day intervals rather than
+an adaptive algorithm like Anki's SM-2. There's no difficulty rating and no
+score — just a simple plan of when to look at something again, and whether
+you did.
+
+## How to use it
+
+1. **Add a topic.** Give it a name, a Pillar (Financial / Academic /
+   Relationship / Health / Spiritual, defaulting to Academic), a Learned-on
+   date (defaults to today), and Intervals — comma-separated days, preset to
+   "1,3,7,15,30." Anvil creates one review per interval, due on
+   learned_date + N days, numbered Stage 1, 2, 3…
+   ![Add topic form](../../frontend/public/help/revision/01-add-topic.png)
+2. **Work through Due Today.** This section lists every pending review due
+   on or before today, with a pillar-colored border, the topic name, a
+   "Review X/Y" stage badge, and a checkbox to mark it done. Anything
+   overdue shows "missed · {date}" but stays fully actionable — it's a
+   label, not an automatic failure.
+   ![Due Today list](../../frontend/public/help/revision/02-due-today.png)
+3. **Use the stage dots on any active topic.** Each topic card shows
+   numbered dots for every scheduled stage — click any dot, not just the
+   currently-due one, to toggle it done or undone directly. The card also
+   shows a running "{done}/{total} done" count and "Learned {date}."
+   ![Topic card with stage dots](../../frontend/public/help/revision/03-stage-dots.png)
+4. **Browse the review calendar** for a month-at-a-glance view — each day
+   cell shows up to two topic names, and clicking a day opens a detail list
+   with the same checkbox interaction as Due Today.
+5. **Edit carefully.** Changing a topic's learned date or its intervals
+   regenerates the entire schedule from scratch. Anvil preserves the "done"
+   flag for any stage numbers that still exist in the new plan, but the edit
+   form warns you before you commit the change, since a very different
+   interval list can shift or drop stages entirely.
+6. **Let topics graduate to Cemented.** Once every scheduled review for a
+   topic is marked done, it automatically becomes Cemented — it moves out
+   of Active Topics into a separate, collapsible Cemented section with a
+   trophy icon, a count badge, and reduced-opacity cards, so your active
+   list stays focused on what still needs review.
+   ![Cemented section](../../frontend/public/help/revision/04-cemented.png)
+7. **Edit or delete a topic** any time — deletes are soft, with an undo
+   toast, so removing a topic by mistake doesn't lose its schedule for good.
+
+## Why it matters
+
+Revision exists because *learning* something and *retaining* it are
+different problems, and the second one only gets solved by deliberately
+revisiting material before you've fully forgotten it:
+
+- **Fixed intervals are a direct, legible application of the spacing
+  effect.** Decades of memory research (going back to Ebbinghaus's forgetting
+  curve, and refined heavily since) show that revisiting material at
+  increasing intervals — rather than cramming it repeatedly in one sitting —
+  produces dramatically better long-term retention. A preset like
+  "1, 3, 7, 15, 30" isn't arbitrary: short gaps early catch the steepest
+  part of the forgetting curve, and the gaps widen as the memory
+  consolidates. You don't need an adaptive algorithm to get most of this
+  benefit — you need to actually come back on schedule, which is the part
+  Revision is built to support.
+- **No difficulty rating is a deliberate simplification, not a missing
+  feature.** Adaptive systems like SM-2 ask you to self-rate how hard each
+  recall was and adjust future intervals accordingly — which is powerful,
+  but also adds friction and a small, constant judgment call to every
+  review. Fixed, user-set intervals trade some of that precision for a
+  system you can understand and predict at a glance, which matters more for
+  a general life-organization tool than for a dedicated flashcard app.
+- **"Missed" without auto-failure keeps the tool honest about real life.**
+  Life interrupts review schedules constantly. A system that silently
+  deletes or fails overdue reviews would punish exactly the busy weeks when
+  you most need the reminder to still be there when you resurface. Marking
+  a review "missed" but leaving it fully actionable respects that reviewing
+  late is still far better than not reviewing at all.
+- **Cemented is a milestone, not a score.** There's no percentage, no
+  grade, no leaderboard — just a binary, satisfying state: this topic is
+  done being actively reviewed. That framing matters because the goal of
+  spaced repetition isn't to maximize a number, it's to reach a point where
+  you can stop worrying about forgetting something. Cemented names that
+  endpoint explicitly, and moving a topic out of your active list is a
+  concrete, visible reward for having gotten it there.
+
+Used consistently, Revision is meant to convert "I learned this once" into
+"I actually still know this" — by making the unglamorous, easy-to-skip act
+of scheduled review into a short list you can clear in a few minutes a day.

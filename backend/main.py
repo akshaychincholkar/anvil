@@ -680,6 +680,21 @@ def set_habit_log_note(habit_id: int, log_date: str, body: HabitLogNote):
             conn.execute("INSERT INTO habit_log (habit_id,date,done,note) VALUES (?,?,0,?)", (habit_id, log_date, body.note))
         return _habit_full(conn, habit_id)
 
+def _day_start_hour(conn) -> int:
+    """User's configured start-of-day hour (Settings → General); 0 = midnight."""
+    row = conn.execute(f"SELECT value FROM user_setting WHERE user_id={cu()} AND key='day_start_hour'").fetchone()
+    if row and row["value"]:
+        try:
+            return max(0, min(23, int(float(json.loads(row["value"])))))
+        except (ValueError, TypeError):
+            return 0
+    return 0
+
+def _effective_today(conn) -> str:
+    """The app-wide 'today': user wall clock shifted back by the day-start hour,
+    so at 1 AM with a 2 AM start the date is still yesterday."""
+    return (_user_now() - timedelta(hours=_day_start_hour(conn))).date().isoformat()
+
 @app.put("/api/habits/{habit_id}/log/{log_date}/count")
 def set_habit_log_count(habit_id: int, log_date: str, body: HabitLogCount):
     """Set a per-day count for minimum/maximum habits. `done` is derived from the rule:
@@ -709,8 +724,9 @@ def set_habit_log_count(habit_id: int, log_date: str, body: HabitLogCount):
         # All times use the USER's wall clock (_user_now) — production runs in
         # UTC, so naive date.today()/datetime.now() would misclassify "today"
         # and record stamps the (local-time) frontend countdown misreads.
+        # "Today" also honours the configured start-of-day hour.
         now = _user_now()
-        is_today = log_date == now.date().isoformat()
+        is_today = log_date == _effective_today(conn)
         stamp = None
         if interval > 0 and is_today and count > cur_count:
             if count - cur_count > 1:
@@ -2289,7 +2305,7 @@ def _golden_streak(conn, goal_id: int) -> int:
     dates = {r["entry_date"] for r in rows}
     if not dates:
         return 0
-    today = date.today()
+    today = date.fromisoformat(_effective_today(conn))
     if today.isoformat() in dates:
         cur = today
     elif (today - timedelta(days=1)).isoformat() in dates:
@@ -2314,7 +2330,7 @@ def _golden_summary(conn, r) -> dict:
     t369_on = bool(r["t369_enabled"])
     today_done = conn.execute(
         "SELECT 1 FROM golden_entry WHERE goal_id=? AND entry_date=? AND text<>''",
-        (gid, _user_now().date().isoformat())
+        (gid, _effective_today(conn))
     ).fetchone() is not None
     out = {
         "id": gid, "title": r["title"], "image": r["image"], "created_date": r["created_date"],

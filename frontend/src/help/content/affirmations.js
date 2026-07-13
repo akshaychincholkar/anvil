@@ -1,0 +1,74 @@
+// In-app copy of docs/help/affirmations.md — keep these word-for-word in sync.
+// Screenshots referenced here live in frontend/public/help/affirmations/.
+export default {
+  title: "Affirmations",
+  tagline: "Low-pressure by design — a place to encounter the same sentences often.",
+  what:
+    "Affirmations is a flippable card viewer for reading positive, self-directed statements, " +
+    "organized into categories, with favoriting and the option to add your own. Like " +
+    "Spiritual, it's a reading experience, not a tracker — there's no \"read today\" state to " +
+    "hit, just cards you browse whenever you want them.",
+  screenshot: "/help/affirmations/02-card-viewer.png",
+  howTo: [
+    {
+      heading: "Pick a category",
+      body:
+        "Eight built-in category chips are available — Regular Habits, Motivational, " +
+        "Organized planning, Solving Problems, Self Esteem, Self-Responsibility, Freedom " +
+        "from worry, and Eating Habits — each showing its card count. A Favorites chip shows " +
+        "only the cards you've starred, pulled from every category at once.",
+      screenshot: "/help/affirmations/01-categories.png",
+    },
+    {
+      heading: "Read through the cards",
+      body:
+        "The viewer shows one affirmation at a time in large serif text, with Back/Next " +
+        "buttons, a counter (e.g. \"3/9\"), arrow-key navigation, and dot indicators so you " +
+        "can jump straight to any card in the set.",
+      screenshot: "/help/affirmations/02-card-viewer.png",
+    },
+    {
+      heading: "Star a favorite",
+      body:
+        "Tap the star icon on any card to toggle it as a favorite — it turns gold when " +
+        "active and syncs to the backend, so it shows up under the Favorites chip from then " +
+        "on.",
+    },
+    {
+      heading: "Add your own affirmation",
+      body:
+        "Click Add affirmation, write your own text, and assign it to an existing category " +
+        "or type a new category name (which becomes its own new tab). Cards you've added " +
+        "carry a delete (trash) icon so you can remove them later.",
+      screenshot: "/help/affirmations/03-add-affirmation.png",
+    },
+  ],
+  why:
+    "Affirmations work through a different mechanism than habits or challenges, and the " +
+    "section is deliberately built to not fight that mechanism:\n\n" +
+    "• No streak, no \"read today,\" no completion state — because obligation undermines the " +
+    "effect. Self-affirmation research generally points to repetition and genuine " +
+    "internalization as what makes affirming statements change self-talk, not the act of " +
+    "dutifully checking a box. The moment reading a card becomes something you owe the app, " +
+    "it starts to feel like homework — and homework is processed differently by the brain " +
+    "than a freely chosen thought. Anvil deliberately withholds streak pressure here so the " +
+    "words have a chance to land instead of being rushed past to hit a quota.\n\n" +
+    "• Fixed order, no shuffle, is intentional too. Repetition — encountering the same " +
+    "statement again in the same place — is part of how affirmations are thought to work " +
+    "their way into default self-talk. Randomizing the order would trade that slow " +
+    "reinforcement for novelty, which suits entertainment but works against the actual " +
+    "mechanism this section relies on.\n\n" +
+    "• Favoriting lets you build your own working set without deleting the rest. The eight " +
+    "categories are broad by design — not every card in \"Motivational\" will land for you " +
+    "personally. Starring the handful that do turns a wide, general library into a short " +
+    "list of statements that are actually yours, without losing the rest for a day you might " +
+    "need a different one.\n\n" +
+    "• Adding your own cards matters because self-authored language sticks better than " +
+    "borrowed language. A generic library can only go so far — the affirmation that actually " +
+    "changes how you talk to yourself is often one phrased in your own words, about your own " +
+    "situation. Letting you add and categorize your own cards means the library can grow " +
+    "toward your life specifically, not stay generic forever.\n\n" +
+    "Used as intended, this section is meant to be low-pressure by design — a place to " +
+    "encounter the same handful of chosen sentences often enough that they quietly become " +
+    "how you talk to yourself, not one more thing to complete.",
+};

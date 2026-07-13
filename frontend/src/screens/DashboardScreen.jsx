@@ -6,6 +6,7 @@ import {
 import { api } from "../api.js";
 import { useCurrency, fmtMoney2 } from "../currency.js";
 import { useMonthStartDay, cycleRange } from "../monthCycle.js";
+import { effectiveTodayISO } from "../dayStart.js";
 import { TREES, DEFAULT_TREE } from "./grove/trees.jsx";
 
 const FOCUS_COLOR = "#C9A227";
@@ -15,8 +16,9 @@ const CHAL_COLOR = "#4C9A6B";
 const USAGE_EXCLUDE = new Set(["worth"]);
 
 const toISO = (d) => { const p = (n) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; };
-const TODAY = toISO(new Date());
-const dayOffISO = (off) => { const d = new Date(); d.setDate(d.getDate() + off); return toISO(d); };
+// "Today" honours the configured start-of-day hour (Settings → General).
+const TODAY = effectiveTodayISO();
+const dayOffISO = (off) => { const d = new Date(TODAY + "T12:00:00"); d.setDate(d.getDate() + off); return toISO(d); };
 const DAY_FULL = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const todayName = () => DAY_FULL[(new Date().getDay() + 6) % 7];
 

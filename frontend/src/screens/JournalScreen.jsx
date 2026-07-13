@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Flame, Plus, X, Trophy, Heart, Target, Wind, Sunrise, ChevronLeft } from "lucide-react";
 import { api } from "../api.js";
+import { effectiveTodayISO } from "../dayStart.js";
 
 const MOODS = [
   { id: 1, label: "Rough", emoji: "😣", color: "#C2536B" },
@@ -20,7 +21,7 @@ const SECTIONS = [
 ];
 
 const isoL = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-const todayISO = () => isoL(new Date());
+const todayISO = () => effectiveTodayISO(); // honours the start-of-day hour (Settings)
 const formatDateLabel = (iso) => {
   const d = new Date(iso + "T00:00:00");
   return d.toLocaleDateString("en-US", { weekday: "long", day: "numeric", month: "long", year: "numeric" });

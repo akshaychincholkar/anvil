@@ -8,6 +8,7 @@ import {
   Scissors, PawPrint, Baby, GraduationCap, Briefcase, Car, Bike,
 } from "lucide-react";
 import { api } from "../api.js";
+import { effectiveTodayISO } from "../dayStart.js";
 import { useCurrency, fmtMoney } from "../currency.js";
 import { useMonthStartDay, cycleRange } from "../monthCycle.js";
 import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
@@ -28,7 +29,7 @@ const IconFor = ({ name, ...props }) => { const I = ICONS[name] || ShoppingBag; 
 const COLORS = ["#C9772E", "#4C9A6B", "#3A7CA5", "#8268B0", "#C2536B", "#C9A227", "#D1556E", "#5B7C99", "#A23E57", "#3E9E6B"];
 
 const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-const TODAY = iso(new Date());
+const TODAY = effectiveTodayISO(); // honours the start-of-day hour (Settings)
 
 // Cap the note length so a long comment can't push the amount off-screen.
 const NOTE_MAX = 120;
@@ -121,7 +122,7 @@ export default function ExpensesScreen() {
 
   // Today vs Yesterday vs Day-before spend (like the Grove daily comparison).
   const threeDay = useMemo(() => {
-    const dayISO = (offset) => { const d = new Date(); d.setDate(d.getDate() + offset); return iso(d); };
+    const dayISO = (offset) => { const d = new Date(TODAY + "T12:00:00"); d.setDate(d.getDate() + offset); return iso(d); };
     const totalOn = (ds) => logs.filter((l) => l.date === ds).reduce((n, l) => n + l.amount, 0);
     return [
       { label: "Today", value: totalOn(dayISO(0)), color: ACCENT },

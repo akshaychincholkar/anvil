@@ -3,6 +3,7 @@ import { X, Eye, EyeOff, ChevronUp, ChevronDown, Check, LayoutList, Palette, Coi
 import { THEMES } from "../theme.js";
 import { CURRENCIES } from "../currency.js";
 import { api } from "../api.js";
+import { getDayStartHour, setDayStartHour } from "../dayStart.js";
 import Dropdown from "../components/Dropdown.jsx";
 
 const ordinal = (n) => (n % 10 === 1 && n !== 11 ? "st" : n % 10 === 2 && n !== 12 ? "nd" : n % 10 === 3 && n !== 13 ? "rd" : "th");
@@ -54,6 +55,20 @@ export default function SettingsModal({ screens, order, hidden, themeId, currenc
   const saveMusic = () => {
     api.setSetting("golden_music", musicUrl.trim())
       .then(() => { setMusicSaved(true); setTimeout(() => setMusicSaved(false), 1500); })
+      .catch(() => {});
+  };
+
+  // Start of day (0–23): when the app-wide "today" rolls over.
+  const [dayStart, setDayStart] = useState(getDayStartHour());
+  const [dayStartSaved, setDayStartSaved] = useState(false);
+  useEffect(() => {
+    api.getSetting("day_start_hour").then((r) => { if (r?.value != null) setDayStart(setDayStartHour(r.value)); }).catch(() => {});
+  }, []);
+  const saveDayStart = (h) => {
+    const v = setDayStartHour(h); // updates the local cache + notifies screens
+    setDayStart(v);
+    api.setSetting("day_start_hour", v)
+      .then(() => { setDayStartSaved(true); setTimeout(() => setDayStartSaved(false), 1800); })
       .catch(() => {});
   };
 
@@ -132,7 +147,7 @@ export default function SettingsModal({ screens, order, hidden, themeId, currenc
             <Coins size={15} /> Monetary
           </button>
           <button onClick={() => setTab("music")} style={{ ...S.tab, ...(tab === "music" ? S.tabOn : {}) }}>
-            <Music size={15} /> Music
+            <Music size={15} /> General
           </button>
           <button onClick={() => setTab("reminders")} style={{ ...S.tab, ...(tab === "reminders" ? S.tabOn : {}) }}>
             <Megaphone size={15} /> Reminders
@@ -232,6 +247,19 @@ export default function SettingsModal({ screens, order, hidden, themeId, currenc
             </>
           ) : tab === "music" ? (
             <>
+              <div style={S.fieldLbl}>Start of day</div>
+              <p style={S.hint}>When your day actually begins. With <b>2 AM</b>, anything you log at 1:30 AM — habits, journal, expenses, Golden Book — still counts toward the previous day.</p>
+              <select value={dayStart} onChange={(e) => saveDayStart(e.target.value)} style={S.musicInput}>
+                {Array.from({ length: 24 }, (_, h) => (
+                  <option key={h} value={h}>
+                    {h === 0 ? "Midnight (default)" : `${h % 12 === 0 ? 12 : h % 12}:00 ${h < 12 ? "AM" : "PM"}`}
+                  </option>
+                ))}
+              </select>
+              {dayStartSaved && <p style={{ ...S.hint, color: "#4C9A6B", fontWeight: 700 }}>Saved — the whole app now rolls over at this hour.</p>}
+
+              <div style={S.subDivider} />
+              <div style={S.fieldLbl}>Golden Book music</div>
               <p style={S.hint}>Paste a YouTube link to play softly while you write in the <b>Golden Book</b>. It plays only on that screen (audio only).</p>
               <input value={musicUrl} onChange={(e) => setMusicUrl(e.target.value)}
                 placeholder="https://youtube.com/watch?v=…" style={S.musicInput} />

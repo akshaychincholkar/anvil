@@ -4,6 +4,7 @@ import {
   TrendingUp, TrendingDown, BookOpen, LineChart, Wallet, Clock, Undo2,
 } from "lucide-react";
 import { api } from "../api.js";
+import { effectiveTodayISO } from "../dayStart.js";
 import { useCurrency, fmtMoney } from "../currency.js";
 
 const ACCENT = "#3A7CA5";
@@ -21,7 +22,7 @@ const SHORTABLE = new Set(["fno", "intraday"]);
 const canShort = (kind) => SHORTABLE.has(kind);
 
 const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-const TODAY = iso(new Date());
+const TODAY = effectiveTodayISO(); // honours the start-of-day hour (Settings)
 const fmtNice = (s) => new Date(s + "T00:00").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
 const fmtShort = (s) => s ? new Date(s + "T00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
 const num = (v) => (v === "" || v === null || v === undefined || isNaN(parseFloat(v)) ? 0 : parseFloat(v));

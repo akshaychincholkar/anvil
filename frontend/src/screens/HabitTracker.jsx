@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback, useRef, useMemo, Fragment } from "react";
 import { Pencil, Plus, Bell, Check, Flame, LayoutGrid, Menu, X, MoreHorizontal, FileText, Link2, ChevronLeft, ChevronRight, Power, Eye, EyeOff } from "lucide-react";
 import { api } from "../api.js";
+import { effectiveTodayISO } from "../dayStart.js";
 import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
 import UndoToast from "../components/UndoToast.jsx";
 import Dropdown from "../components/Dropdown.jsx";
+import HelpButton from "../components/HelpButton.jsx";
 
 const HABIT_TYPES = [
   { value: "regular", label: "Regular (yes/no)" },
@@ -26,11 +28,13 @@ const MONTHS_SHORT = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct
 // Local calendar date (NOT toISOString, which is UTC and shifts the day for
 // timezones ahead of/behind UTC, especially around midnight).
 const toISO = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-const todayISO = () => toISO(new Date());
+// "Today" honours the configured start-of-day hour (Settings → General).
+const todayISO = () => effectiveTodayISO();
 
 // weekOffset: 0 = current week, -1 = last week, +1 = next week …
+// Anchored on the effective "today" so the week rolls with the day-start hour.
 const getWeekDates = (weekOffset = 0) => {
-  const today = new Date();
+  const today = new Date(todayISO() + "T12:00:00");
   const dow = today.getDay();
   const mondayOffset = dow === 0 ? -6 : 1 - dow;
   const monday = new Date(today);
@@ -44,7 +48,7 @@ const getWeekDates = (weekOffset = 0) => {
 
 // monthOffset: 0 = current month, -1 = last month …
 const getMonthInfo = (monthOffset = 0) => {
-  const base = new Date();
+  const base = new Date(todayISO() + "T12:00:00");
   const d = new Date(base.getFullYear(), base.getMonth() + monthOffset, 1);
   const year = d.getFullYear();
   const month = d.getMonth();
@@ -716,7 +720,10 @@ function AllHabitsWeekly({ habits, dayAction, logSet, onDelete, onEdit, renderIn
       <div style={S.mainHead}>
         <div style={S.eyebrow}>Weekly view</div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-          <h1 style={S.h1}>All Habits</h1>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <h1 style={S.h1}>All Habits</h1>
+            <HelpButton id="habits" />
+          </div>
           {isMobile && habits.length > 0 && (
             <button onClick={toggleShowNames} style={S.nameToggle}
               title={showNames ? "Hide habit names — tap a circle to reveal one" : "Show all habit names"}>

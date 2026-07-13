@@ -1,0 +1,102 @@
+// In-app copy of docs/help/expenses.md — keep these word-for-word in sync.
+// Screenshots referenced here live in frontend/public/help/expenses/.
+export default {
+  title: "Expenses",
+  tagline: "Not just what you spent — where it actually went.",
+  what:
+    "The Expenses section is a day-by-day spending log organized by category, with " +
+    "running totals, a daily budget line, and month-over-month comparison. It doesn't " +
+    "manage your income or investments — it exists purely to answer one question " +
+    "honestly, every day: where did the money actually go?",
+  screenshot: "/help/expenses/01-calendar.png",
+  howTo: [
+    {
+      heading: "Pick a day",
+      body:
+        "The calendar is billing-cycle-aware — it honors whatever \"month start day\" " +
+        "you've set, so a cycle that runs the 5th-to-5th shows up correctly instead of " +
+        "splitting across calendar months. Click any day to select it; days with spend " +
+        "already logged show a dot.",
+      screenshot: "/help/expenses/01-calendar.png",
+    },
+    {
+      heading: "Log a spend",
+      body:
+        "Under the selected day, tap a category icon from the grid to open the Add " +
+        "expense modal — Amount is required, Note is optional. The day's transactions " +
+        "list below it, and every row is editable or deletable in place (deletes show " +
+        "an undo toast, so a stray tap isn't permanent).",
+      screenshot: "/help/expenses/02-add-expense.png",
+    },
+    {
+      heading: "Read the Total spent card",
+      body:
+        "Switch its scope between Day / Month / Year / All to zoom the total in or out. " +
+        "Right below it, the daily budget line does the math for you: remaining " +
+        "(income − expenses − invested) divided by days left in the cycle — shown green " +
+        "as \"You can spend ≈ X/day\" when you're on track, or red as \"Overspent this " +
+        "cycle by X\" when you're not. Income and investment figures themselves are " +
+        "entered in the Wallet/Finance section; Expenses only reads them for this " +
+        "calculation.",
+    },
+    {
+      heading: "Check the Last 3 days bars and category donut",
+      body:
+        "The Last 3 days bars give a quick Today / Yesterday / Day before comparison, " +
+        "and the Spending by category donut covers the selected scope. Donut legend " +
+        "rows are clickable and multi-select — pick one or several categories to drill " +
+        "down into the matching transactions, which stay editable/deletable right there " +
+        "in the drill-down list.",
+      screenshot: "/help/expenses/03-category-donut.png",
+    },
+    {
+      heading: "Customize categories",
+      body:
+        "Reorder them with the up/down arrow buttons, or edit/delete one (deleting " +
+        "reassigns its past transactions to \"Other\" rather than losing them). Adding a " +
+        "category asks for a Name, a Color (10 presets), and an Icon (33 to choose from " +
+        "— Carrot, ShoppingCart, Fuel, Coffee, Home, Heart, Gift, Book, Dumbbell, and " +
+        "more). There's no fixed default category set — the whole list is yours to " +
+        "define.",
+    },
+    {
+      heading: "Review the Monthly trend card",
+      body:
+        "See spending across cycles, not just within one. Pick past billing cycles from " +
+        "the chip row, filter by category (multi-select chips), and read the 3-cycle bar " +
+        "comparison with its % change badge — red for up, green for down, since less " +
+        "spending is the good direction here. A category-split donut and an editable " +
+        "transaction list follow for whichever cycle/filter you've selected.",
+      screenshot: "/help/expenses/04-monthly-trend.png",
+    },
+  ],
+  why:
+    "Most people don't overspend in one dramatic purchase — they overspend in twenty " +
+    "small ones they never added up. Anvil's Expenses section is built around closing " +
+    "that gap between feeling fine about money and knowing where it went:\n\n" +
+    "• Logging by category, not just by total, builds spending consciousness. A single " +
+    "running total tells you that you're over budget; a category donut tells you why — " +
+    "and \"why\" is the only version of that information you can actually act on next " +
+    "time you're standing in front of a coffee shop or a delivery app.\n\n" +
+    "• The daily budget line reframes a monthly number into a daily decision. \"You have " +
+    "₹8,400 left this month\" is too abstract to change behavior in the moment. \"You can " +
+    "spend ≈ ₹280/day\" is a number you can hold against a single choice, today, which is " +
+    "the only timescale most spending decisions actually happen on.\n\n" +
+    "• Billing-cycle-aware calendars keep the math honest. If your income lands on the " +
+    "5th, a budget that resets on the 1st is lying to you for four days every month. " +
+    "Anchoring the whole section to your real cycle means the \"days left\" denominator " +
+    "in the daily budget line is always correct.\n\n" +
+    "• User-defined categories make the tracker fit your life instead of the other way " +
+    "around. A fixed category list forces you to either misfile spending or ignore the " +
+    "feature; letting you name, color, and icon your own categories means the donut " +
+    "chart actually reflects the shape of your spending, not a template designer's " +
+    "guess at it.\n\n" +
+    "• Month-over-month trend comparison turns one-off overspending into a pattern you " +
+    "can see. A single bad week is easy to rationalize away; three consecutive cycles " +
+    "trending the same direction, with a red % badge sitting right there, is much " +
+    "harder to ignore.\n\n" +
+    "Used consistently, this section is meant to replace vague financial anxiety (\"I " +
+    "feel like I'm spending too much\") with a specific, checkable fact (\"I'm ₹40/day " +
+    "over budget on Food this cycle\") — because only the second version tells you what " +
+    "to actually change.",
+};

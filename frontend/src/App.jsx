@@ -32,6 +32,7 @@ import { api, getToken, setToken, clearToken } from "./api.js";
 import { applyTheme, getStoredThemeId } from "./theme.js";
 import { getCurrencyCode, setCurrencyCode } from "./currency.js";
 import { getMonthStartDay, setMonthStartDay } from "./monthCycle.js";
+import { setDayStartHour } from "./dayStart.js";
 
 // Apply the stored theme immediately so there's no flash before React mounts.
 applyTheme(getStoredThemeId(), false);
@@ -160,6 +161,7 @@ export default function App() {
     api.getSetting("theme").then((r) => { if (r?.value) setThemeId(applyTheme(r.value)); }).catch(() => {});
     api.getSetting("currency").then((r) => { if (r?.value) setCurrency(setCurrencyCode(r.value)); }).catch(() => {});
     api.getSetting("month_start_day").then((r) => { if (r?.value) setMonthStartDayState(setMonthStartDay(r.value)); }).catch(() => {});
+    api.getSetting("day_start_hour").then((r) => { if (r?.value != null) setDayStartHour(r.value); }).catch(() => {});
     api.getSetting("ticker").then((r) => { if (r?.value) setTicker((t) => ({ ...t, ...r.value })); }).catch(() => {});
     api.getSetting("default_screen").then((r) => {
       if (r?.value && SCREENS[r.value]) { setDefaultScreen(r.value); try { localStorage.setItem(DEFAULT_SCREEN_KEY, r.value); } catch { /* ignore */ } }

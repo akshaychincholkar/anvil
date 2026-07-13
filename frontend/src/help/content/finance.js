@@ -1,0 +1,94 @@
+// In-app copy of docs/help/finance.md — keep these word-for-word in sync.
+// Screenshots referenced here live in frontend/public/help/finance/.
+export default {
+  title: "Wallet",
+  tagline: "Where money stops being a feeling and becomes a set of numbers.",
+  what:
+    "The Wallet section is where money stops being a vague feeling and becomes a set of " +
+    "numbers you actually look at: what came in, what went out, what you invested, and " +
+    "what's left — plus a financial-health score, growth forecasts, and calculators for " +
+    "the two decisions that shape most people's money over decades — how much to invest, " +
+    "and how to handle a loan.",
+  screenshot: "/help/finance/01-overview-summary.png",
+  howTo: [
+    {
+      heading: "Start on the Overview tab",
+      body:
+        "Pick a period — This month / Last month / This year / All time — and read the " +
+        "four summary cards: Income, Expenses, Invested, and Remaining (income minus " +
+        "expenses minus investments). Remaining also shows \"≈ X/day, N days left,\" " +
+        "dividing what's left by the days remaining in your current billing cycle.",
+      screenshot: "/help/finance/01-overview-summary.png",
+    },
+    {
+      heading: "Check Assets & investments and your Financial health score",
+      body:
+        "The assets card totals everything you've invested, all-time, and includes a " +
+        "Growth forecast — enter a monthly investment amount, a yearly step-up % (how " +
+        "much your contribution increases every year), and an expected annual return %. " +
+        "The 20-year bar chart adds 12× your (stepped-up) monthly contribution each year, " +
+        "then grows the whole pot by your return rate, and the note beneath it spells out " +
+        "the destination plainly: \"In 20 years at X% p.a. → ₹Y (you'd put in ₹Z, growth " +
+        "adds ₹W).\" The Financial health card scores 0–100 (50 + savings rate × 100) and " +
+        "labels you Excellent, Healthy, Okay, Tight, or Overspending with a colored gauge " +
+        "bar and a tip.",
+      screenshot: "/help/finance/02-growth-health.png",
+    },
+    {
+      heading: "Log income and manage fixed items on the Money tab",
+      body:
+        "Use Add income for amount, category, date, and note — expenses aren't added here, " +
+        "only in the Expenses section, though they flow in automatically and stay editable " +
+        "from this tab too. Fixed items are recurring EMI/rent/SIP entries (name, kind — " +
+        "Expense or Investment — amount/month, category or investment type, note) that " +
+        "auto-post at the start of every billing cycle; pause, resume, edit, or delete them " +
+        "as your commitments change. Investments (Stocks, Mutual Fund, SIP, Fixed Deposit, " +
+        "Gold, Real Estate, PPF-EPF, Crypto, Other) and full transaction History — grouped " +
+        "by date, editable/deletable inline with an undo toast — live here too.",
+      screenshot: "/help/finance/03-money-tab.png",
+    },
+    {
+      heading: "Run the numbers on the Calculators tab",
+      body:
+        "The SIP projection calculator uses sliders for monthly investment, expected " +
+        "return %, and years to show projected wealth, the invested-vs-returns split, and " +
+        "a year-by-year stacked bar chart. The EMI calculator uses sliders for loan amount, " +
+        "interest rate, and tenure, with an optional one-time or monthly prepayment and a " +
+        "strategy of reduce-tenure or reduce-EMI — it shows your new EMI, interest saved, " +
+        "and months saved.",
+      screenshot: "/help/finance/04-calculators.png",
+    },
+  ],
+  why:
+    "Money anxiety is rarely about the actual numbers — it's about not knowing them. " +
+    "Wallet is built to close that gap between feeling and fact:\n\n" +
+    "• A daily \"Remaining\" figure and health score replace vague worry with a specific " +
+    "number. \"I feel like money is tight this month\" is unfalsifiable and unfixable. " +
+    "\"You're at ₹340/day for 12 days, Financial health: Tight\" is a fact you can act on " +
+    "today — spend less, or accept the number and move on. Either way, you're no longer " +
+    "just anxious; you're informed.\n\n" +
+    "• Simple annual compounding in the growth forecast makes an abstract concept " +
+    "viscerally concrete. Everyone has heard that compounding is powerful, but \"8% annual " +
+    "return\" means almost nothing until you see a 20-year bar chart where the green " +
+    "\"growth\" portion visibly overtakes the blue \"you put in\" portion. The forecast " +
+    "exists to turn a math fact you intellectually accept into a number you emotionally " +
+    "believe — which is what actually gets people to start investing sooner rather than " +
+    "later.\n\n" +
+    "• Step-up % models real income growth, not a fantasy flat contribution. Nobody " +
+    "invests the exact same amount for 20 years — raises happen. Building the step-up " +
+    "into the forecast keeps the projection honest instead of either under-selling your " +
+    "real trajectory or requiring you to redo the math every year.\n\n" +
+    "• Separating Income, Expenses, and Invested — instead of one lump \"balance\" — forces " +
+    "a three-way decision to stay visible. Every rupee is doing one of three jobs: funding " +
+    "today, funding the future, or sitting idle. A single balance number hides which job is " +
+    "being neglected; three cards don't let it hide.\n\n" +
+    "• The EMI calculator's prepayment strategies name the actual trade-off. \"Reduce " +
+    "tenure\" and \"reduce EMI\" are not the same decision — one maximizes interest saved, " +
+    "the other maximizes monthly breathing room — and most loan apps don't make you choose " +
+    "consciously. Naming both options and showing interest-saved and months-saved side by " +
+    "side turns a decision people usually default into into one they actually make.\n\n" +
+    "Used consistently, Wallet is meant to replace \"I hope I'm doing okay financially\" " +
+    "with \"I can see exactly how okay I'm doing, and exactly what happens if I change one " +
+    "number\" — because that second sentence is what actually changes financial behavior, " +
+    "not the first.",
+};

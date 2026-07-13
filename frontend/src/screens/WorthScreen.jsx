@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { ScrollText, X } from "lucide-react";
 import { api } from "../api.js";
+import { effectiveTodayISO } from "../dayStart.js";
 import { TREES, DEFAULT_TREE } from "./grove/trees.jsx";
 import { useCurrency, fmtMoney2 } from "../currency.js";
 
@@ -73,7 +74,8 @@ const PERIODS = [
   { id: "tyear", label: "This year" },
 ];
 function periodRange(id) {
-  const now = new Date();
+  // All ranges anchor on the effective "today" (start-of-day hour in Settings).
+  const now = new Date(effectiveTodayISO() + "T12:00:00");
   if (id === "today") return [iso(now), iso(now)];
   if (id === "tweek") { const s = startOfWeek(now); const e = new Date(s); e.setDate(s.getDate() + 6); return [iso(s), iso(e)]; }
   if (id === "pweek") { const s = startOfWeek(now); s.setDate(s.getDate() - 7); const e = new Date(s); e.setDate(s.getDate() + 6); return [iso(s), iso(e)]; }

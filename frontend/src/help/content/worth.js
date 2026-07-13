@@ -1,0 +1,91 @@
+// In-app copy of docs/help/worth.md — keep these word-for-word in sync.
+// Screenshots referenced here live in frontend/public/help/worth/.
+export default {
+  title: "Rewards",
+  tagline: "Time spent focusing and using the app, converted into real money.",
+  what:
+    "The Rewards section tracks a virtual reward currency you earn from focus sessions " +
+    "and app usage, which you can take out as a real cash payout or spend on a Bucket " +
+    "List wish. It's the layer that turns time spent on the rest of Anvil into something " +
+    "with a literal, spendable number attached to it.",
+  screenshot: "/help/worth/01-hero-card.png",
+  howTo: [
+    {
+      heading: "Read the hero card",
+      body:
+        "Pending reward is earned minus already-taken. \"Take partial\" and \"Take all " +
+        "pending\" both require a mandatory reason/note before they'll go through — " +
+        "there's no silent withdrawal.",
+      screenshot: "/help/worth/01-hero-card.png",
+    },
+    {
+      heading: "Toggle \"Fulfil from bucket list\"",
+      body:
+        "Turn this on if you'd rather spend pending reward on a specific goal than take " +
+        "cash. With it on, the Take flow lets you pick an unfulfilled Bucket List wish " +
+        "instead of entering a free amount — the wish is marked fulfilled and its cost " +
+        "deducted from pending, blocked if the cost exceeds what's pending.",
+    },
+    {
+      heading: "Configure your four reward types",
+      body:
+        "Each is independently toggleable, and turning one off excludes it from the " +
+        "pending total:",
+      list: [
+        "Focus Rewards — ₹/hour, set per pillar (Financial, Academic, Relationship, Health, Spiritual) via \"Set rates.\"",
+        "Usage Rewards — ₹/minute, set per app screen.",
+        "Achievement Rewards — configured in the Achievements section.",
+        "Challenge Rewards — banked automatically when a challenge completes.",
+      ],
+      screenshot: "/help/worth/02-reward-types.png",
+    },
+    {
+      heading: "Track earnings over time",
+      body:
+        "Use the period selector (Today / All time / This week / This month / Last week / " +
+        "Last month / This year) to drive the Reward split bar and the per-type breakdown " +
+        "lists, check the \"Earned · last 3 days\" comparison bar (Today / Yesterday / Day " +
+        "before), and read the Most-used screens pie (by time, not money) and the Reward " +
+        "breakdown donut (Focus/Usage/Achievement/Challenge as % of the period total). " +
+        "Rate changes only apply going forward — past time keeps whatever rate was in " +
+        "effect when it was earned.",
+      screenshot: "/help/worth/03-period-breakdown.png",
+    },
+    {
+      heading: "Review the log",
+      body:
+        "Open the Reward log popup to review or delete past payouts.",
+    },
+  ],
+  why:
+    "Rewards is the gamification layer of Anvil, but it's built to avoid the failure mode " +
+    "most gamification falls into — points that feel good for a week and mean nothing " +
+    "after that:\n\n" +
+    "• Real money is a stronger bridge from extrinsic to intrinsic motivation than points " +
+    "ever are. A point has no exchange rate with anything you actually want; it can be " +
+    "inflated, ignored, or forgotten without cost. A rupee you can take out and spend — or " +
+    "better, put toward a wish you already wanted — keeps the extrinsic reward tethered to " +
+    "something real, which is what lets it eventually fade into the background once the " +
+    "underlying habit (focusing, showing up) becomes rewarding on its own.\n\n" +
+    "• Per-pillar and per-screen rates let you price your own priorities. Setting Health " +
+    "focus at a higher ₹/hour than, say, casual browsing time isn't arbitrary — it's a way " +
+    "of encoding \"this matters more to me\" into a number that then shows up every time " +
+    "you check the app, instead of staying a vague intention you re-decide every day.\n\n" +
+    "• Date-effective rates protect the integrity of the record. If raising your Focus " +
+    "rate today silently rewrote yesterday's earnings, the whole system would just be a " +
+    "mirror for whatever you feel like believing right now. Anchoring past time to the " +
+    "rate that was actually in effect keeps the ledger honest, the same way a real payroll " +
+    "change doesn't retroactively alter last month's paycheck.\n\n" +
+    "• Mandatory reasons on every payout add a moment of reflection to spending your own " +
+    "reward. It's trivial to tap \"take all\" without thinking; writing even one line about " +
+    "why forces a half-second of intention, which is enough to separate \"I'm rewarding " +
+    "real effort\" from \"I'm just cashing out because the number is there.\"\n\n" +
+    "• The bucket-list fulfillment path converts abstract earning into a concrete want. " +
+    "Taking cash is satisfying once; watching a specific wish move from \"pending\" to " +
+    "\"fulfilled\" because you focused and used your time well is a much more durable " +
+    "payoff, and it's why that option exists as more than a convenience feature.\n\n" +
+    "Used consistently, Rewards is meant to make \"I should focus more\" feel less like a " +
+    "moral obligation and more like a transaction you're choosing to make with yourself — " +
+    "one where the currency is real enough to matter, but the thing you're actually buying " +
+    "is a life shaped the way you said you wanted it.",
+};
