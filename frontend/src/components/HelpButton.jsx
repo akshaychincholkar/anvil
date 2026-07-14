@@ -7,6 +7,25 @@ import { HelpCircle, X } from "lucide-react";
 // in-app copy).
 const REGISTRY = {
   habits: () => import("../help/content/habits.js"),
+  dashboard: () => import("../help/content/dashboard.js"),
+  expenses: () => import("../help/content/expenses.js"),
+  "golden-book": () => import("../help/content/golden-book.js"),
+  grove: () => import("../help/content/grove.js"),
+  achievements: () => import("../help/content/achievements.js"),
+  journal: () => import("../help/content/journal.js"),
+  revision: () => import("../help/content/revision.js"),
+  spiritual: () => import("../help/content/spiritual.js"),
+  kickstart: () => import("../help/content/kickstart.js"),
+  affirmations: () => import("../help/content/affirmations.js"),
+  challenges: () => import("../help/content/challenges.js"),
+  finance: () => import("../help/content/finance.js"),
+  worth: () => import("../help/content/worth.js"),
+  "trading-journal": () => import("../help/content/trading-journal.js"),
+  mindscape: () => import("../help/content/mindscape.js"),
+  "bucket-list": () => import("../help/content/bucket-list.js"),
+  goals: () => import("../help/content/goals.js"),
+  skills: () => import("../help/content/skills.js"),
+  delight: () => import("../help/content/delight.js"),
 };
 
 // Small round "?" button — drop next to any screen's <h1>. `id` must match

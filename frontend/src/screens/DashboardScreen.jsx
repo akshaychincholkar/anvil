@@ -8,6 +8,7 @@ import { useCurrency, fmtMoney2 } from "../currency.js";
 import { useMonthStartDay, cycleRange } from "../monthCycle.js";
 import { effectiveTodayISO } from "../dayStart.js";
 import { TREES, DEFAULT_TREE } from "./grove/trees.jsx";
+import HelpButton from "../components/HelpButton.jsx";
 
 const FOCUS_COLOR = "#C9A227";
 const USAGE_COLOR = "#3A7CA5";
@@ -258,7 +259,10 @@ export default function DashboardScreen({ onNavigate }) {
     <div style={S.page}>
       <div style={S.head}>
         <div style={S.eyebrow}>Anvil · Today</div>
-        <h1 style={S.h1}>Dashboard</h1>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <h1 style={S.h1}>Dashboard</h1>
+          <HelpButton id="dashboard" />
+        </div>
         <div style={S.subhead}>{new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</div>
       </div>
 

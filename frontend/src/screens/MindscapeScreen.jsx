@@ -3,6 +3,7 @@ import { Plus, X, Check, Play, Pause, Pencil, ImagePlus, Brain, Eye, Music2 } fr
 import { api } from "../api.js";
 import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
 import UndoToast from "../components/UndoToast.jsx";
+import HelpButton from "../components/HelpButton.jsx";
 
 const TABS = [
   { id: "meditation", label: "Meditation Hub", icon: Brain, color: "#8268B0" },
@@ -107,7 +108,10 @@ export default function MindscapeScreen() {
       <div style={S.head}>
         <div>
           <div style={S.eyebrow}>Anvil · Mindscape</div>
-          <h1 style={S.h1}>Mindscape</h1>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <h1 style={S.h1}>Mindscape</h1>
+            <HelpButton id="mindscape" />
+          </div>
           <div style={S.subhead}>Close your eyes and listen — guided meditation and visualization.</div>
         </div>
         {!form && <button onClick={() => setForm(blankForm(tab))} style={{ ...S.addBtn, background: tabMeta.color }}><Plus size={15} /> Add</button>}

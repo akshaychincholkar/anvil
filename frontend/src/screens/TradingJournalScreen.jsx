@@ -6,6 +6,7 @@ import {
 import { api } from "../api.js";
 import { effectiveTodayISO } from "../dayStart.js";
 import { useCurrency, fmtMoney } from "../currency.js";
+import HelpButton from "../components/HelpButton.jsx";
 
 const ACCENT = "#3A7CA5";
 const GREEN = "#4C9A6B";
@@ -227,7 +228,10 @@ export default function TradingJournalScreen() {
       <div style={S.head}>
         <div>
           <div style={S.eyebrow}>Anvil · Trading Journal</div>
-          <h1 style={S.h1}>Trading Journal</h1>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <h1 style={S.h1}>Trading Journal</h1>
+            <HelpButton id="trading-journal" />
+          </div>
           <div style={S.subhead}>Open trades with your entry, SL &amp; target — book profit/loss and P/L is calculated for you.</div>
         </div>
       </div>

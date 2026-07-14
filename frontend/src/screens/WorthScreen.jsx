@@ -4,6 +4,7 @@ import { api } from "../api.js";
 import { effectiveTodayISO } from "../dayStart.js";
 import { TREES, DEFAULT_TREE } from "./grove/trees.jsx";
 import { useCurrency, fmtMoney2 } from "../currency.js";
+import HelpButton from "../components/HelpButton.jsx";
 
 const FOCUS_KEY = "grove_rates";   // legacy fallback: pillar → ₹/hr
 const USAGE_KEY = "reward_rates";  // legacy fallback: screen → ₹/min
@@ -336,7 +337,10 @@ export default function WorthScreen() {
     <div style={S.page}>
       <div style={S.head}>
         <div style={S.eyebrow}>Anvil · Rewards</div>
-        <h1 style={S.h1}>Rewards</h1>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <h1 style={S.h1}>Rewards</h1>
+          <HelpButton id="worth" />
+        </div>
         <div style={S.subhead}>Your earned rewards from focus and app usage.</div>
       </div>
 

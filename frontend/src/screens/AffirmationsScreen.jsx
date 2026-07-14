@@ -3,6 +3,7 @@ import { Star, Quote, ChevronLeft, ChevronRight, Plus, X, Check, Trash2 } from "
 import { AFFIRMATION_TABS } from "./spiritual/affirmationsData.js";
 import { api } from "../api.js";
 import Dropdown from "../components/Dropdown.jsx";
+import HelpButton from "../components/HelpButton.jsx";
 
 // A calm rotating palette, one colour per category.
 const PALETTE = ["#3A7CA5", "#4C9A6B", "#C2773B", "#8268B0", "#C2536B", "#C9A227", "#3A7CA5", "#4C9A6B"];
@@ -135,7 +136,10 @@ export default function AffirmationsScreen() {
       <div style={{ ...S.head, display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
         <div>
           <div style={S.eyebrow}>Anvil · Affirmations</div>
-          <h1 style={S.h1}>Affirmations</h1>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <h1 style={S.h1}>Affirmations</h1>
+            <HelpButton id="affirmations" />
+          </div>
           <div style={S.subhead}>One at a time — read it, mean it.</div>
         </div>
         {!adding && (

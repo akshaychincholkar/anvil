@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { Plus, X, Check, Pencil, ChevronUp, ChevronDown, Sparkles, ExternalLink, PartyPopper } from "lucide-react";
 import { api } from "../api.js";
 import { useCurrency, fmtMoney2 } from "../currency.js";
+import HelpButton from "../components/HelpButton.jsx";
 
 const ACCENT = "#8268B0";
 const GREEN = "#4C9A6B";
@@ -69,7 +70,10 @@ export default function BucketListScreen() {
     <div style={S.page}>
       <div style={S.head}>
         <div style={S.eyebrow}>Anvil · Bucket List</div>
-        <h1 style={S.h1}>Bucket List</h1>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <h1 style={S.h1}>Bucket List</h1>
+          <HelpButton id="bucket-list" />
+        </div>
         <div style={S.subhead}>The materialistic wishes you want to fulfil, big or small — ordered by what matters most.</div>
       </div>
 

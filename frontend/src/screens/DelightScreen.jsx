@@ -3,6 +3,7 @@ import { Plus, X, Check, Pencil, PartyPopper, Columns3, GripVertical } from "luc
 import { api } from "../api.js";
 import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
 import UndoToast from "../components/UndoToast.jsx";
+import HelpButton from "../components/HelpButton.jsx";
 
 function useIsMobile(bp = 760) {
   const [m, setM] = useState(() => window.innerWidth < bp);
@@ -275,7 +276,10 @@ export default function DelightScreen() {
       <div style={S.head}>
         <div>
           <div style={S.eyebrow}>Anvil · Delights</div>
-          <h1 style={S.h1}>Delights</h1>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <h1 style={S.h1}>Delights</h1>
+            <HelpButton id="delight" />
+          </div>
           <div style={S.subhead}>Books, films, places, food — track what you want to enjoy and how you felt.</div>
         </div>
         <button onClick={openAddCollection} style={S.addColBtn}><Plus size={15} /> New list</button>

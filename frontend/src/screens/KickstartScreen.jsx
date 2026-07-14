@@ -3,8 +3,9 @@ import { Plus, X, Check, Play, Pencil, Scissors, Tag, Instagram, Youtube } from 
 import { api } from "../api.js";
 import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
 import UndoToast from "../components/UndoToast.jsx";
+import HelpButton from "../components/HelpButton.jsx";
 
-const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const DAYS =["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const DAY_ABBR = { Monday: "Mon", Tuesday: "Tue", Wednesday: "Wed", Thursday: "Thu", Friday: "Fri", Saturday: "Sat", Sunday: "Sun" };
 const todayName = () => DAYS[(new Date().getDay() + 6) % 7];
 
@@ -161,7 +162,10 @@ export default function KickstartScreen() {
       <div style={S.head}>
         <div>
           <div style={S.eyebrow}>Anvil · Kickstart</div>
-          <h1 style={S.h1}>Kickstart</h1>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <h1 style={S.h1}>Kickstart</h1>
+            <HelpButton id="kickstart" />
+          </div>
           <div style={S.subhead}>Your motivation hub — the right push for {todayName()}.</div>
         </div>
         {!form && <button onClick={() => setForm(blankForm())} style={S.addBtn}><Plus size={15} /> Add video</button>}

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { Menu, X, ChevronLeft, ChevronRight, Plus, Check, ImagePlus, Trash2, FileText, Images, Pencil, Home, ChevronUp, ChevronDown } from "lucide-react";
 import { SPIRITUAL_ITEMS } from "./spiritual/spiritualContent.js";
 import { api } from "../api.js";
+import HelpButton from "../components/HelpButton.jsx";
 
 function useIsMobile() {
   const [m, setM] = useState(() => window.innerWidth < 720);
@@ -160,7 +161,10 @@ export default function SpiritualScreen() {
 
       <aside style={sidebarStyle}>
         <div style={S.sideHead}>
-          <div style={S.brand}>Anvil · Spiritual</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <div style={S.brand}>Anvil · Spiritual</div>
+            <HelpButton id="spiritual" />
+          </div>
           <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
             <button onClick={() => setEditMode((v) => !v)} style={S.iconBtn} title="Rearrange & set default">
               {editMode ? <Check size={16} /> : <Pencil size={15} />}

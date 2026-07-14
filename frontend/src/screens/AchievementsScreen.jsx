@@ -4,6 +4,7 @@ import { api } from "../api.js";
 import { useCurrency, fmtMoney2 } from "../currency.js";
 import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
 import UndoToast from "../components/UndoToast.jsx";
+import HelpButton from "../components/HelpButton.jsx";
 
 const PILLARS = {
   Financial: "#C9A227", Academic: "#3A7CA5", Relationship: "#C2536B",
@@ -218,7 +219,10 @@ export default function AchievementsScreen() {
       <div style={S.head}>
         <div>
           <div style={S.eyebrow}>Anvil · Achievements</div>
-          <h1 style={S.h1}>Achievements</h1>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <h1 style={S.h1}>Achievements</h1>
+            <HelpButton id="achievements" />
+          </div>
           <div style={S.subhead}>Your tree of wins — newest at the top, scroll down through the past.</div>
         </div>
         <div style={S.headRight}>

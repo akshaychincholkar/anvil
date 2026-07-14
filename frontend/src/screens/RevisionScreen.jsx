@@ -3,6 +3,7 @@ import { Plus, X, Check, ChevronDown, ChevronRight, RotateCcw, Trophy, Pencil } 
 import { api } from "../api.js";
 import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
 import UndoToast from "../components/UndoToast.jsx";
+import HelpButton from "../components/HelpButton.jsx";
 
 const PILLARS = {
   Financial:    { dot: "#C9A227", soft: "rgba(201,162,39,0.10)" },
@@ -128,7 +129,10 @@ export default function RevisionScreen() {
       <div style={S.head}>
         <div>
           <div style={S.eyebrow}>Anvil · Revision</div>
-          <h1 style={S.h1}>Spaced Repetition</h1>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <h1 style={S.h1}>Spaced Repetition</h1>
+            <HelpButton id="revision" />
+          </div>
         </div>
         <button onClick={() => setAdding(true)} style={S.addBtn}><Plus size={15} /> Add topic</button>
       </div>

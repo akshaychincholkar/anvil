@@ -4,6 +4,7 @@ import { api } from "../api.js";
 import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
 import UndoToast from "../components/UndoToast.jsx";
 import Dropdown from "../components/Dropdown.jsx";
+import HelpButton from "../components/HelpButton.jsx";
 
 function useIsMobile(bp = 760) {
   const [m, setM] = useState(() => window.innerWidth < bp);
@@ -192,7 +193,10 @@ export default function SkillsScreen() {
       <div style={S.head}>
         <div>
           <div style={S.eyebrow}>Anvil · Skills</div>
-          <h1 style={S.h1}>Skills</h1>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <h1 style={S.h1}>Skills</h1>
+            <HelpButton id="skills" />
+          </div>
           <div style={S.subhead}>Data → Information → Knowledge → Wisdom</div>
         </div>
         <div style={S.headRight}>

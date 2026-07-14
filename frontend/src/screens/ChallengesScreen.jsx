@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { Plus, X, Check, Pencil, Trophy, Flag, Gift, CalendarClock, TrendingDown } from "lucide-react";
 import { api } from "../api.js";
 import { useCurrency, fmtMoney2 } from "../currency.js";
+import HelpButton from "../components/HelpButton.jsx";
 
 const ACCENT = "#C9A227";
 const RED = "#C2536B";
@@ -115,7 +116,10 @@ export default function ChallengesScreen() {
     <div style={S.page}>
       <div style={S.head}>
         <div style={S.eyebrow}>Anvil · Challenges</div>
-        <h1 style={S.h1}>Challenges</h1>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <h1 style={S.h1}>Challenges</h1>
+          <HelpButton id="challenges" />
+        </div>
         <div style={S.subhead}>Small steps toward success — track each toward its target and bank the reward on completion.</div>
       </div>
 

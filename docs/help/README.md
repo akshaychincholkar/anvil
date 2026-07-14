@@ -59,23 +59,37 @@ when adding a new section.
 
 ## Sections covered so far
 
-| Section    | Doc                | JS content                                  | Status |
-|------------|---------------------|----------------------------------------------|--------|
-| Habits     | [habits.md](habits.md) | `frontend/src/help/content/habits.js`     | ✅ Live (text; screenshots pending) |
-| Expenses   | —                    | —                                              | ⬜ Not started |
-| Golden Book| —                    | —                                              | ⬜ Not started |
-| Dashboard  | —                    | —                                              | ⬜ Not started |
-| Grove      | —                    | —                                              | ⬜ Not started |
-| Rewards    | —                    | —                                              | ⬜ Not started |
-| Journal    | —                    | —                                              | ⬜ Not started |
-| Revision   | —                    | —                                              | ⬜ Not started |
-| Spiritual  | [spiritual.md](spiritual.md) | `frontend/src/help/content/spiritual.js` | ✅ Live (text; screenshots pending) |
-| Kickstart  | [kickstart.md](kickstart.md) | `frontend/src/help/content/kickstart.js` | ✅ Live (text; screenshots pending) |
-| Affirmations| [affirmations.md](affirmations.md) | `frontend/src/help/content/affirmations.js` | ✅ Live (text; screenshots pending) |
-| Challenges | [challenges.md](challenges.md) | `frontend/src/help/content/challenges.js` | ✅ Live (text; screenshots pending) |
-| Finance / Worth | —               | —                                              | ⬜ Not started |
+| Section          | id (HelpButton)   | Doc                                          | Screenshots |
+|-------------------|--------------------|-----------------------------------------------|-------------|
+| Habits            | `habits`           | [habits.md](habits.md)                       | pending |
+| Dashboard         | `dashboard`        | [dashboard.md](dashboard.md)                 | pending |
+| Expenses          | `expenses`         | [expenses.md](expenses.md)                   | pending |
+| Golden Book       | `golden-book`      | [golden-book.md](golden-book.md)             | pending |
+| Grove             | `grove`            | [grove.md](grove.md)                         | pending |
+| Achievements      | `achievements`     | [achievements.md](achievements.md)           | pending |
+| Journal           | `journal`          | [journal.md](journal.md)                     | pending |
+| Revision          | `revision`         | [revision.md](revision.md)                   | pending |
+| Spiritual         | `spiritual`        | [spiritual.md](spiritual.md)                 | pending |
+| Kickstart         | `kickstart`        | [kickstart.md](kickstart.md)                 | pending |
+| Affirmations      | `affirmations`     | [affirmations.md](affirmations.md)           | pending |
+| Challenges        | `challenges`       | [challenges.md](challenges.md)               | pending |
+| Wallet (Finance)  | `finance`          | [finance.md](finance.md)                     | pending |
+| Rewards (Worth)   | `worth`            | [worth.md](worth.md)                         | pending |
+| Trading Journal   | `trading-journal`  | [trading-journal.md](trading-journal.md)     | pending |
+| Mindscape         | `mindscape`        | [mindscape.md](mindscape.md)                 | pending |
+| Bucket List       | `bucket-list`      | [bucket-list.md](bucket-list.md)             | pending |
+| Goals             | `goals`            | [goals.md](goals.md)                         | pending |
+| Skills            | `skills`           | [skills.md](skills.md)                       | pending |
+| Delights          | `delight`          | [delight.md](delight.md)                     | pending |
 
-Update this table whenever a new section's help content ships.
+All 20 sections are text-complete and wired to a Help button on their screen.
+Every section is waiting on screenshots — drop numbered PNGs into
+`frontend/public/help/<id>/` (see that folder's `README.txt` for exact
+expected filenames) and they'll appear automatically, no code changes
+needed. Not yet covered: Settings, Auth, Weekly Routing (QuadrantView), and
+Grove's Insights sub-view.
+
+Update this table whenever a section's screenshots land or its content changes.
 
 ## Screenshot capture tips
 

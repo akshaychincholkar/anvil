@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Flame, Plus, X, Trophy, Heart, Target, Wind, Sunrise, ChevronLeft } from "lucide-react";
 import { api } from "../api.js";
 import { effectiveTodayISO } from "../dayStart.js";
+import HelpButton from "../components/HelpButton.jsx";
 
 const MOODS = [
   { id: 1, label: "Rough", emoji: "😣", color: "#C2536B" },
@@ -119,7 +120,10 @@ export default function JournalScreen() {
               <ChevronLeft size={14} /> Back to Today
             </button>
           )}
-          <h1 style={S.h1}>{isToday ? "Today" : formatDateLabel(selectedDate)}</h1>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <h1 style={S.h1}>{isToday ? "Today" : formatDateLabel(selectedDate)}</h1>
+            <HelpButton id="journal" />
+          </div>
           {isToday && <div style={S.date}>{formatDateLabel(TODAY)}</div>}
         </div>
         <div style={S.streakBox}>

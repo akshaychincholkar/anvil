@@ -3,6 +3,7 @@ import { BarChart3 } from "lucide-react";
 import { api } from "../api.js";
 import GroveStats from "./GroveStats.jsx";
 import { TREES, DEFAULT_TREE, Tree, MiniTree } from "./grove/trees.jsx";
+import HelpButton from "../components/HelpButton.jsx";
 
 const DURATIONS = [15, 30, 45, 60, 90];
 const ACTIVE_KEY = "anvil_grove_active";
@@ -149,7 +150,10 @@ export default function GroveScreen() {
     <div style={S.page}>
       <div style={S.head}>
         <div style={S.eyebrow}>Anvil · Grove</div>
-        <h1 style={S.h1}>Grove</h1>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <h1 style={S.h1}>Grove</h1>
+          <HelpButton id="grove" />
+        </div>
         <div style={S.subhead}>Plant a tree, stay focused, grow your grove.</div>
         <button onClick={() => setView("stats")} style={S.insightsBtn} disabled={phase === "running"}>
           <BarChart3 size={15} /> Insights

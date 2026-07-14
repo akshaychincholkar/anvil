@@ -8,6 +8,7 @@ import {
   Scissors, PawPrint, Baby, GraduationCap, Briefcase, Car, Bike,
 } from "lucide-react";
 import { api } from "../api.js";
+import HelpButton from "../components/HelpButton.jsx";
 import { effectiveTodayISO } from "../dayStart.js";
 import { useCurrency, fmtMoney } from "../currency.js";
 import { useMonthStartDay, cycleRange } from "../monthCycle.js";
@@ -308,7 +309,10 @@ export default function ExpensesScreen() {
       <div style={S.head}>
         <div>
           <div style={S.eyebrow}>Anvil · Expenses</div>
-          <h1 style={S.h1}>Expenses</h1>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <h1 style={S.h1}>Expenses</h1>
+            <HelpButton id="expenses" />
+          </div>
           <div style={S.subhead}>Log day-to-day spending by category and see where it goes.</div>
         </div>
       </div>

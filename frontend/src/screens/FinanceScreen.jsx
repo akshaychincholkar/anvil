@@ -8,6 +8,7 @@ import { api } from "../api.js";
 import { useCurrency, fmtMoney, fmtCompact } from "../currency.js";
 import { useMonthStartDay, cycleRange } from "../monthCycle.js";
 import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
+import HelpButton from "../components/HelpButton.jsx";
 import UndoToast from "../components/UndoToast.jsx";
 import Dropdown from "../components/Dropdown.jsx";
 
@@ -112,7 +113,10 @@ export default function FinanceScreen() {
     <div style={S.page}>
       <div style={S.head}>
         <div style={S.eyebrow}>Anvil · Wallet</div>
-        <h1 style={S.h1}>Wallet</h1>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <h1 style={S.h1}>Wallet</h1>
+          <HelpButton id="finance" />
+        </div>
         <div style={S.subhead}>Your money — what comes in, what goes out, and where it's headed.</div>
       </div>
 

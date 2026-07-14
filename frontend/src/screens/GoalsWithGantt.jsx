@@ -3,6 +3,7 @@ import { ChevronRight, ChevronDown, Plus, Target, X, Check, Pencil, Eye, EyeOff,
 import { api } from "../api.js";
 import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
 import UndoToast from "../components/UndoToast.jsx";
+import HelpButton from "../components/HelpButton.jsx";
 
 const PILLARS = {
   Financial:    { dot: "#C9A227", soft: "rgba(201,162,39,0.10)" },
@@ -753,7 +754,10 @@ export default function GoalsWithGantt() {
     <div style={S.page}>
       <div style={S.head}>
         <div style={S.eyebrow}>Anvil · Goals</div>
-        <h1 style={S.h1}>{isAll ? "All Goals" : `${pillar} Goals`}</h1>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <h1 style={S.h1}>{isAll ? "All Goals" : `${pillar} Goals`}</h1>
+          <HelpButton id="goals" />
+        </div>
       </div>
 
       {/* Item 6: flex-wrap ensures mobile containment */}

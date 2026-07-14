@@ -8,6 +8,7 @@ import { api } from "../api.js";
 import { effectiveTodayISO } from "../dayStart.js";
 import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
 import UndoToast from "../components/UndoToast.jsx";
+import HelpButton from "../components/HelpButton.jsx";
 
 const isoL = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const todayISO = () => effectiveTodayISO(); // honours the start-of-day hour (Settings)
@@ -132,7 +133,10 @@ export default function GoldenBookScreen() {
       <div style={S.head}>
         <div>
           <div style={S.eyebrow}>Anvil · Golden Book</div>
-          <h1 style={S.h1}>Golden Book</h1>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <h1 style={S.h1}>Golden Book</h1>
+            <HelpButton id="golden-book" />
+          </div>
           <div style={S.subhead}>Write your dreams into being — a little every day.</div>
         </div>
         {!adding && <button onClick={() => setAdding(true)} style={S.addBtn}><Plus size={15} /> New dream</button>}
