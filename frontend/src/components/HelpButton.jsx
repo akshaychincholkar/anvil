@@ -45,6 +45,7 @@ export default function HelpButton({ id }) {
 
 function HelpModal({ id, onClose }) {
   const [content, setContent] = useState(null);
+  const shots = useFoundShots(id);
 
   useEffect(() => {
     REGISTRY[id]().then((m) => setContent(m.default)).catch(() => setContent(false));
@@ -62,10 +63,13 @@ function HelpModal({ id, onClose }) {
             <h2 style={S.title}>{content.title}</h2>
             <p style={S.tagline}>{content.tagline}</p>
 
-            <Gallery id={id} />
-
+            {/* Image 01 illustrates "What it is"; image 02 illustrates the
+                first How-to step, 03 the second, and so on — purely by
+                position, so screenshots just need to be numbered in the
+                order they should appear, no filename coordination. */}
             <Section label="What it is">
               <p style={S.p}>{content.what}</p>
+              <Shot src={shots[0]} />
             </Section>
 
             <Section label="How to use it">
@@ -81,6 +85,7 @@ function HelpModal({ id, onClose }) {
                       {step.list.map((li, j) => <li key={j} style={S.li}>{li}</li>)}
                     </ul>
                   )}
+                  <Shot src={shots[i + 1]} />
                 </div>
               ))}
             </Section>
@@ -108,13 +113,15 @@ function Section({ label, children }) {
 
 // Drop-and-deploy screenshots: just save numbered files (01.jpg, 02.png, …)
 // into frontend/public/help/<id>/ — no filename coordination with the text
-// content needed. This probes 01..MAX_SHOTS against a few common extensions
-// and renders whichever numbers actually exist, in order, on top of the
-// modal — a section with no images yet renders no gallery at all.
+// content needed. This probes 01..MAX_SHOTS against a few common extensions;
+// whichever numbers exist get slotted in order — 01 next to "What it is",
+// 02 next to the first How-to step, 03 the second, etc. — so each image
+// demonstrates the thing it's numbered after instead of dumping as one
+// block up top.
 const EXTS = ["jpg", "jpeg", "png", "webp"];
 const MAX_SHOTS = 12;
 
-function Gallery({ id }) {
+function useFoundShots(id) {
   const [found, setFound] = useState([]);
 
   useEffect(() => {
@@ -137,19 +144,19 @@ function Gallery({ id }) {
         ).catch(() => null);
       })
     ).then((results) => {
+      // Keep gaps out: if 02 is missing but 03 exists, 03 should still
+      // slot into the 2nd position (index 1) rather than leaving a hole.
       if (!cancelled) setFound(results.filter(Boolean));
     });
     return () => { cancelled = true; };
   }, [id]);
 
-  if (found.length === 0) return null;
-  return (
-    <div style={S.gallery}>
-      {found.map((src) => (
-        <img key={src} src={src} alt="" style={S.shot} />
-      ))}
-    </div>
-  );
+  return found;
+}
+
+function Shot({ src }) {
+  if (!src) return null;
+  return <img src={src} alt="" style={S.shot} />;
 }
 
 const S = {
@@ -192,9 +199,8 @@ const S = {
   stepHeading: { fontSize: 14, fontWeight: 700, color: "var(--text)" },
   list: { margin: "0 0 8px", paddingLeft: 20 },
   li: { fontSize: 13.5, lineHeight: 1.6, color: "var(--text)", marginBottom: 4 },
-  gallery: { display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 },
   shot: {
     width: "100%", borderRadius: 8, border: "1px solid var(--border)", display: "block",
-    boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
+    margin: "8px 0 4px", boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
   },
 };

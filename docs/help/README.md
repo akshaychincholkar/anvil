@@ -40,11 +40,21 @@ with code:
 1. Take a screenshot on any device.
 2. Drop it into `frontend/public/help/<section>/`, named just `01.jpg` (or
    `.png`/`.jpeg`/`.webp`) — `02.jpg`, `03.jpg`, etc. for more than one.
-   **The number is the only thing that matters.** No need to match a step,
-   a heading, or any text in the `.js` file — the Help modal shows every
-   numbered image it finds for that section, in order, above the text.
-3. Rebuild and redeploy (`npm run build` in `frontend/`, then restart the
-   backend so it serves the fresh `dist/`). That's it — no code change.
+   **The number is the only thing that matters — and it controls where the
+   image appears, not just whether it does:**
+   - `01` renders under **"What it is"** (the intro).
+   - `02` renders under How-to-use **step 1**, `03` under step 2, `04`
+     under step 3, and so on — each screenshot sits right below the step
+     it's demonstrating, instead of all piling up in one block at the top.
+   - No filename text needs to match anything in the `.js` file — position
+     is everything. Skip a number and everything after it just shifts up
+     one step early, so keep the numbering contiguous (01, 02, 03…) if you
+     want a screenshot to land on a specific step.
+3. Either restart the backend (it falls back to serving straight out of
+   `frontend/public/help/` for any image not yet in a built `dist/`, so this
+   alone is enough to go live — handy from mobile, no build required), or
+   run `npm run build` in `frontend/` first if you want it baked into the
+   production bundle.
 
 Section ids (the folder name under `frontend/public/help/`) are listed in the
 table below. Use `docs/help/screenshots/<section>/` as an optional mirror for

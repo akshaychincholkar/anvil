@@ -1,3 +1,4 @@
 Reviewer copy of screenshots served from frontend/public/help/skills/.
-Naming convention: 01.jpg, 02.png, etc. — number only, any common
-extension. See docs/help/README.md for the full convention.
+Naming/position convention: 01.jpg -> "What it is", 02.jpg -> How-to
+step 1, 03.jpg -> step 2, etc. See docs/help/README.md for the full
+convention.
