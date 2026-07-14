@@ -82,6 +82,7 @@ GCAL_SCOPES          = [
 ]
 
 DIST = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
+PUBLIC = os.path.join(os.path.dirname(__file__), "..", "frontend", "public")
 
 def _gcal_client_config():
     return {"web": {
@@ -3536,4 +3537,12 @@ if os.path.isdir(DIST):
             candidate = os.path.normpath(os.path.join(DIST, full_path))
             if candidate.startswith(os.path.normpath(DIST)) and os.path.isfile(candidate):
                 return FileResponse(candidate)
+            # Help-section screenshots (frontend/public/help/<section>/*) are
+            # meant to go live the moment they're dropped in, without waiting
+            # for a frontend rebuild — so fall back to reading straight out
+            # of public/ for anything under /help/ that isn't in dist/ yet.
+            if full_path.startswith("help/"):
+                fallback = os.path.normpath(os.path.join(PUBLIC, full_path))
+                if fallback.startswith(os.path.normpath(PUBLIC)) and os.path.isfile(fallback):
+                    return FileResponse(fallback)
         return FileResponse(os.path.join(DIST, "index.html"))
