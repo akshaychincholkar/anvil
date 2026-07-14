@@ -6,6 +6,7 @@ import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
 import UndoToast from "../components/UndoToast.jsx";
 import Dropdown from "../components/Dropdown.jsx";
 import HelpButton from "../components/HelpButton.jsx";
+import { useConfirm } from "../components/ConfirmDialog.jsx";
 
 const HABIT_TYPES = [
   { value: "regular", label: "Regular (yes/no)" },
@@ -92,6 +93,7 @@ export default function HabitTracker() {
   const [newHabit, setNewHabit] = useState({ name: "", pillar: "Health", target_per_week: 7, type: "regular", target_count: null, period: "week", days: [], min_interval_min: 0 });
   const [reordering, setReordering] = useState(false);
   const [habitOrder, setHabitOrder] = useState([]);
+  const confirm = useConfirm();
 
   const load = useCallback(() => api.getHabits().then(setHabits).catch(console.error), []);
   useEffect(() => { load(); }, [load]);
@@ -170,7 +172,16 @@ export default function HabitTracker() {
     try { mergeHabit(await api.setHabitLogCount(habitId, dateStr, count, note)); setCountPopup(null); }
     catch (e) { alert(e.message || "Could not save."); }
   };
-  const clearLog = async (habitId, dateStr) => { mergeHabit(await api.clearHabitLog(habitId, dateStr)); setCountPopup(null); };
+  const clearLog = async (habitId, dateStr, habitName) => {
+    const ok = await confirm({
+      title: `Clear this entry?`,
+      message: `This removes "${habitName}"'s logged count for ${dateStr}.`,
+      confirmLabel: "Clear entry",
+    });
+    if (!ok) return;
+    mergeHabit(await api.clearHabitLog(habitId, dateStr));
+    setCountPopup(null);
+  };
 
   // Render the inline cooldown counter under a habit's row, if it's the active one.
   // `habit` is the live habit object (from state) so the countdown stays fresh.
@@ -214,6 +225,12 @@ export default function HabitTracker() {
   };
 
   const deleteHabit = async (id, name) => {
+    const ok = await confirm({
+      title: `Delete "${name}"?`,
+      message: "This removes all of its logged history. You'll have 7 seconds to undo right after.",
+      confirmLabel: "Delete",
+    });
+    if (!ok) return;
     if (selected === id) setSelected("ALL");
     softDelete(id, name);
   };
@@ -303,6 +320,7 @@ export default function HabitTracker() {
           habits={sortedHabits}
           onSave={saveOrder}
           onToggleActive={toggleActive}
+          onDelete={deleteHabit}
           onClose={() => setReordering(false)}
         />
       )}
@@ -323,12 +341,13 @@ export default function HabitTracker() {
           initialCount={countPopup.habit.log_counts?.[countPopup.date] ?? 0}
           initialNote={countPopup.habit.log_notes?.[countPopup.date] ?? ""}
           onSave={(count, note) => saveCount(countPopup.habit.id, countPopup.date, count, note)}
-          onClear={() => clearLog(countPopup.habit.id, countPopup.date)}
+          onClear={() => clearLog(countPopup.habit.id, countPopup.date, countPopup.habit.name)}
           onClose={() => setCountPopup(null)}
         />
       )}
 
       <UndoToast toasts={toasts} onUndo={handleUndo} onDismiss={handleDismiss} />
+      <confirm.Host />
     </div>
   );
 }
@@ -1147,7 +1166,7 @@ function LongPressMenu({ onEdit, onDelete, onAddNote, onRemind, onClose }) {
   );
 }
 
-function ReorderModal({ habits, onSave, onToggleActive, onClose }) {
+function ReorderModal({ habits, onSave, onToggleActive, onDelete, onClose }) {
   // Track order locally; pull live `active` state from the latest `habits` prop.
   const [order, setOrder] = useState(() => habits.map((h) => h.id));
   const byId = useMemo(() => { const m = {}; habits.forEach((h) => (m[h.id] = h)); return m; }, [habits]);
@@ -1168,7 +1187,7 @@ function ReorderModal({ habits, onSave, onToggleActive, onClose }) {
           Edit Habits
           <button onClick={onClose} style={S.closeBtn}><X size={16} /></button>
         </div>
-        <p style={{ fontSize: 12, color: "var(--text-3)", margin: "0 0 10px", flexShrink: 0 }}>Reorder with the arrows. Toggle a habit off to hide it from your views (its history is kept).</p>
+        <p style={{ fontSize: 12, color: "var(--text-3)", margin: "0 0 10px", flexShrink: 0 }}>Reorder with the arrows, toggle a habit off to hide it (its history is kept), or delete it for good.</p>
         <div style={{ display: "flex", flexDirection: "column", gap: 6, overflowY: "auto", minHeight: 0 }}>
           {items.map((h, i) => {
             const c = PILLARS[h.pillar]?.dot || "#9A968C";
@@ -1190,6 +1209,12 @@ function ReorderModal({ habits, onSave, onToggleActive, onClose }) {
                 <button
                   onClick={() => move(i, 1)} disabled={i === items.length - 1}
                   style={{ ...S.navBtn, width: 28, height: 28, opacity: i === items.length - 1 ? 0.3 : 1, fontSize: 14 }}>↓</button>
+                <button
+                  onClick={() => onDelete(h.id, h.name)}
+                  title="Delete habit"
+                  style={{ ...S.navBtn, width: 28, height: 28, color: "#C2536B", borderColor: "#C2536B" }}>
+                  <X size={14} />
+                </button>
               </div>
             );
           })}
