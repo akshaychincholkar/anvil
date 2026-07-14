@@ -8,14 +8,12 @@ export default {
     "Every book, video, or article you log moves through four gated stages — Data → " +
     "Information → Knowledge → Wisdom — and you can't skip ahead until you've done the " +
     "work of each one.",
-  screenshot: "/help/skills/01-add-skill.png",
   howTo: [
     {
       heading: "Add a skill",
       body:
         "Click Add skill, give it a title, pick a source type (Book, Video, or Article) " +
         "and a pillar, and optionally attach a link. It starts at the first stage: Data.",
-      screenshot: "/help/skills/01-add-skill.png",
     },
     {
       heading: "Data — \"What did you read/watch?\"",
@@ -33,7 +31,6 @@ export default {
     {
       heading: "Knowledge — \"How will this specifically improve your life?\"",
       body: "Get concrete about the application, not the abstract idea.",
-      screenshot: "/help/skills/02-stages.png",
     },
     {
       heading: "Wisdom — \"How have you implemented it?\"",

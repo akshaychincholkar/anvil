@@ -8,7 +8,6 @@ export default {
     "restaurants to try, places to visit — not obligations, just things that sound fun. " +
     "Each list moves items through Want to → Enjoying → Satisfied, so anticipation has " +
     "somewhere to live and completion gets its own moment.",
-  screenshot: "/help/delight/01-new-list.png",
   howTo: [
     {
       heading: "Create a list",
@@ -16,7 +15,6 @@ export default {
         "Click New list, name it (e.g. \"Restaurants to try\"), and define up to 6 custom " +
         "columns of your choosing — Text, Number, or Link type (e.g. \"Cuisine,\" " +
         "\"Price,\" \"Website\").",
-      screenshot: "/help/delight/01-new-list.png",
     },
     {
       heading: "Add items",
@@ -30,7 +28,6 @@ export default {
       body:
         "Move a card from Want to → Enjoying → Satisfied as you go, or reorder within a " +
         "lane by priority.",
-      screenshot: "/help/delight/02-kanban-board.png",
     },
     {
       heading: "Close the loop when you finish",

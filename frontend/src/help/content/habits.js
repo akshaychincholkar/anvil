@@ -8,7 +8,6 @@ export default {
     "Every habit you track shows up as a row of circles across the week — tap a circle " +
     "to mark it done. Over weeks, the pattern of filled and empty circles is the story " +
     "of who you're becoming.",
-  screenshot: "/help/habits/01-weekly-grid.png",
   howTo: [
     {
       heading: "Add a habit",
@@ -21,7 +20,6 @@ export default {
         "Minimum — do it at least N times per day/week/month/year (e.g. \"Drink water — at least 8x/day\"). Tap repeatedly to log each count; the circle fills once you hit the target.",
         "Maximum — a cap you're trying to stay under (e.g. \"Screen time — no more than 3x/day\"). Going over target flags the day instead of rewarding it — this type is for breaking habits, not building them.",
       ],
-      screenshot: "/help/habits/02-add-habit.png",
     },
     {
       heading: "Log your day",
@@ -44,7 +42,6 @@ export default {
         "list's top bar shows Today / Week / Month completion rings across all habits " +
         "combined, plus a 3-day comparison bar (today vs. yesterday vs. day before) so " +
         "you can see at a glance whether you're trending up or sliding.",
-      screenshot: "/help/habits/03-streaks-progress.png",
     },
     {
       heading: "Start-of-day setting",

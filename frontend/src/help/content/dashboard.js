@@ -9,7 +9,6 @@ export default {
     "edit anything itself — every card and tile is clickable and simply jumps you to " +
     "the section it summarizes. It exists so \"how am I doing today?\" has a one-glance " +
     "answer instead of a seven-tab tour.",
-  screenshot: "/help/dashboard/01-stat-tiles.png",
   howTo: [
     {
       heading: "Scan the top stat tiles first",
@@ -17,7 +16,6 @@ export default {
         "Habits done (X/Y), Grove (today's focus minutes + tree count), Spent today, " +
         "and Rewards pending give you the four numbers most worth knowing before you " +
         "open anything else.",
-      screenshot: "/help/dashboard/01-stat-tiles.png",
     },
     {
       heading: "Check the Habits and Expenses cards",
@@ -27,7 +25,6 @@ export default {
         "comparison and a category donut for the current billing cycle — the same " +
         "numbers you'd find on the Expenses screen, just condensed. Tap either to jump " +
         "straight into that screen.",
-      screenshot: "/help/dashboard/02-habits-expenses-cards.png",
     },
     {
       heading: "Check the remaining section cards",
@@ -41,7 +38,6 @@ export default {
         "today; Journal shows whether you've journaled today plus your mood emoji if " +
         "you have; Spiritual shows total chapters read all-time, chapters read today, " +
         "and a chip row of all scriptures with their counts.",
-      screenshot: "/help/dashboard/03-remaining-cards.png",
     },
     {
       heading: "Glance at the mini-card grid",

@@ -9,7 +9,6 @@ export default {
     "what's left — plus a financial-health score, growth forecasts, and calculators for " +
     "the two decisions that shape most people's money over decades — how much to invest, " +
     "and how to handle a loan.",
-  screenshot: "/help/finance/01-overview-summary.png",
   howTo: [
     {
       heading: "Start on the Overview tab",
@@ -18,7 +17,6 @@ export default {
         "four summary cards: Income, Expenses, Invested, and Remaining (income minus " +
         "expenses minus investments). Remaining also shows \"≈ X/day, N days left,\" " +
         "dividing what's left by the days remaining in your current billing cycle.",
-      screenshot: "/help/finance/01-overview-summary.png",
     },
     {
       heading: "Check Assets & investments and your Financial health score",
@@ -32,7 +30,6 @@ export default {
         "adds ₹W).\" The Financial health card scores 0–100 (50 + savings rate × 100) and " +
         "labels you Excellent, Healthy, Okay, Tight, or Overspending with a colored gauge " +
         "bar and a tip.",
-      screenshot: "/help/finance/02-growth-health.png",
     },
     {
       heading: "Log income and manage fixed items on the Money tab",
@@ -45,7 +42,6 @@ export default {
         "as your commitments change. Investments (Stocks, Mutual Fund, SIP, Fixed Deposit, " +
         "Gold, Real Estate, PPF-EPF, Crypto, Other) and full transaction History — grouped " +
         "by date, editable/deletable inline with an undo toast — live here too.",
-      screenshot: "/help/finance/03-money-tab.png",
     },
     {
       heading: "Run the numbers on the Calculators tab",
@@ -56,7 +52,6 @@ export default {
         "interest rate, and tenure, with an optional one-time or monthly prepayment and a " +
         "strategy of reduce-tenure or reduce-EMI — it shows your new EMI, interest saved, " +
         "and months saved.",
-      screenshot: "/help/finance/04-calculators.png",
     },
   ],
   why:

@@ -1,8 +1,4 @@
-Drop Habits screenshots here, named to match docs/help/habits.md:
-  01-weekly-grid.png
-  02-add-habit.png
-  03-streaks-progress.png
-
-These are served directly by the frontend (referenced as /help/habits/<file>
-in frontend/src/help/content/habits.js). See docs/help/README.md for the
-full convention, including the docs/help/screenshots/ reviewer copy.
+Drop screenshots here named just by number: 01.jpg, 02.png, 03.jpeg, etc.
+(jpg/jpeg/png/webp all work). No need to match filenames to anything in
+the code — the Help modal shows every numbered image it finds here, in
+order, automatically. Rebuild (npm run build) and redeploy to see them.

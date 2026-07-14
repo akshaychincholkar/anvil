@@ -8,7 +8,6 @@ export default {
     "and visualization, played as background audio. It has no timer, no daily " +
     "requirement, and no completion checkbox — it's simply two shelves of audio you built " +
     "yourself, there when you want them.",
-  screenshot: "/help/mindscape/01-categories.png",
   howTo: [
     {
       heading: "Browse the two categories",
@@ -16,7 +15,6 @@ export default {
         "Meditation Hub and Visualization are each a list of tracks you've added — " +
         "there's no built-in content, and no pressure to fill either one out; it grows " +
         "only as you add things you actually want to come back to.",
-      screenshot: "/help/mindscape/01-categories.png",
     },
     {
       heading: "Add a track",
@@ -24,7 +22,6 @@ export default {
         "Paste a YouTube link — the video ID is extracted automatically for audio-only " +
         "playback — then give it a required Title and a required cover image (uploaded, " +
         "auto-compressed so the library stays light).",
-      screenshot: "/help/mindscape/02-add-track.png",
     },
     {
       heading: "Play it",
@@ -32,7 +29,6 @@ export default {
         "Click a track's cover to start it through a hidden YouTube iframe — audio only, " +
         "autoplaying, with no visible video or player controls cluttering the screen. The " +
         "active card shows a \"Playing\" badge; click the cover again to pause.",
-      screenshot: "/help/mindscape/03-playing.png",
     },
     {
       heading: "Know what counts toward Rewards",

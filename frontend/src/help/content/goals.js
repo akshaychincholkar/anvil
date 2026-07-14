@@ -8,7 +8,6 @@ export default {
     "Yearly goals cascade into Quarterly, Monthly, and Weekly ones, all laid out on a " +
     "Gantt chart so you can trace a straight line from \"what I want this year\" to " +
     "\"what I'm doing this week.\"",
-  screenshot: "/help/goals/01-add-goal.png",
   howTo: [
     {
       heading: "Add a goal",
@@ -16,7 +15,6 @@ export default {
         "Click Add new goal, pick a pillar (Financial, Academic, Relationship, Health, " +
         "Spiritual), a horizon (Yearly, Quarterly, Monthly, or Weekly), and the specific " +
         "period it covers. Yearly goals can even span multiple calendar years.",
-      screenshot: "/help/goals/01-add-goal.png",
     },
     {
       heading: "Break it into sub-goals",
@@ -33,7 +31,6 @@ export default {
         "default (toggle them on with the eye icon) so the chart isn't overwhelming; " +
         "Monthly and Weekly bars show automatically since those are what you act on day " +
         "to day.",
-      screenshot: "/help/goals/02-gantt-view.png",
     },
     {
       heading: "Drag to reschedule, resize to extend",

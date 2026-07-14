@@ -9,7 +9,6 @@ export default {
     "optional reward that gets \"banked\" once you hit the target. Unlike Habits, it isn't " +
     "about daily repetition; it's about a single number moving toward a finish line over " +
     "days or weeks.",
-  screenshot: "/help/challenges/02-challenge-card.png",
   howTo: [
     {
       heading: "Create a challenge",
@@ -19,7 +18,6 @@ export default {
         "label, e.g. \"New headphones\") and its Reward cost, a Comment, and check Allow " +
         "negative progress if you're tracking something that can go backward — a running " +
         "trading loss, for example, instead of only ever accumulating upward.",
-      screenshot: "/help/challenges/01-new-challenge.png",
     },
     {
       heading: "Read a challenge card",
@@ -27,7 +25,6 @@ export default {
         "Each card shows the name, comment, a status badge, a progress bar " +
         "(completed/target, capped at 100%), and chips for Remaining X, the end date, the " +
         "reward label/cost, and \"± negative allowed\" if that option is on.",
-      screenshot: "/help/challenges/02-challenge-card.png",
     },
     {
       heading: "Update progress",
@@ -36,7 +33,6 @@ export default {
         "(overwrite). Negative totals are blocked unless the challenge has \"allow negative " +
         "progress\" enabled — for those, the bar renders red and grows from zero with a " +
         "down-trend icon instead of the normal fill.",
-      screenshot: "/help/challenges/03-update-progress.png",
     },
     {
       heading: "Edit or delete",
@@ -61,7 +57,6 @@ export default {
         "The summary row shows an Active count, Completed count, Missed count, and total " +
         "Reward earned across every challenge. The Dashboard also shows up to 3 active " +
         "challenges with mini progress bars.",
-      screenshot: "/help/challenges/04-summary-dashboard.png",
     },
   ],
   why:

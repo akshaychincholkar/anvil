@@ -62,9 +62,10 @@ function HelpModal({ id, onClose }) {
             <h2 style={S.title}>{content.title}</h2>
             <p style={S.tagline}>{content.tagline}</p>
 
+            <Gallery id={id} />
+
             <Section label="What it is">
               <p style={S.p}>{content.what}</p>
-              <Shot src={content.screenshot} />
             </Section>
 
             <Section label="How to use it">
@@ -80,7 +81,6 @@ function HelpModal({ id, onClose }) {
                       {step.list.map((li, j) => <li key={j} style={S.li}>{li}</li>)}
                     </ul>
                   )}
-                  <Shot src={step.screenshot} />
                 </div>
               ))}
             </Section>
@@ -106,12 +106,50 @@ function Section({ label, children }) {
   );
 }
 
-// Screenshots are optional — if the file hasn't been captured yet, the
-// broken image simply disappears instead of showing a broken-image icon.
-function Shot({ src }) {
-  const [broken, setBroken] = useState(false);
-  if (!src || broken) return null;
-  return <img src={src} alt="" style={S.shot} onError={() => setBroken(true)} />;
+// Drop-and-deploy screenshots: just save numbered files (01.jpg, 02.png, …)
+// into frontend/public/help/<id>/ — no filename coordination with the text
+// content needed. This probes 01..MAX_SHOTS against a few common extensions
+// and renders whichever numbers actually exist, in order, on top of the
+// modal — a section with no images yet renders no gallery at all.
+const EXTS = ["jpg", "jpeg", "png", "webp"];
+const MAX_SHOTS = 12;
+
+function Gallery({ id }) {
+  const [found, setFound] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setFound([]);
+    Promise.all(
+      Array.from({ length: MAX_SHOTS }, (_, i) => {
+        const n = String(i + 1).padStart(2, "0");
+        return Promise.any(
+          EXTS.map(
+            (ext) =>
+              new Promise((resolve, reject) => {
+                const src = `/help/${id}/${n}.${ext}`;
+                const img = new Image();
+                img.onload = () => resolve(src);
+                img.onerror = reject;
+                img.src = src;
+              })
+          )
+        ).catch(() => null);
+      })
+    ).then((results) => {
+      if (!cancelled) setFound(results.filter(Boolean));
+    });
+    return () => { cancelled = true; };
+  }, [id]);
+
+  if (found.length === 0) return null;
+  return (
+    <div style={S.gallery}>
+      {found.map((src) => (
+        <img key={src} src={src} alt="" style={S.shot} />
+      ))}
+    </div>
+  );
 }
 
 const S = {
@@ -154,8 +192,9 @@ const S = {
   stepHeading: { fontSize: 14, fontWeight: 700, color: "var(--text)" },
   list: { margin: "0 0 8px", paddingLeft: 20 },
   li: { fontSize: 13.5, lineHeight: 1.6, color: "var(--text)", marginBottom: 4 },
+  gallery: { display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 },
   shot: {
     width: "100%", borderRadius: 8, border: "1px solid var(--border)", display: "block",
-    margin: "8px 0 4px", boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
+    boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
   },
 };

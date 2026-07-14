@@ -8,7 +8,6 @@ export default {
     "running totals, a daily budget line, and month-over-month comparison. It doesn't " +
     "manage your income or investments — it exists purely to answer one question " +
     "honestly, every day: where did the money actually go?",
-  screenshot: "/help/expenses/01-calendar.png",
   howTo: [
     {
       heading: "Pick a day",
@@ -17,7 +16,6 @@ export default {
         "you've set, so a cycle that runs the 5th-to-5th shows up correctly instead of " +
         "splitting across calendar months. Click any day to select it; days with spend " +
         "already logged show a dot.",
-      screenshot: "/help/expenses/01-calendar.png",
     },
     {
       heading: "Log a spend",
@@ -26,7 +24,6 @@ export default {
         "expense modal — Amount is required, Note is optional. The day's transactions " +
         "list below it, and every row is editable or deletable in place (deletes show " +
         "an undo toast, so a stray tap isn't permanent).",
-      screenshot: "/help/expenses/02-add-expense.png",
     },
     {
       heading: "Read the Total spent card",
@@ -47,7 +44,6 @@ export default {
         "rows are clickable and multi-select — pick one or several categories to drill " +
         "down into the matching transactions, which stay editable/deletable right there " +
         "in the drill-down list.",
-      screenshot: "/help/expenses/03-category-donut.png",
     },
     {
       heading: "Customize categories",
@@ -67,7 +63,6 @@ export default {
         "comparison with its % change badge — red for up, green for down, since less " +
         "spending is the good direction here. A category-split donut and an editable " +
         "transaction list follow for whichever cycle/filter you've selected.",
-      screenshot: "/help/expenses/04-monthly-trend.png",
     },
   ],
   why:

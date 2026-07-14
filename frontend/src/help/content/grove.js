@@ -9,7 +9,6 @@ export default {
     "withers instead. Over time the forest becomes a literal, visual record of the " +
     "hours you actually sat still and focused — and a separate Insights view charts " +
     "that history so the pattern is never just a vague feeling.",
-  screenshot: "/help/grove/01-start-session.png",
   howTo: [
     {
       heading: "Pick a duration and (optionally) a label",
@@ -18,7 +17,6 @@ export default {
         "length from 1 to 600 minutes. You can also fill in \"What are you focusing " +
         "on?\" so the session is tied to something specific instead of just a block " +
         "of time.",
-      screenshot: "/help/grove/01-start-session.png",
     },
     {
       heading: "Choose a tree species",
@@ -35,7 +33,6 @@ export default {
         "Tapping Plant tree starts the countdown — a ring fills and the tree SVG " +
         "visibly grows as time passes, so progress is always visible at a glance, not " +
         "just a number ticking down.",
-      screenshot: "/help/grove/02-growing-tree.png",
     },
     {
       heading: "Decide how strict to be with Deep Focus",
@@ -53,7 +50,6 @@ export default {
         "days with at least one completed session), and success rate. Completed " +
         "sessions land in the forest list below, grouped by day — double-click or tap " +
         "a tree there if you ever want to delete it.",
-      screenshot: "/help/grove/03-forest-stats.png",
     },
     {
       heading: "Open Grove Insights",
@@ -63,7 +59,6 @@ export default {
         "chart (minutes per hour of day), a \"Pillar distribution\" donut, and a " +
         "\"Focus trend\" that compares the current period to the previous one with a " +
         "% change badge.",
-      screenshot: "/help/grove/04-insights.png",
     },
   ],
   why:

@@ -8,7 +8,6 @@ export default {
     "you've learned, using fixed, user-defined day intervals rather than an adaptive " +
     "algorithm like Anki's SM-2. There's no difficulty rating and no score — just a " +
     "simple plan of when to look at something again, and whether you did.",
-  screenshot: "/help/revision/02-due-today.png",
   howTo: [
     {
       heading: "Add a topic",
@@ -18,7 +17,6 @@ export default {
         "and Intervals — comma-separated days, preset to \"1,3,7,15,30.\" Anvil " +
         "creates one review per interval, due on learned_date + N days, numbered " +
         "Stage 1, 2, 3…",
-      screenshot: "/help/revision/01-add-topic.png",
     },
     {
       heading: "Work through Due Today",
@@ -27,7 +25,6 @@ export default {
         "pillar-colored border, the topic name, a \"Review X/Y\" stage badge, and a " +
         "checkbox to mark it done. Anything overdue shows \"missed · {date}\" but " +
         "stays fully actionable — it's a label, not an automatic failure.",
-      screenshot: "/help/revision/02-due-today.png",
     },
     {
       heading: "Use the stage dots on any active topic",
@@ -36,7 +33,6 @@ export default {
         "dot, not just the currently-due one, to toggle it done or undone directly. " +
         "The card also shows a running \"{done}/{total} done\" count and \"Learned " +
         "{date}.\"",
-      screenshot: "/help/revision/03-stage-dots.png",
     },
     {
       heading: "Browse the review calendar",
@@ -62,7 +58,6 @@ export default {
         "collapsible Cemented section with a trophy icon, a count badge, and " +
         "reduced-opacity cards, so your active list stays focused on what still needs " +
         "review.",
-      screenshot: "/help/revision/04-cemented.png",
     },
     {
       heading: "Edit or delete a topic",

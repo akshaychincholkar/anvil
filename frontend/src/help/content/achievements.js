@@ -9,7 +9,6 @@ export default {
     "points-and-rewards system — it's a deliberate record of the things you've " +
     "actually accomplished, so the year doesn't blur into an undifferentiated memory " +
     "of just getting by.",
-  screenshot: "/help/achievements/02-timeline.png",
   howTo: [
     {
       heading: "Add an achievement",
@@ -19,7 +18,6 @@ export default {
         "Health / Spiritual — color-coded on the timeline), a Reward — an optional " +
         "monetary amount described as a gesture of appreciation, not a points system " +
         "— a Photo (with a pan/zoom cropper to frame it), and a Note.",
-      screenshot: "/help/achievements/01-add-achievement.png",
     },
     {
       heading: "Read the timeline",
@@ -28,7 +26,6 @@ export default {
         "on mobile, grouped under year-divider chips with the newest achievement at " +
         "the top. Each card carries its pillar color, photo (if you added one), and " +
         "reward amount (if you set one).",
-      screenshot: "/help/achievements/02-timeline.png",
     },
     {
       heading: "Edit or delete a card",
@@ -36,7 +33,6 @@ export default {
         "Every card has a pencil icon to edit it in place and an X to delete it — " +
         "deletes are soft, with an undo toast, so a mis-tap doesn't erase a real " +
         "memory.",
-      screenshot: "/help/achievements/03-edit-delete.png",
     },
     {
       heading: "Check the running total",

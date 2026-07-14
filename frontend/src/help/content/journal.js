@@ -8,7 +8,6 @@ export default {
     "reflection prompts, plus a monthly mood calendar underneath. It isn't a " +
     "free-form diary — the structure is the point, so a two-minute entry still " +
     "captures the day honestly instead of turning into a blank page you avoid.",
-  screenshot: "/help/journal/02-reflection-sections.png",
   howTo: [
     {
       heading: "Set today's mood",
@@ -16,7 +15,6 @@ export default {
         "Pick one of five — Rough, Low, Okay, Good, or Great — each with its own " +
         "emoji. Only one mood per day, and only for today: past days are read-only, " +
         "so you can't quietly rewrite how a day actually felt after the fact.",
-      screenshot: "/help/journal/01-mood-picker.png",
     },
     {
       heading: "Fill in the five reflection sections",
@@ -29,7 +27,6 @@ export default {
         "Letting go of — \"Offload what's draining\"",
         "Tomorrow's one thing — \"A single priority\"",
       ],
-      screenshot: "/help/journal/02-reflection-sections.png",
     },
     {
       heading: "Browse past entries from the monthly calendar",
@@ -38,7 +35,6 @@ export default {
         "entry, clearly marked \"Viewing {date} · past entries are read-only.\" " +
         "Future days are disabled, and a Back to Today link returns you to the live, " +
         "editable entry.",
-      screenshot: "/help/journal/03-mood-calendar.png",
     },
     {
       heading: "Watch your streak",

@@ -9,7 +9,6 @@ export default {
     "It's less a to-do list than a repetition tool: the same affirmation, written by " +
     "your own hand, over and over, until it either comes true or you stop believing it " +
     "needs to.",
-  screenshot: "/help/golden-book/01-create-dream.png",
   howTo: [
     {
       heading: "Create a dream",
@@ -18,7 +17,6 @@ export default {
         "optionally attach a photo. Each dream tracks its own streak (days), total " +
         "entry count, created date, achieved status, and, once achieved, " +
         "days_to_manifest.",
-      screenshot: "/help/golden-book/01-create-dream.png",
     },
     {
       heading: "Write in Normal mode (the default)",
@@ -36,7 +34,6 @@ export default {
         "and drag-drop are blocked. An Undo button removes the last logged write if you " +
         "make a mistake, and you can turn on optional browser-notification reminders " +
         "per window.",
-      screenshot: "/help/golden-book/02-369-mode.png",
     },
     {
       heading: "Watch day_complete and your streak",
@@ -46,7 +43,6 @@ export default {
         "tracks current_streak and best_streak in days; if the dream has a min_streak " +
         "threshold set, you'll see \"Day N of min_streak minimum\" until you clear it, " +
         "then \"✓ minimum met — keep going until it manifests.\"",
-      screenshot: "/help/golden-book/03-streak-progress.png",
     },
     {
       heading: "Turn on Soft tunes if you want ambient audio while you write",

@@ -24,38 +24,47 @@ docs/help/
   README.md                 ← this file — conventions, not shown in-app
   habits.md                 ← content for the Habits section
   <section>.md              ← one file per screen, same pattern
-  screenshots/
-    habits/                 ← screenshots referenced by habits.md
-      01-weekly-grid.png
-      02-log-count.png
-    <section>/               ← one subfolder per screen, matching the .md name
+
+frontend/public/help/
+  habits/01.jpg              ← screenshots actually served to the app
+  habits/02.png
+  <section>/01.jpg …
 ```
 
-**Naming rule:** the markdown file's basename (`habits.md`) must match its
-screenshot subfolder (`screenshots/habits/`) and the `id` passed to `<HelpButton>`
-in the screen's JSX (e.g. `<HelpButton id="habits" />`). Keep all three in sync
-when adding a new section.
+## Adding screenshots — the only part you'll do repeatedly
 
-## Adding help for a new section
+This is deliberately dead simple, because screenshots get added from a phone,
+after the fact, by drag-and-drop — not by a developer coordinating filenames
+with code:
+
+1. Take a screenshot on any device.
+2. Drop it into `frontend/public/help/<section>/`, named just `01.jpg` (or
+   `.png`/`.jpeg`/`.webp`) — `02.jpg`, `03.jpg`, etc. for more than one.
+   **The number is the only thing that matters.** No need to match a step,
+   a heading, or any text in the `.js` file — the Help modal shows every
+   numbered image it finds for that section, in order, above the text.
+3. Rebuild and redeploy (`npm run build` in `frontend/`, then restart the
+   backend so it serves the fresh `dist/`). That's it — no code change.
+
+Section ids (the folder name under `frontend/public/help/`) are listed in the
+table below. Use `docs/help/screenshots/<section>/` as an optional mirror for
+reviewers browsing the docs repo on GitHub — it isn't served by the app.
+
+## Adding a whole new section (text + wiring)
 
 1. Create `docs/help/<section>.md` following the structure in `habits.md`
-   (What / How to use / Why it matters — see that file for the exact headings
-   the in-app renderer expects).
-2. Create `docs/help/screenshots/<section>/` and drop numbered PNGs/JPGs in it
-   (`01-*.png`, `02-*.png`, …) as you capture them. Screenshots are optional at
-   first — ship the text, add images later — but keep the numbering so the
-   order in the doc and the order in the folder match.
-3. Copy the markdown's prose into `frontend/src/help/content/<section>.js` as a
-   plain JS object (title, intro, steps, why) — the in-app `HelpModal` reads
-   from that JS file, not the markdown directly, since the frontend doesn't
-   ship a markdown parser. **The `.md` file is the authored/reviewed source;
-   the `.js` file is its in-app copy.** Keep them word-for-word in sync.
-4. If you have screenshots, copy them into
-   `frontend/public/help/<section>/` (this is what actually gets served —
-   `docs/help/screenshots/` is the documentation-repo copy for reviewers
-   browsing GitHub) and reference them by filename in the `.js` entry.
-5. Add `<HelpButton id="<section>" />` next to the screen's `<h1>` title, same
-   placement as `HabitTracker.jsx`.
+   (What / How to use / Why it matters).
+2. Copy the markdown's prose into `frontend/src/help/content/<section>.js` as
+   a plain JS object: `{ title, tagline, what, howTo: [{heading, body, list?}], why }`
+   — no `screenshot` field needed anymore, images are auto-discovered (see
+   above). **The `.md` file is the authored/reviewed source; the `.js` file
+   is its in-app copy.** Keep them in sync.
+3. Register it in `frontend/src/components/HelpButton.jsx`'s `REGISTRY` map:
+   `"<section>": () => import("../help/content/<section>.js")`.
+4. Add `<HelpButton id="<section>" />` next to the screen's `<h1>` title,
+   same placement as `HabitTracker.jsx`.
+5. Create `frontend/public/help/<section>/` (can be empty until screenshots
+   arrive) and, optionally, `docs/help/screenshots/<section>/` to mirror it.
 
 ## Sections covered so far
 
@@ -93,8 +102,9 @@ Update this table whenever a section's screenshots land or its content changes.
 
 ## Screenshot capture tips
 
-- Crop to just the relevant card/panel, not the whole browser window.
-- Use the Sandstone (default) theme for consistency across screenshots.
-- PNG, ~1200px wide is plenty — these render inside a modal, not full-bleed.
+- Crop to just the relevant card/panel where possible, not the whole screen.
+- Any resolution works — the modal scales images to fit its width.
 - Redact or use placeholder data for anything personal (real expense amounts,
   journal text, etc.) before saving the screenshot into this repo.
+- Up to 12 numbered images per section are picked up (`01`–`12`); that's far
+  more than any section needs, so don't worry about running out of slots.

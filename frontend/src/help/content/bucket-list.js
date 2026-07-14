@@ -7,14 +7,12 @@ export default {
     "The Bucket List is a wishlist with a price tag on it. Every wish you add has a name " +
     "and a cost — not a vague \"someday I'd like to,\" but a number you can actually work " +
     "toward, funded straight out of the reward money you earn elsewhere in Anvil.",
-  screenshot: "/help/bucket-list/01-new-wish.png",
   howTo: [
     {
       heading: "Add a wish",
       body:
         "Click New wish and give it a name (required), a cost, and optionally a link (to " +
         "the exact product/experience) and a note.",
-      screenshot: "/help/bucket-list/01-new-wish.png",
     },
     {
       heading: "Reorder by priority",
@@ -28,7 +26,6 @@ export default {
         "Tap the Fulfilled pill once you've actually gotten or done the thing — it stamps " +
         "today's date (\"Fulfilled · [date]\") and moves it out of your active wishlist. " +
         "Tap Undo if you tapped it by mistake.",
-      screenshot: "/help/bucket-list/02-fulfilled.png",
     },
     {
       heading: "Or let Rewards pay for it",

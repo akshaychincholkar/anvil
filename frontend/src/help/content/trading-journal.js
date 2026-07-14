@@ -9,7 +9,6 @@ export default {
     "trading discipline before a bad trade ever gets placed. It isn't just a record of " +
     "trades after the fact — it's built to sit between you and your worst impulses in the " +
     "moment you're about to act on them.",
-  screenshot: "/help/trading-journal/01-trade-entry.png",
   howTo: [
     {
       heading: "Open a trade",
@@ -20,7 +19,6 @@ export default {
         "note. A live P/L preview updates as you type: \"If target hit\" is |target − " +
         "entry| × qty, \"If SL hit\" is −|SL − entry| × qty, so you see your real " +
         "risk:reward before you commit.",
-      screenshot: "/help/trading-journal/01-trade-entry.png",
     },
     {
       heading: "Know the validation rules",
@@ -32,7 +30,6 @@ export default {
         "capital, or a per-kind diversification cap (max position value = capital ÷ N, " +
         "max N open trades of that kind) — a trade that breaks one of them won't go " +
         "through.",
-      screenshot: "/help/trading-journal/02-discipline-rules.png",
     },
     {
       heading: "Book a trade when you exit it",
@@ -42,7 +39,6 @@ export default {
         "Intraday trades must be booked the same day they were opened — square off same " +
         "day, no exceptions — while Swing and FnO booking dates are editable. Any booked " +
         "trade can be reopened later if you booked it by mistake.",
-      screenshot: "/help/trading-journal/03-booking-modal.png",
     },
     {
       heading: "Track your stats",
@@ -59,7 +55,6 @@ export default {
         "day shows its booked trades plus a Positive/Negative/No trades badge, and a " +
         "free-text daily learning box lets you record what worked or what didn't, " +
         "independent of whether you traded that day at all.",
-      screenshot: "/help/trading-journal/04-calendar-notes.png",
     },
   ],
   why:

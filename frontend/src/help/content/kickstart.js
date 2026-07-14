@@ -8,7 +8,6 @@ export default {
     "you tag by day of the week and life pillar, built for a quick daily hit of motivation " +
     "instead of an endless scroll. Add a handful of clips that actually move you, tag them, " +
     "and let the filters surface the right one on the right day.",
-  screenshot: "/help/kickstart/03-filter-grid.png",
   howTo: [
     {
       heading: "Add a video",
@@ -17,7 +16,6 @@ export default {
         "A Title is required. For YouTube clips you can optionally set a Start/End time " +
         "(m:ss) to trim it, so only that clipped range plays instead of the full video. " +
         "Instagram embeds always play in full and can't be trimmed.",
-      screenshot: "/help/kickstart/01-add-video.png",
     },
     {
       heading: "Tag it",
@@ -26,7 +24,6 @@ export default {
         "eligible to show), and optionally one or more pillars (Financial, Academic, " +
         "Relationship, Health, Spiritual) and custom tags (up to 21, which you manage " +
         "yourself).",
-      screenshot: "/help/kickstart/02-tagging.png",
     },
     {
       heading: "Filter the grid",
@@ -35,7 +32,6 @@ export default {
         "pillar, or a custom tag — to narrow the grid down to what's relevant right now. " +
         "Each thumbnail shows a play overlay and, if trimmed, a range badge like " +
         "\"0:30-1:15.\" Edit and Delete icons sit on each card.",
-      screenshot: "/help/kickstart/03-filter-grid.png",
     },
     {
       heading: "Watch",

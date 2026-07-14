@@ -8,7 +8,6 @@ export default {
     "plus any personal \"decks\" of scripture text or images you add yourself. It isn't a " +
     "habit tracker with checkboxes or completion state; it's a quiet shelf of texts you open " +
     "and read, the way you'd reach for a physical book of prayers.",
-  screenshot: "/help/spiritual/01-library-sidebar.png",
   howTo: [
     {
       heading: "Browse the library",
@@ -19,7 +18,6 @@ export default {
         "Shree Ram Stuti, and Hanuman Aarti (the last four each have an embedded YouTube " +
         "video alongside the text), plus Durga Saptashati (a 19-page swipeable image " +
         "carousel), Aigiri Nandini, Siddha Kunjika Stotram, and Jai Ambe Gauri.",
-      screenshot: "/help/spiritual/01-library-sidebar.png",
     },
     {
       heading: "Create your own deck",
@@ -28,14 +26,12 @@ export default {
         "directly into a textarea) or Images (upload multiple images — they're " +
         "auto-compressed and shown as a swipeable carousel, just like Durga Saptashati). " +
         "Decks can be deleted any time.",
-      screenshot: "/help/spiritual/02-new-deck.png",
     },
     {
       heading: "Navigate an image carousel",
       body:
         "For image-based items, use Prev/Next to move through pages; a page counter " +
         "(e.g. \"3/19\") shows where you are.",
-      screenshot: "/help/spiritual/03-carousel.png",
     },
     {
       heading: "Use edit mode to organize",

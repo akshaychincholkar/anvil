@@ -8,7 +8,6 @@ export default {
     "and app usage, which you can take out as a real cash payout or spend on a Bucket " +
     "List wish. It's the layer that turns time spent on the rest of Anvil into something " +
     "with a literal, spendable number attached to it.",
-  screenshot: "/help/worth/01-hero-card.png",
   howTo: [
     {
       heading: "Read the hero card",
@@ -16,7 +15,6 @@ export default {
         "Pending reward is earned minus already-taken. \"Take partial\" and \"Take all " +
         "pending\" both require a mandatory reason/note before they'll go through — " +
         "there's no silent withdrawal.",
-      screenshot: "/help/worth/01-hero-card.png",
     },
     {
       heading: "Toggle \"Fulfil from bucket list\"",
@@ -37,7 +35,6 @@ export default {
         "Achievement Rewards — configured in the Achievements section.",
         "Challenge Rewards — banked automatically when a challenge completes.",
       ],
-      screenshot: "/help/worth/02-reward-types.png",
     },
     {
       heading: "Track earnings over time",
@@ -49,7 +46,6 @@ export default {
         "breakdown donut (Focus/Usage/Achievement/Challenge as % of the period total). " +
         "Rate changes only apply going forward — past time keeps whatever rate was in " +
         "effect when it was earned.",
-      screenshot: "/help/worth/03-period-breakdown.png",
     },
     {
       heading: "Review the log",
