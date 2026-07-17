@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Menu, X, ChevronLeft, ChevronRight, Plus, Check, ImagePlus, Trash2, FileText, Images, Pencil, Home, ChevronUp, ChevronDown } from "lucide-react";
+import { Menu, X, ChevronLeft, ChevronRight, Plus, Check, ImagePlus, Trash2, FileText, Images, Pencil, Home, ChevronUp, ChevronDown, BookOpen, Flower2 } from "lucide-react";
 import { SPIRITUAL_ITEMS } from "./spiritual/spiritualContent.js";
+import ChantingView from "./spiritual/ChantingView.jsx";
 import { api } from "../api.js";
 import HelpButton from "../components/HelpButton.jsx";
 
@@ -68,6 +69,7 @@ export default function SpiritualScreen() {
   const [order, setOrder] = useState([]);       // saved id order
   const [defaultId, setDefaultId] = useState(null);
   const [editMode, setEditMode] = useState(false);
+  const [tab, setTab] = useState("chanting");   // "chanting" | "read" — Chanting is the default landing tab
   const appliedRef = useRef(false);
 
   const load = useCallback(async () => {
@@ -118,8 +120,8 @@ export default function SpiritualScreen() {
   const builtin = !deck ? (SPIRITUAL_ITEMS.find((x) => x.id === activeId) || (deckId == null ? SPIRITUAL_ITEMS[0] : null)) : null;
   const currentTitle = creating ? "New deck" : (deck ? deck.title : builtin?.title || "");
 
-  const pick = (id) => { setActiveId(id); setCreating(false); if (isMobile) setSidebarOpen(false); };
-  const openCreate = () => { setCreating(true); setForm({ title: "", type: "text", content: "", images: [] }); if (isMobile) setSidebarOpen(false); };
+  const pick = (id) => { setActiveId(id); setCreating(false); setTab("read"); if (isMobile) setSidebarOpen(false); };
+  const openCreate = () => { setCreating(true); setTab("read"); setForm({ title: "", type: "text", content: "", images: [] }); if (isMobile) setSidebarOpen(false); };
 
   const addImages = async (e) => {
     const files = Array.from(e.target.files || []);
@@ -207,7 +209,19 @@ export default function SpiritualScreen() {
           </button>
         )}
 
-        {creating ? (
+        <div style={S.tabs}>
+          {[["chanting", "Chanting", Flower2], ["read", "Reading", BookOpen]].map(([id, label, Icon]) => (
+            <button key={id} onClick={() => setTab(id)} style={{ ...S.tab, ...(tab === id ? S.tabOn : {}) }}>
+              <Icon size={15} /> {label}
+            </button>
+          ))}
+        </div>
+
+        {tab === "chanting" ? (
+          <div style={S.contentWrap}>
+            <ChantingView />
+          </div>
+        ) : creating ? (
           <div style={S.contentWrap}>
             <div style={S.formTitle}>Create a deck</div>
             <input placeholder="Deck title (e.g. Vishnu Sahasranamam)" value={form.title}
@@ -312,6 +326,9 @@ const S = {
   sideDivider: { fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--text-3)", padding: "14px 12px 6px", borderTop: "1px solid var(--border)", marginTop: 10 },
   newDeckBtn: { display: "flex", alignItems: "center", justifyContent: "center", gap: 6, width: "100%", border: "1px dashed var(--border)", background: "none", padding: "9px", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 600, color: "var(--text-2)", marginTop: 6 },
   main: { flex: 1, padding: "26px 22px", overflowY: "auto", minWidth: 0 },
+  tabs: { display: "flex", gap: 7, marginBottom: 18, flexWrap: "wrap", maxWidth: 760, marginLeft: "auto", marginRight: "auto" },
+  tab: { display: "flex", alignItems: "center", gap: 6, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-2)", padding: "8px 14px", borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
+  tabOn: { background: "#8268B0", color: "#fff", borderColor: "#8268B0" },
   hamburger: { display: "flex", alignItems: "center", gap: 9, border: "1px solid var(--border)", background: "var(--surface)", padding: "9px 14px", borderRadius: 9, fontSize: 13, fontWeight: 600, color: "var(--text-2)", cursor: "pointer", fontFamily: "inherit", marginBottom: 18 },
   hamburgerLabel: { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 220 },
   contentWrap: { background: "var(--surface)", borderRadius: 14, padding: "26px 28px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", maxWidth: 760, margin: "0 auto" },

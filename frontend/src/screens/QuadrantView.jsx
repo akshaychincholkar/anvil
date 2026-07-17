@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Plus, Clock, CalendarPlus, Check, X, Pencil } from "lucide-react";
+import { Plus, Clock, CalendarPlus, Check, X, Pencil, Target } from "lucide-react";
 import { api } from "../api.js";
 import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
 import UndoToast from "../components/UndoToast.jsx";
@@ -56,6 +56,7 @@ const EMPTY_DRAFT = () => ({
 export default function QuadrantView() {
   const [tasks, setTasks]         = useState([]);
   const [goals, setGoals]         = useState([]);
+  const [goalIndex, setGoalIndex] = useState({}); // id → goal (all horizons), for the task badge
   const [pillarFilter, setPillarFilter] = useState("All");
   const [goalSel, setGoalSel]     = useState(null); // selected weekly goal id, or null = all
   const [adding, setAdding]       = useState(null);
@@ -67,7 +68,10 @@ export default function QuadrantView() {
 
   useEffect(() => {
     load();
-    api.getGoals().then((gs) => setGoals(gs.filter((g) => g.horizon === "Weekly"))).catch(() => {});
+    api.getGoals().then((gs) => {
+      setGoalIndex(Object.fromEntries(gs.map((g) => [g.id, g])));
+      setGoals(gs.filter((g) => g.horizon === "Weekly"));
+    }).catch(() => {});
   }, [load]);
 
   const PILLAR_NAMES = Object.keys(PILLARS);
@@ -109,6 +113,13 @@ export default function QuadrantView() {
   };
 
   const deleteTask = (id, title) => softDelete(id, title);
+
+  // Done tasks leave the board (only active tasks are listed) and count toward
+  // their weekly goal's "X / Y tasks done" progress in the Goals section.
+  const completeTask = async (t) => {
+    await api.updateTask(t.id, { status: "done" });
+    load();
+  };
 
   const startEdit = (t) => {
     const parts = t.start_datetime ? t.start_datetime.split("T") : [];
@@ -311,9 +322,16 @@ export default function QuadrantView() {
                           {t.pillar}
                         </span>
                         <span style={S.metaPill}><Clock size={11} /> {fmt(t.time_estimate_min)}</span>
+                        {t.goal_id && goalIndex[t.goal_id] && (
+                          <span style={{ ...S.goalBadge, color: p.dot, borderColor: p.dot }}
+                            title={`Weekly goal: ${goalIndex[t.goal_id].title}`}>
+                            <Target size={10} /> {goalIndex[t.goal_id].title}
+                          </span>
+                        )}
                       </div>
                     </div>
                     <div style={S.cardActions}>
+                      <button onClick={() => completeTask(t)} onPointerDown={(e) => e.stopPropagation()} style={{ ...S.delBtn, color: "#4C9A6B" }} title="Mark done"><Check size={13} /></button>
                       <button onClick={() => startEdit(t)} onPointerDown={(e) => e.stopPropagation()} style={S.delBtn} title="Edit"><Pencil size={12} /></button>
                       <button onClick={() => deleteTask(t.id, t.title)} onPointerDown={(e) => e.stopPropagation()} style={S.delBtn}><X size={13} /></button>
                     </div>
@@ -437,6 +455,7 @@ const S = {
   eventTime: { display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#3A7CA5", fontWeight: 500, marginBottom: 5 },
   cardMeta: { display: "flex", gap: 8, flexWrap: "wrap" },
   metaPill: { display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "var(--text-2)", fontWeight: 500 },
+  goalBadge: { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10.5, fontWeight: 700, border: "1px solid", borderRadius: 10, padding: "1px 7px", maxWidth: 160, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
   cardActions: { display: "flex", flexDirection: "column", gap: 4, alignSelf: "center", flexShrink: 0 },
   delBtn: { width: 30, height: 30, borderRadius: 8, border: "none", background: "none", color: "var(--text-3)", cursor: "pointer", display: "grid", placeItems: "center" },
   addTrigger: { display: "flex", alignItems: "center", gap: 5, fontSize: 12.5, color: "var(--text-3)", background: "none", border: "1px dashed var(--border)", borderRadius: 8, padding: "8px 10px", cursor: "pointer", fontWeight: 500, marginTop: 2 },

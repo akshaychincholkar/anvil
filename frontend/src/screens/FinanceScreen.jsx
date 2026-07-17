@@ -246,10 +246,11 @@ function Overview({ txns, investments, loaded, money, cur }) {
   );
 }
 
-// Growth forecast: SIP-style projection. You keep investing a monthly amount
+// Growth forecast: standard SIP projection, monthly compounding — matches
+// what a real SIP calculator shows. You keep investing a monthly amount
 // (e.g. ₹15k/month) that steps up by a yearly % (e.g. +10% → ₹16,500/month
-// from year two), all compounding monthly at the annual rate (default 10%).
-// Every input persists. Timeline can be viewed month-wise or year-wise.
+// from year two), compounding monthly at the annual rate (default 10%).
+// Every input persists.
 function ForecastBlock({ invested, investments, money, cur }) {
   const [rate, setRate] = useState(10);
   const [monthly, setMonthly] = useState("");
@@ -285,15 +286,19 @@ function ForecastBlock({ invested, investments, money, cur }) {
   const m = Math.max(0, parseFloat(monthly) || 0);
   const sPct = Math.max(0, parseFloat(stepUp) || 0);
 
-  // Simple ANNUAL compounding, matching a standard calculator: each year you
-  // add 12× the monthly amount, then the whole pot grows by the rate. The
-  // contribution steps up by sPct% every year.
+  // Standard SIP math, monthly compounding: each month's contribution starts
+  // earning immediately at rate/12, same convention as any real SIP
+  // calculator (Groww, ET Money, etc.) — not a once-a-year lump sum. The
+  // monthly contribution steps up by sPct% at the start of each new year.
+  const i = pct / 100 / 12;
   const fv = (years) => {
-    let corpus = invested, yearly = m * 12, putIn = invested;
+    let corpus = invested, monthlyAmt = m, putIn = invested;
     for (let y = 1; y <= years; y++) {
-      corpus = (corpus + yearly) * (1 + pct / 100);
-      putIn += yearly;
-      yearly *= 1 + sPct / 100;
+      for (let mo = 0; mo < 12; mo++) {
+        corpus = corpus * (1 + i) + monthlyAmt;
+        putIn += monthlyAmt;
+      }
+      monthlyAmt *= 1 + sPct / 100;
     }
     return { value: corpus, putIn };
   };

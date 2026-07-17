@@ -483,6 +483,19 @@ def restore_goal(goal_id: int):
         _restore(conn, "goal", goal_id)
         return _goal(conn, goal_id)
 
+@app.get("/api/goals/task-progress")
+def goal_task_progress():
+    """Per-goal linked-task counts, for weekly-goal progress like '3 / 5 tasks done'."""
+    with db() as conn:
+        rows = conn.execute(f"""
+            SELECT goal_id, COUNT(*) AS total,
+                   SUM(CASE WHEN status='done' THEN 1 ELSE 0 END) AS done
+            FROM task
+            WHERE user_id={cu()} AND goal_id IS NOT NULL AND deleted_at IS NULL
+            GROUP BY goal_id
+        """).fetchall()
+        return [row_dict(r) for r in rows]
+
 
 # ── Habits (Screen 3) ─────────────────────────────────────────────────────────
 

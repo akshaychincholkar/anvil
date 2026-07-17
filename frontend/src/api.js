@@ -141,6 +141,7 @@ export const api = {
 
   // Goals
   getGoals: (pillar) => req("GET", `/goals${pillar ? `?pillar=${encodeURIComponent(pillar)}` : ""}`),
+  getGoalTaskProgress: () => req("GET", "/goals/task-progress"),
   createGoal: (data) => req("POST", "/goals", data),
   updateGoal: (id, data) => req("PUT", `/goals/${id}`, data),
   deleteGoal: (id) => req("DELETE", `/goals/${id}`),

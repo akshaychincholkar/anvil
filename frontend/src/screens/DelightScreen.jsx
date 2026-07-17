@@ -142,6 +142,9 @@ export default function DelightScreen() {
   };
 
   const commitDrop = (item, t) => {
+    // Satisfied is a one-way door — once an item lands there, it can't be
+    // dragged back to an earlier stage (only deleted, if it was a mistake).
+    if (item.status === "done" && t.status !== "done") return;
     const g = {};
     STATUSES.forEach((s) => { g[s.id] = (groups[s.id] || []).filter((it) => it.id !== item.id); });
     const arr = g[t.status] || [];
@@ -191,15 +194,16 @@ export default function DelightScreen() {
   };
 
   // ── Item add/edit ──
-  const openAddItem = (status = "todo") => setItemForm({ id: null, name: "", fields: {}, status });
-  const openEditItem = (it) => setItemForm({ id: it.id, name: it.name, fields: { ...it.fields }, status: it.status });
+  const openAddItem = (status = "todo") => setItemForm({ id: null, name: "", fields: {}, status, wasDone: false });
+  const openEditItem = (it) => setItemForm({ id: it.id, name: it.name, fields: { ...it.fields }, status: it.status, wasDone: it.status === "done" });
   const saveItem = async () => {
     const name = itemForm.name.trim();
     if (!name || !selected) return;
-    // Was this item already in Satisfied before saving?
-    const prev = itemForm.id ? (selected.items || []).find((x) => x.id === itemForm.id) : null;
-    const wasDone = prev?.status === "done";
-    const payload = { name, fields: itemForm.fields, status: itemForm.status };
+    // Satisfied is a one-way door — once an item was already Satisfied, force
+    // the saved status to stay Satisfied even if the UI guard was bypassed.
+    const status = itemForm.wasDone ? "done" : itemForm.status;
+    const wasDone = itemForm.wasDone;
+    const payload = { name, fields: itemForm.fields, status };
     let saved;
     if (itemForm.id) saved = await api.updateDelightItem(itemForm.id, payload);
     else saved = await api.createDelightItem(selected.id, payload);
@@ -449,13 +453,27 @@ export default function DelightScreen() {
 
             <label style={S.label}>Status</label>
             <div style={S.statusPick}>
-              {STATUSES.map((s) => (
-                <button key={s.id} type="button" onClick={() => setItemForm((f) => ({ ...f, status: s.id }))}
-                  style={{ ...S.statusChip, ...(itemForm.status === s.id ? { background: s.color, color: "#fff", border: `1px solid ${s.color}` } : {}) }}>
-                  {s.label}
-                </button>
-              ))}
+              {STATUSES.map((s) => {
+                // Satisfied is a one-way door: once an item is already Satisfied,
+                // it can't be moved back to an earlier stage from here either.
+                const locked = itemForm.wasDone && s.id !== "done";
+                return (
+                  <button key={s.id} type="button" disabled={locked}
+                    onClick={() => setItemForm((f) => ({ ...f, status: s.id }))}
+                    title={locked ? "Already Satisfied — can't move back to an earlier stage" : undefined}
+                    style={{
+                      ...S.statusChip,
+                      ...(itemForm.status === s.id ? { background: s.color, color: "#fff", border: `1px solid ${s.color}` } : {}),
+                      ...(locked ? { opacity: 0.4, cursor: "not-allowed" } : {}),
+                    }}>
+                    {s.label}
+                  </button>
+                );
+              })}
             </div>
+            {itemForm.wasDone && (
+              <div style={{ ...S.muted2, marginTop: 6 }}>Already Satisfied — this can't move back to an earlier stage.</div>
+            )}
 
             <div style={S.modalActions}>
               <button onClick={() => setItemForm(null)} style={S.cancelBtn}>Cancel</button>

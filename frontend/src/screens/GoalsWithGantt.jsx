@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { ChevronRight, ChevronDown, Plus, Target, X, Check, Pencil, Eye, EyeOff, PanelLeftClose, PanelLeftOpen, GripVertical, Settings, AlertTriangle } from "lucide-react";
+import { ChevronRight, ChevronDown, Plus, Target, X, Check, Pencil, Eye, EyeOff, PanelLeftClose, PanelLeftOpen, GripVertical, Settings, AlertTriangle, Telescope, GanttChart, ListTodo } from "lucide-react";
 import { api } from "../api.js";
 import { useUndoableDelete } from "../hooks/useUndoableDelete.js";
 import UndoToast from "../components/UndoToast.jsx";
@@ -171,6 +171,239 @@ const periodLabel = (g) => {
   }
 };
 
+// ── Break a Weekly goal into quadrant tasks ──────────────────────────────────
+// Inline bullet-adder (type, Enter, repeat — same pattern as Journal bullets).
+// Each line becomes a Task with goal_id set and the goal's pillar inherited.
+// New tasks land in Weekly Routing's "Schedule" quadrant as a neutral default;
+// the user assigns the real quadrant there by dragging — never auto-derived.
+function TaskBreaker({ goal, accent, onClose, onCreated }) {
+  const [text, setText] = useState("");
+  const [added, setAdded] = useState([]);
+  const busyRef = useRef(false);
+  const add = async () => {
+    const t = text.trim();
+    if (!t || busyRef.current) return;
+    busyRef.current = true;
+    try {
+      await api.createTask({ pillar: goal.pillar, title: t, quadrant: "Q2", time_estimate_min: 30, goal_id: goal.id });
+      setAdded((a) => [...a, t]);
+      setText("");
+      onCreated?.();
+    } catch { /* keep the text so nothing typed is lost */ }
+    busyRef.current = false;
+  };
+  return (
+    <div style={{ ...T.breaker, borderColor: mix(accent, 32) }} onClick={(e) => e.stopPropagation()}>
+      <div style={T.breakerHead}>
+        <span style={{ ...T.breakerTitle, color: accent }}><ListTodo size={13} /> Break into tasks</span>
+        <button onClick={onClose} style={T.breakerClose} aria-label="Close"><X size={13} /></button>
+      </div>
+      {added.map((t, i) => (
+        <div key={i} style={T.breakerItem}><span style={{ ...T.breakerDot, background: accent }} />{t}</div>
+      ))}
+      <input
+        autoFocus
+        placeholder={added.length ? "Next task — Enter adds another…" : "Task title — Enter adds it…"}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") add(); if (e.key === "Escape") onClose(); }}
+        style={T.breakerInput}
+      />
+      <div style={T.breakerHint}>Tasks appear in Weekly Routing under "Schedule" — drag each into its right quadrant there.</div>
+    </div>
+  );
+}
+
+// ── Telescope view ───────────────────────────────────────────────────────────
+// One pillar's whole hierarchy on a single page: Yearly → Quarterly → Monthly
+// → Weekly as stacked bands, no expand/collapse. Type size carries the
+// hierarchy (yearly headline down to compact weekly cards); color stays within
+// the selected pillar's hex, tinted toward the page background.
+const mix = (hex, pct) => `color-mix(in srgb, ${hex} ${pct}%, var(--bg))`;
+
+const TELE_BANDS = [
+  { horizon: "Yearly",    empty: "Nothing set for the year yet" },
+  { horizon: "Quarterly", empty: "Nothing set for the quarter yet" },
+  { horizon: "Monthly",   empty: "Nothing set for the month yet" },
+  { horizon: "Weekly",    empty: "Nothing set for the week yet" },
+];
+
+// Type scale per band — size is the hierarchy signal, not labels or numbering.
+const TELE_SCALE = {
+  Yearly:    { font: "clamp(26px, 5vw, 34px)", pad: "26px 30px", tag: 12 },
+  Quarterly: { font: 20,   pad: "16px 20px", tag: 11 },
+  Monthly:   { font: 15.5, pad: "12px 16px", tag: 10.5 },
+  Weekly:    { font: 13.5, pad: "10px 14px", tag: 10 },
+};
+
+function TelescopeView({ goals, pillar, onPickPillar, reload, taskProgress, breaking, setBreaking, onTasksChanged }) {
+  const hex = PILLARS[pillar]?.dot || "#9A968C";
+  const mine = goals.filter((g) => g.pillar === pillar);
+  const now = new Date();
+  const [addH, setAddH] = useState(null); // horizon whose inline add is open
+  const [title, setTitle] = useState("");
+  const [year, setYear] = useState(YEAR);
+  const [endYear, setEndYear] = useState(YEAR);
+  const [month, setMonth] = useState(now.getMonth());
+  const [week, setWeek] = useState(1);
+
+  const openAdd = (h) => {
+    setAddH(h); setTitle(""); setYear(YEAR); setEndYear(YEAR);
+    setMonth(h === "Quarterly" ? Math.floor(now.getMonth() / 3) * 3 : now.getMonth());
+    setWeek(Math.min(Math.max(Math.ceil(now.getDate() / 7), 1), 4));
+  };
+  const submit = async () => {
+    if (!title.trim() || !addH) return;
+    let start_date, end_date;
+    if (addH === "Yearly") {
+      const sy = Number(year), ey = Math.max(sy, Number(endYear) || sy);
+      start_date = `${sy}-01-01`; end_date = `${ey}-12-31`;
+    } else {
+      ({ start_date, end_date } = horizonDates(addH, Number(year), month, week));
+    }
+    await api.createGoal({ pillar, title: title.trim(), horizon: addH, parent_goal_id: null, start_date, end_date });
+    setAddH(null); setTitle("");
+    reload();
+  };
+
+  return (
+    <div style={T.wrap}>
+      {/* Quiet pillar selector — small pills, not the visual focus */}
+      <div style={T.pillarRow}>
+        {PILLAR_NAMES.map((name) => {
+          const on = name === pillar;
+          const c = PILLARS[name].dot;
+          return (
+            <button key={name} onClick={() => onPickPillar(name)}
+              style={{ ...T.pillarPill, ...(on ? { background: mix(c, 16), color: c, borderColor: mix(c, 45), fontWeight: 700 } : {}) }}>
+              <span style={{ width: 7, height: 7, borderRadius: "50%", background: c, display: "inline-block", flexShrink: 0 }} />
+              {name}
+            </button>
+          );
+        })}
+      </div>
+
+      {TELE_BANDS.map(({ horizon, empty }) => {
+        const items = mine.filter((g) => g.horizon === horizon).sort((a, b) => a.start_date.localeCompare(b.start_date));
+        const sc = TELE_SCALE[horizon];
+        const isYearly = horizon === "Yearly";
+        return (
+          <section key={horizon} style={{ ...T.band, borderTopColor: mix(hex, 45) }}>
+            <div style={{ ...T.bandLabel, color: hex }}>{horizon}</div>
+            <div style={{ ...T.cards, ...(isYearly ? { flexDirection: "column", alignItems: "center" } : {}) }}>
+              {items.map((g) => {
+                const prog = horizon === "Weekly" ? taskProgress[g.id] : null;
+                return (
+                  <div key={g.id} style={{
+                    ...T.card, padding: sc.pad,
+                    background: mix(hex, 7), borderColor: mix(hex, 28),
+                    ...(isYearly ? { maxWidth: 640, width: "100%", textAlign: "center", boxSizing: "border-box" } : {}),
+                  }}>
+                    <span style={{ ...T.tag, fontSize: sc.tag, color: hex, background: mix(hex, 14) }}>{periodLabel(g)}</span>
+                    <div style={{
+                      ...T.cardTitle, fontSize: sc.font,
+                      ...(isYearly ? { fontFamily: "'Fraunces',Georgia,serif", fontWeight: 700, letterSpacing: "-0.02em", lineHeight: 1.25 } : {}),
+                    }}>{g.title}</div>
+                    {horizon === "Weekly" && (
+                      <div style={T.weeklyFoot}>
+                        {prog?.total > 0 && (
+                          <span style={{ ...T.progText, color: prog.done >= prog.total ? "#4C9A6B" : "var(--text-2)" }}>
+                            {prog.done} / {prog.total} tasks done
+                          </span>
+                        )}
+                        <button onClick={() => setBreaking(breaking === g.id ? null : g.id)}
+                          style={{ ...T.breakBtn, color: hex, borderColor: mix(hex, 35) }}>
+                          <ListTodo size={12} /> Break into tasks
+                        </button>
+                      </div>
+                    )}
+                    {horizon === "Weekly" && breaking === g.id && (
+                      <TaskBreaker goal={g} accent={hex} onClose={() => setBreaking(null)} onCreated={onTasksChanged} />
+                    )}
+                  </div>
+                );
+              })}
+              {items.length === 0 && addH !== horizon && <div style={T.empty}>{empty}</div>}
+            </div>
+            {addH === horizon ? (
+              <div style={T.addRow}>
+                <input autoFocus placeholder={`New ${horizon.toLowerCase()} goal…`} value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") submit(); if (e.key === "Escape") setAddH(null); }}
+                  style={T.addInput} />
+                <select value={year} onChange={(e) => { const y = Number(e.target.value); setYear(y); if (endYear < y) setEndYear(y); }}
+                  style={T.addSelect} title={horizon === "Yearly" ? "Start year" : "Year"}>
+                  {YEAR_OPTIONS.map((y) => <option key={y} value={y}>{y}</option>)}
+                </select>
+                {horizon === "Yearly" && (
+                  <>
+                    <span style={T.toTag}>to</span>
+                    <select value={endYear} onChange={(e) => setEndYear(Number(e.target.value))} style={T.addSelect} title="End year">
+                      {YEAR_OPTIONS.filter((y) => y >= year).map((y) => <option key={y} value={y}>{y}</option>)}
+                    </select>
+                  </>
+                )}
+                {horizon === "Quarterly" && (
+                  <select value={month} onChange={(e) => setMonth(Number(e.target.value))} style={T.addSelect}>
+                    {QUARTERS.map((q) => <option key={q.startMonth} value={q.startMonth}>{q.label}</option>)}
+                  </select>
+                )}
+                {(horizon === "Monthly" || horizon === "Weekly") && (
+                  <select value={month} onChange={(e) => setMonth(Number(e.target.value))} style={T.addSelect}>
+                    {MONTHS.map((m, i) => <option key={i} value={i}>{m}</option>)}
+                  </select>
+                )}
+                {horizon === "Weekly" && (
+                  <select value={week} onChange={(e) => setWeek(Number(e.target.value))} style={T.addSelect}>
+                    {[1, 2, 3, 4].map((w) => <option key={w} value={w}>Week {w}</option>)}
+                  </select>
+                )}
+                <button onClick={submit} style={T.addSave}><Check size={14} /></button>
+                <button onClick={() => setAddH(null)} style={T.addCancel}><X size={14} /></button>
+              </div>
+            ) : (
+              <button onClick={() => openAdd(horizon)} style={{ ...T.addTrigger, color: hex }}>
+                <Plus size={13} /> Add {horizon.toLowerCase()} goal
+              </button>
+            )}
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+const T = {
+  wrap: { display: "flex", flexDirection: "column", gap: 14, maxWidth: 900, margin: "0 auto", width: "100%" },
+  pillarRow: { display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 2 },
+  pillarPill: { display: "inline-flex", alignItems: "center", gap: 6, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-2)", padding: "4px 10px", borderRadius: 14, fontSize: 11.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
+  band: { background: "var(--surface)", borderRadius: 12, borderTop: "3px solid", padding: "14px 16px 12px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
+  bandLabel: { fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 },
+  cards: { display: "flex", flexWrap: "wrap", gap: 10, justifyContent: "center" },
+  card: { border: "1px solid", borderRadius: 12, minWidth: 0, maxWidth: "100%", boxSizing: "border-box" },
+  tag: { display: "inline-block", fontWeight: 700, borderRadius: 10, padding: "2px 8px", marginBottom: 6, letterSpacing: "0.03em" },
+  cardTitle: { fontWeight: 600, lineHeight: 1.35, overflowWrap: "anywhere", color: "var(--text)" },
+  empty: { fontSize: 12.5, color: "var(--text-3)", fontStyle: "italic", padding: "8px 0", textAlign: "center", width: "100%" },
+  addTrigger: { display: "flex", alignItems: "center", gap: 5, fontSize: 12, background: "none", border: "none", cursor: "pointer", fontWeight: 700, fontFamily: "inherit", margin: "10px auto 0", padding: "4px 8px" },
+  addRow: { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 10, justifyContent: "center" },
+  addInput: { border: "1px solid var(--border)", borderRadius: 7, padding: "8px 11px", fontSize: 13, fontFamily: "inherit", outline: "none", flex: "1 1 180px", minWidth: 140 },
+  addSelect: { border: "1px solid var(--border)", borderRadius: 7, padding: "7px 8px", fontSize: 12, fontFamily: "inherit", flexShrink: 0 },
+  toTag: { fontSize: 11, fontWeight: 600, color: "var(--text-3)", flexShrink: 0 },
+  addSave: { border: "none", background: "#4C9A6B", color: "#fff", width: 30, height: 30, borderRadius: 7, cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0 },
+  addCancel: { border: "none", background: "var(--hover)", color: "var(--text-2)", width: 30, height: 30, borderRadius: 7, cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0 },
+  weeklyFoot: { display: "flex", alignItems: "center", gap: 8, marginTop: 8, flexWrap: "wrap" },
+  progText: { fontSize: 11, fontWeight: 700 },
+  breakBtn: { display: "inline-flex", alignItems: "center", gap: 4, border: "1px solid", background: "none", borderRadius: 12, padding: "3px 9px", fontSize: 10.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" },
+  breaker: { border: "1px solid", borderRadius: 10, padding: "10px 12px", marginTop: 8, background: "var(--surface)", display: "flex", flexDirection: "column", gap: 6, textAlign: "left" },
+  breakerHead: { display: "flex", alignItems: "center", justifyContent: "space-between" },
+  breakerTitle: { display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em" },
+  breakerClose: { border: "none", background: "none", color: "var(--text-3)", cursor: "pointer", padding: 2, display: "grid", placeItems: "center" },
+  breakerItem: { display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, color: "var(--text)" },
+  breakerDot: { width: 6, height: 6, borderRadius: "50%", flexShrink: 0 },
+  breakerInput: { border: "1px solid var(--border)", borderRadius: 7, padding: "7px 10px", fontSize: 12.5, fontFamily: "inherit", outline: "none", width: "100%", boxSizing: "border-box" },
+  breakerHint: { fontSize: 10.5, color: "var(--text-3)" },
+};
+
 export default function GoalsWithGantt() {
   const [goals, setGoals] = useState([]);
   const [pillar, setPillar] = useState("All");
@@ -185,6 +418,9 @@ export default function GoalsWithGantt() {
   const [draftHorizon, setDraftHorizon] = useState("Yearly"); // chosen horizon for a new top-level goal
   const [draftPillar, setDraftPillar] = useState(PILLAR_NAMES[0]); // pillar for a new top-level goal (used in All view)
   const [editing, setEditing] = useState(null); // { id, title, pillar, year, endYear, month, week, ... }
+  const [view, setView] = useState("telescope"); // 'telescope' (default) | 'gantt' (drill-down + timeline)
+  const [breaking, setBreaking] = useState(null); // weekly goal id whose break-into-tasks adder is open
+  const [taskProgress, setTaskProgress] = useState({}); // goal_id → { total, done } from linked quadrant tasks
 
   const isMobile = useIsMobile();
   const [showLabels, setShowLabels] = useState(!isMobile); // gantt left column; hidden on mobile by default
@@ -229,6 +465,13 @@ export default function GoalsWithGantt() {
     api.getGoals().then(setGoals).catch(console.error);
   }, []);
   useEffect(() => { load(); }, [load]);
+
+  const loadProgress = useCallback(() => {
+    api.getGoalTaskProgress()
+      .then((rows) => setTaskProgress(Object.fromEntries(rows.map((r) => [r.goal_id, r]))))
+      .catch(() => {});
+  }, []);
+  useEffect(() => { loadProgress(); }, [loadProgress]);
 
   const { deleteItem: softDelete, toasts, handleUndo, handleDismiss } = useUndoableDelete(
     api.deleteGoal, api.restoreGoal, load
@@ -325,6 +568,10 @@ export default function GoalsWithGantt() {
   }, [resizing, finalizeResize]);
 
   const isAll = pillar === "All";
+  // Telescope is single-pillar by design: when "All" is selected there, fall
+  // back to the first pillar that has goals (the shared pillar state still
+  // syncs both views once a specific pillar is picked).
+  const telePillar = isAll ? (PILLAR_NAMES.find((n) => goals.some((g) => g.pillar === n)) || PILLAR_NAMES[0]) : pillar;
   const p = PILLARS[pillar] || { dot: "var(--text-3)", soft: "transparent" };
   const pillarGoals = isAll ? goals : goals.filter((g) => g.pillar === pillar);
   const roots = pillarGoals.filter((g) => !g.parent_goal_id);
@@ -599,7 +846,14 @@ export default function GoalsWithGantt() {
               onPointerLeave={endHold}
               onPointerCancel={endHold}
             >{goal.title}</span>
-            <span style={S.whenSub}>{periodLabel(goal)}</span>
+            <span style={S.whenSub}>
+              {periodLabel(goal)}
+              {taskProgress[goal.id]?.total > 0 && (
+                <span style={{ color: taskProgress[goal.id].done >= taskProgress[goal.id].total ? "#4C9A6B" : "var(--text-3)", fontStyle: "normal", fontWeight: 700 }}>
+                  {" "}· {taskProgress[goal.id].done}/{taskProgress[goal.id].total} tasks done
+                </span>
+              )}
+            </span>
           </div>
 
           {isMobile ? (
@@ -613,6 +867,11 @@ export default function GoalsWithGantt() {
                     <div style={S.menuBackdrop} onClick={() => setMenuFor(null)} />
                     <div style={{ ...S.goalMenu, ...menuPos }}>
                     <button style={S.menuItem} onClick={() => { startEdit(goal); setMenuFor(null); }}><Pencil size={14} /> Edit</button>
+                    {goal.horizon === "Weekly" && (
+                      <button style={S.menuItem} onClick={() => { setBreaking(goal.id); setMenuFor(null); }}>
+                        <ListTodo size={14} /> Break into tasks
+                      </button>
+                    )}
                     {canNest && (
                       <button style={S.menuItem} onClick={() => { setOpen((o) => ({ ...o, [goal.id]: true })); startAdd(goal.id, goal); setMenuFor(null); }}>
                         <Plus size={14} /> Add sub-goal
@@ -643,6 +902,15 @@ export default function GoalsWithGantt() {
                 {isOnGantt(goal) ? <Eye size={13} /> : <EyeOff size={13} />}
               </button>
               <button onClick={() => startEdit(goal)} style={S.rowAdd} title="Edit"><Pencil size={12} /></button>
+              {goal.horizon === "Weekly" && (
+                <button
+                  onClick={() => setBreaking(breaking === goal.id ? null : goal.id)}
+                  style={{ ...S.rowAdd, color: breaking === goal.id ? (PILLARS[goal.pillar]?.dot || p.dot) : "var(--text-3)" }}
+                  title="Break into tasks"
+                >
+                  <ListTodo size={13} />
+                </button>
+              )}
               {canNest && (
                 <button
                   onClick={() => { setOpen((o) => ({ ...o, [goal.id]: true })); startAdd(goal.id, goal); }}
@@ -658,6 +926,16 @@ export default function GoalsWithGantt() {
             </>
           )}
         </div>
+        {goal.horizon === "Weekly" && breaking === goal.id && (
+          <div style={{ marginLeft: depth * 24 + 28, marginTop: 2, marginBottom: 6, maxWidth: 480 }}>
+            <TaskBreaker
+              goal={goal}
+              accent={PILLARS[goal.pillar]?.dot || "#9A968C"}
+              onClose={() => setBreaking(null)}
+              onCreated={loadProgress}
+            />
+          </div>
+        )}
         {isOpen && kids.map((k) => <Node key={k.id} goal={k} depth={depth + 1} />)}
         {isOpen && adding === goal.id && (
           <AddInline parentId={goal.id} parentGoal={goal} depth={depth + 1} />
@@ -755,11 +1033,36 @@ export default function GoalsWithGantt() {
       <div style={S.head}>
         <div style={S.eyebrow}>Anvil · Goals</div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <h1 style={S.h1}>{isAll ? "All Goals" : `${pillar} Goals`}</h1>
+          <h1 style={S.h1}>{view === "telescope" ? `${telePillar} Goals` : (isAll ? "All Goals" : `${pillar} Goals`)}</h1>
           <HelpButton id="goals" />
         </div>
       </div>
 
+      {/* Telescope (default) vs Gantt drill-down — shared pillar + goal data */}
+      <div style={S.viewToggle}>
+        <button onClick={() => setView("telescope")} style={{ ...S.viewBtn, ...(view === "telescope" ? S.viewBtnOn : {}) }}>
+          <Telescope size={15} /> Telescope
+        </button>
+        <button onClick={() => setView("gantt")} style={{ ...S.viewBtn, ...(view === "gantt" ? S.viewBtnOn : {}) }}>
+          <GanttChart size={15} /> Gantt
+        </button>
+      </div>
+
+      {view === "telescope" && (
+        <TelescopeView
+          goals={goals}
+          pillar={telePillar}
+          onPickPillar={(n) => { setPillar(n); setAdding(null); setEditing(null); }}
+          reload={load}
+          taskProgress={taskProgress}
+          breaking={breaking}
+          setBreaking={setBreaking}
+          onTasksChanged={loadProgress}
+        />
+      )}
+
+      {view === "gantt" && (
+      <>
       {/* Item 6: flex-wrap ensures mobile containment */}
       <div style={S.pillarPicker}>
         <button onClick={() => { setPillar("All"); setAdding(null); setEditing(null); }}
@@ -982,6 +1285,8 @@ export default function GoalsWithGantt() {
           </div>
         )}
       </div>
+      </>
+      )}
 
       {warning && (
         <div style={S.warnToast}>
@@ -1001,6 +1306,9 @@ const S = {
   eyebrow: { fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--text-3)", fontWeight: 600, marginBottom: 4 },
   h1: { fontSize: 28, fontWeight: 700, margin: 0, letterSpacing: "-0.02em", fontFamily: "'Fraunces',Georgia,serif" },
   dot: { width: 9, height: 9, borderRadius: "50%", display: "inline-block", flexShrink: 0 },
+  viewToggle: { display: "flex", gap: 7, marginBottom: 16 },
+  viewBtn: { display: "flex", alignItems: "center", gap: 6, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text-2)", padding: "8px 14px", borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
+  viewBtnOn: { background: "var(--accent-strong)", color: "#fff", borderColor: "var(--accent-strong)" },
   pillarPicker: { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 },
   pillarChip: { display: "flex", alignItems: "center", gap: 7, border: "1px solid var(--border)", background: "var(--surface)", padding: "7px 13px", borderRadius: 20, fontSize: 13, fontWeight: 600, color: "var(--text-2)", cursor: "pointer", fontFamily: "inherit" },
   list: { background: "var(--surface)", borderRadius: 12, padding: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.05)", overflowX: "hidden" },
