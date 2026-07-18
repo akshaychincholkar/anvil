@@ -3294,20 +3294,30 @@ def _challenge_row(r, logged_dates: set) -> dict:
     today = date.today().isoformat()
     start = r["start_date"]
     end = r["end_date"]
-    # Day-dot strip: one dot per calendar day from start_date to today (or
-    # end_date, whichever is earlier) — each dot is "logged" (you updated
-    # progress that day) or "missed" (a past day with no update). Days after
-    # today aren't rendered yet since there's nothing to mark them with.
+    # Day-dot strip: one dot per calendar day of the WHOLE challenge span,
+    # start_date through end_date (so the total dot count is fixed and visible
+    # up front, not just days elapsed so far). Each dot's state:
+    #   "logged"   — progress was updated that day
+    #   "missed"   — a past/today day with no update
+    #   "upcoming" — a future day, not yet reachable
+    # An open-ended challenge (no end_date) still only shows through today,
+    # since there's no fixed total to draw the rest of yet.
     days = []
     if start:
-        last_day = min(end, today) if end else today
+        last_day = end if end else today
         d = date.fromisoformat(start)
         last = date.fromisoformat(last_day)
         if last >= d:
             n = (last - d).days + 1
             for i in range(n):
                 ds = (d + timedelta(days=i)).isoformat()
-                days.append({"date": ds, "logged": ds in logged_dates})
+                if ds in logged_dates:
+                    state = "logged"
+                elif ds > today:
+                    state = "upcoming"
+                else:
+                    state = "missed"
+                days.append({"date": ds, "logged": ds in logged_dates, "state": state})
     days_remaining = None
     if end:
         days_remaining = max(0, (date.fromisoformat(end) - date.fromisoformat(max(start or today, today))).days + (1 if today <= end else 0))

@@ -38,27 +38,32 @@ function progressInfo(ch) {
   return { pct: Math.min(100, (done / target) * 100), negPct: 0, negative: false };
 }
 
-// Day-by-day dot strip — one dot per calendar day from start_date to today
-// (or the deadline, if it already passed). Each dot is either:
-//   • filled (accent color)  — you updated progress that day
-//   • grey                   — a day that passed with no entry (missed)
-// Same visual language as the Chanting mala beads. Days after today aren't
-// shown yet — there's nothing to mark them with until they happen.
+// Day-by-day dot strip — one dot per calendar day of the WHOLE challenge span
+// (start_date through end_date), so the total is fixed and visible up front,
+// not just how many days have elapsed. Each dot is one of:
+//   • filled (accent/green) — you updated progress that day
+//   • grey, solid           — a past/today day with no entry (missed)
+//   • grey, hollow outline  — a future day, not reachable yet
+// Same visual language as the Chanting mala beads.
 function DayDots({ ch }) {
   if (!ch.start_date || !ch.days || ch.days.length === 0) return null;
   const color = ch.status === "done" ? GREEN : ACCENT;
-  const loggedCount = ch.days.filter((d) => d.logged).length;
-  const missedCount = ch.days.length - loggedCount;
+  const loggedCount = ch.days.filter((d) => d.state === "logged").length;
+  const missedCount = ch.days.filter((d) => d.state === "missed").length;
+  const dotStyle = (d) => {
+    if (d.state === "logged") return { background: color };
+    if (d.state === "missed") return S.dotMissed;
+    return S.dotUpcoming;
+  };
   return (
     <div style={S.dotsWrap}>
       <div style={S.dotsRow}>
         {ch.days.map((d) => (
-          <span key={d.date} title={`${d.date} — ${d.logged ? "logged" : "missed"}`}
-            style={{ ...S.dot, ...(d.logged ? { background: color } : S.dotMissed) }} />
+          <span key={d.date} title={`${d.date} — ${d.state}`} style={{ ...S.dot, ...dotStyle(d) }} />
         ))}
       </div>
       <div style={S.dotsMeta}>
-        <span>Started {prettyDate(ch.start_date)} · {loggedCount} logged, {missedCount} missed</span>
+        <span>Started {prettyDate(ch.start_date)} · {loggedCount}/{ch.days.length} logged{missedCount > 0 ? `, ${missedCount} missed` : ""}</span>
         {ch.end_date && (
           <span style={{ fontWeight: 800, color: ch.days_remaining === 0 ? GREEN : "var(--text-2)" }}>
             {ch.days_remaining === 0 ? "Last day" : `${ch.days_remaining} day${ch.days_remaining === 1 ? "" : "s"} left`}
@@ -394,8 +399,9 @@ const S = {
 
   dotsWrap: { marginTop: 14, paddingTop: 12, borderTop: "1px dashed var(--border)" },
   dotsRow: { display: "flex", flexWrap: "wrap", gap: 4 },
-  dot: { width: 8, height: 8, borderRadius: "50%", background: "var(--border)", transition: "background 0.2s ease", flexShrink: 0 },
+  dot: { width: 8, height: 8, boxSizing: "border-box", borderRadius: "50%", background: "var(--border)", border: "1px solid transparent", transition: "background 0.2s ease", flexShrink: 0 },
   dotMissed: { background: "#9A968C" },
+  dotUpcoming: { background: "transparent", borderColor: "var(--border)" },
   dotsMeta: { display: "flex", justifyContent: "space-between", gap: 8, marginTop: 7, fontSize: 11.5, color: "var(--text-3)", flexWrap: "wrap" },
 
   chips: { display: "flex", gap: 7, flexWrap: "wrap", marginTop: 12 },
