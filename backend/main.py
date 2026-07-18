@@ -3259,6 +3259,7 @@ class ChallengeCreate(BaseModel):
     name: str
     completed: float = 0
     target: float = 0
+    start_date: Optional[str] = None
     end_date: Optional[str] = None
     reward: str = ""
     reward_cost: float = 0
@@ -3269,13 +3270,14 @@ class ChallengeUpdate(BaseModel):
     name: Optional[str] = None
     completed: Optional[float] = None
     target: Optional[float] = None
+    start_date: Optional[str] = None
     end_date: Optional[str] = None
     reward: Optional[str] = None
     reward_cost: Optional[float] = None
     comment: Optional[str] = None
     allow_negative: Optional[bool] = None
 
-_CH_COLS = ("id, name, completed, target, end_date, reward, reward_cost, "
+_CH_COLS = ("id, name, completed, target, start_date, end_date, reward, reward_cost, "
             "comment, allow_negative, position")
 
 def _challenge_status(r) -> str:
@@ -3287,17 +3289,45 @@ def _challenge_status(r) -> str:
         return "failed"
     return "active"
 
-def _challenge_row(r) -> dict:
+def _challenge_row(r, logged_dates: set) -> dict:
     status = _challenge_status(r)
+    today = date.today().isoformat()
+    start = r["start_date"]
+    end = r["end_date"]
+    # Day-dot strip: one dot per calendar day from start_date to today (or
+    # end_date, whichever is earlier) — each dot is "logged" (you updated
+    # progress that day) or "missed" (a past day with no update). Days after
+    # today aren't rendered yet since there's nothing to mark them with.
+    days = []
+    if start:
+        last_day = min(end, today) if end else today
+        d = date.fromisoformat(start)
+        last = date.fromisoformat(last_day)
+        if last >= d:
+            n = (last - d).days + 1
+            for i in range(n):
+                ds = (d + timedelta(days=i)).isoformat()
+                days.append({"date": ds, "logged": ds in logged_dates})
+    days_remaining = None
+    if end:
+        days_remaining = max(0, (date.fromisoformat(end) - date.fromisoformat(max(start or today, today))).days + (1 if today <= end else 0))
+        if today > end:
+            days_remaining = 0
     return {
         "id": r["id"], "name": r["name"], "completed": r["completed"], "target": r["target"],
         "remaining": max(0.0, (r["target"] or 0) - (r["completed"] or 0)),
-        "end_date": r["end_date"], "reward": r["reward"], "reward_cost": r["reward_cost"],
+        "start_date": start, "end_date": end,
+        "days": days, "days_remaining": days_remaining,
+        "reward": r["reward"], "reward_cost": r["reward_cost"],
         "comment": r["comment"], "allow_negative": bool(r["allow_negative"]),
         "position": r["position"], "status": status,
         # reward is banked only when the target is actually reached (not on failure)
         "reward_earned": r["reward_cost"] if status == "done" else 0,
     }
+
+def _logged_dates(conn, challenge_id: int) -> set:
+    rows = conn.execute("SELECT log_date FROM challenge_log WHERE challenge_id=?", (challenge_id,)).fetchall()
+    return {r["log_date"] for r in rows}
 
 @app.get("/api/challenges")
 def get_challenges():
@@ -3306,7 +3336,7 @@ def get_challenges():
             f"SELECT {_CH_COLS} FROM challenge WHERE user_id={cu()} AND deleted_at IS NULL "
             "ORDER BY position, id"
         ).fetchall()
-        return [_challenge_row(r) for r in rows]
+        return [_challenge_row(r, _logged_dates(conn, r["id"])) for r in rows]
 
 @app.post("/api/challenges", status_code=201)
 def create_challenge(body: ChallengeCreate):
@@ -3318,14 +3348,14 @@ def create_challenge(body: ChallengeCreate):
             f"SELECT COALESCE(MAX(position),-1)+1 p FROM challenge WHERE user_id={cu()}"
         ).fetchone()["p"]
         cur = conn.execute(
-            f"INSERT INTO challenge (user_id, name, completed, target, end_date, reward, "
-            f"reward_cost, comment, allow_negative, position) VALUES ({cu()},?,?,?,?,?,?,?,?,?)",
-            (name, body.completed or 0, body.target or 0, body.end_date,
+            f"INSERT INTO challenge (user_id, name, completed, target, start_date, end_date, reward, "
+            f"reward_cost, comment, allow_negative, position) VALUES ({cu()},?,?,?,?,?,?,?,?,?,?)",
+            (name, body.completed or 0, body.target or 0, body.start_date or date.today().isoformat(), body.end_date,
              (body.reward or "").strip(), max(0, body.reward_cost or 0), (body.comment or "").strip(),
              1 if body.allow_negative else 0, pos)
         )
         r = conn.execute(f"SELECT {_CH_COLS} FROM challenge WHERE id=?", (cur.lastrowid,)).fetchone()
-        return _challenge_row(r)
+        return _challenge_row(r, set())
 
 @app.put("/api/challenges/{cid}")
 def update_challenge(cid: int, body: ChallengeUpdate):
@@ -3342,6 +3372,8 @@ def update_challenge(cid: int, body: ChallengeUpdate):
             updates["completed"] = body.completed
         if body.target is not None:
             updates["target"] = max(0, body.target)
+        if body.start_date is not None:
+            updates["start_date"] = body.start_date or None
         if body.end_date is not None:
             updates["end_date"] = body.end_date or None
         if body.reward is not None:
@@ -3361,7 +3393,7 @@ def update_challenge(cid: int, body: ChallengeUpdate):
             sets = ", ".join(f"{k}=?" for k in updates)
             conn.execute(f"UPDATE challenge SET {sets} WHERE id=?", (*updates.values(), cid))
         r = conn.execute(f"SELECT {_CH_COLS} FROM challenge WHERE id=?", (cid,)).fetchone()
-        return _challenge_row(r)
+        return _challenge_row(r, _logged_dates(conn, cid))
 
 @app.delete("/api/challenges/{cid}", status_code=204)
 def delete_challenge(cid: int):
@@ -3373,7 +3405,41 @@ def restore_challenge(cid: int):
     with db() as conn:
         _restore(conn, "challenge", cid)
         r = conn.execute(f"SELECT {_CH_COLS} FROM challenge WHERE id=?", (cid,)).fetchone()
-        return _challenge_row(r) if r else {}
+        return _challenge_row(r, _logged_dates(conn, cid)) if r else {}
+
+class ChallengeLogBody(BaseModel):
+    delta: Optional[float] = None  # amount to add/subtract from completed
+    set_to: Optional[float] = None # or set completed to this exact value
+    log_date: Optional[str] = None # defaults to today; lets a missed day be backfilled
+
+@app.post("/api/challenges/{cid}/log")
+def log_challenge_progress(cid: int, body: ChallengeLogBody):
+    """Records a progress update AND marks that calendar day as logged (a
+    filled dot), as opposed to editing the challenge's fields from the edit
+    form, which changes numbers without claiming a day was worked on."""
+    with db() as conn:
+        row = conn.execute(
+            f"SELECT completed, allow_negative FROM challenge WHERE id=? AND user_id={cu()} AND deleted_at IS NULL", (cid,)
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "Challenge not found")
+        if body.set_to is not None:
+            next_val = body.set_to
+        elif body.delta is not None:
+            next_val = (row["completed"] or 0) + body.delta
+        else:
+            raise HTTPException(400, "delta or set_to required")
+        if not row["allow_negative"] and next_val < 0:
+            next_val = 0
+        conn.execute("UPDATE challenge SET completed=? WHERE id=?", (next_val, cid))
+        log_date = body.log_date or date.today().isoformat()
+        conn.execute(
+            "INSERT INTO challenge_log (challenge_id, log_date) VALUES (?,?) "
+            "ON CONFLICT(challenge_id, log_date) DO NOTHING",
+            (cid, log_date)
+        )
+        r = conn.execute(f"SELECT {_CH_COLS} FROM challenge WHERE id=?", (cid,)).fetchone()
+        return _challenge_row(r, _logged_dates(conn, cid))
 
 
 # ── Bucket List (materialistic wishes, ordered by priority) ──────────────────

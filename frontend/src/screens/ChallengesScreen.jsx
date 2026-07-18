@@ -38,8 +38,39 @@ function progressInfo(ch) {
   return { pct: Math.min(100, (done / target) * 100), negPct: 0, negative: false };
 }
 
+// Day-by-day dot strip — one dot per calendar day from start_date to today
+// (or the deadline, if it already passed). Each dot is either:
+//   • filled (accent color)  — you updated progress that day
+//   • grey                   — a day that passed with no entry (missed)
+// Same visual language as the Chanting mala beads. Days after today aren't
+// shown yet — there's nothing to mark them with until they happen.
+function DayDots({ ch }) {
+  if (!ch.start_date || !ch.days || ch.days.length === 0) return null;
+  const color = ch.status === "done" ? GREEN : ACCENT;
+  const loggedCount = ch.days.filter((d) => d.logged).length;
+  const missedCount = ch.days.length - loggedCount;
+  return (
+    <div style={S.dotsWrap}>
+      <div style={S.dotsRow}>
+        {ch.days.map((d) => (
+          <span key={d.date} title={`${d.date} — ${d.logged ? "logged" : "missed"}`}
+            style={{ ...S.dot, ...(d.logged ? { background: color } : S.dotMissed) }} />
+        ))}
+      </div>
+      <div style={S.dotsMeta}>
+        <span>Started {prettyDate(ch.start_date)} · {loggedCount} logged, {missedCount} missed</span>
+        {ch.end_date && (
+          <span style={{ fontWeight: 800, color: ch.days_remaining === 0 ? GREEN : "var(--text-2)" }}>
+            {ch.days_remaining === 0 ? "Last day" : `${ch.days_remaining} day${ch.days_remaining === 1 ? "" : "s"} left`}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 const blankForm = () => ({
-  id: null, name: "", completed: "", target: "", end_date: "",
+  id: null, name: "", completed: "", target: "", start_date: TODAY, end_date: "",
   reward: "", reward_cost: "", comment: "", allow_negative: false,
 });
 
@@ -74,7 +105,7 @@ export default function ChallengesScreen() {
   const openAdd = () => setForm(blankForm());
   const openEdit = (c) => setForm({
     id: c.id, name: c.name, completed: String(c.completed ?? ""), target: String(c.target ?? ""),
-    end_date: c.end_date || "", reward: c.reward || "", reward_cost: String(c.reward_cost ?? ""),
+    start_date: c.start_date || TODAY, end_date: c.end_date || "", reward: c.reward || "", reward_cost: String(c.reward_cost ?? ""),
     comment: c.comment || "", allow_negative: !!c.allow_negative,
   });
   const saveForm = async () => {
@@ -84,6 +115,7 @@ export default function ChallengesScreen() {
       name,
       completed: parseFloat(form.completed) || 0,
       target: parseFloat(form.target) || 0,
+      start_date: form.start_date || null,
       end_date: form.end_date || null,
       reward: form.reward.trim(),
       reward_cost: parseFloat(form.reward_cost) || 0,
@@ -101,13 +133,15 @@ export default function ChallengesScreen() {
     load();
   };
 
-  // ── Quick progress update ──
+  // ── Quick progress update ── goes through /log (not a plain field update)
+  // so today's dot is marked filled — editing the challenge's numbers from
+  // the edit form doesn't claim a day was worked on, only this does.
   const openProgress = (c) => setProgress({ ch: c, amount: "", mode: "add" });
   const saveProgress = async () => {
-    const delta = parseFloat(progress.amount);
-    if (isNaN(delta)) return;
-    const next = progress.mode === "set" ? delta : (progress.ch.completed || 0) + delta;
-    await api.updateChallenge(progress.ch.id, { completed: next });
+    const val = parseFloat(progress.amount);
+    if (isNaN(val)) return;
+    const body = progress.mode === "set" ? { set_to: val } : { delta: val };
+    await api.logChallengeProgress(progress.ch.id, body);
     setProgress(null);
     load();
   };
@@ -175,6 +209,8 @@ export default function ChallengesScreen() {
                   </div>
                 </div>
 
+                <DayDots ch={c} />
+
                 {/* Detail chips */}
                 <div style={S.chips}>
                   <span style={S.chip}><Flag size={12} /> Remaining {fmtNum(c.remaining)}</span>
@@ -223,8 +259,17 @@ export default function ChallengesScreen() {
               </div>
             </div>
 
-            <label style={S.label}>End date (optional — past & incomplete marks it missed)</label>
-            <input type="date" value={form.end_date} onChange={(e) => setForm((f) => ({ ...f, end_date: e.target.value }))} style={S.input} />
+            <div style={S.grid2}>
+              <div>
+                <label style={S.label}>Start date</label>
+                <input type="date" value={form.start_date} onChange={(e) => setForm((f) => ({ ...f, start_date: e.target.value }))} style={S.input} />
+              </div>
+              <div>
+                <label style={S.label}>End date (deadline)</label>
+                <input type="date" value={form.end_date} onChange={(e) => setForm((f) => ({ ...f, end_date: e.target.value }))} style={S.input} />
+              </div>
+            </div>
+            <div style={S.hint}>Set both dates to show a day-by-day progress strip on the card. Past an incomplete end date marks the challenge missed.</div>
 
             <div style={S.grid2}>
               <div>
@@ -347,6 +392,12 @@ const S = {
   barPct: { fontSize: 12, fontWeight: 700, color: "var(--text-2)" },
   target: { fontSize: 12, color: "var(--text-3)", marginLeft: "auto" },
 
+  dotsWrap: { marginTop: 14, paddingTop: 12, borderTop: "1px dashed var(--border)" },
+  dotsRow: { display: "flex", flexWrap: "wrap", gap: 4 },
+  dot: { width: 8, height: 8, borderRadius: "50%", background: "var(--border)", transition: "background 0.2s ease", flexShrink: 0 },
+  dotMissed: { background: "#9A968C" },
+  dotsMeta: { display: "flex", justifyContent: "space-between", gap: 8, marginTop: 7, fontSize: 11.5, color: "var(--text-3)", flexWrap: "wrap" },
+
   chips: { display: "flex", gap: 7, flexWrap: "wrap", marginTop: 12 },
   chip: { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "var(--text-2)", border: "1px solid var(--border)", borderRadius: 20, padding: "4px 10px" },
   chipReward: { color: ACCENT, borderColor: ACCENT + "55", background: ACCENT + "12" },
@@ -361,6 +412,7 @@ const S = {
   iconBtnPlain: { border: "none", background: "var(--hover)", color: "var(--text-2)", width: 30, height: 30, borderRadius: 8, cursor: "pointer", display: "grid", placeItems: "center", flexShrink: 0 },
   label: { display: "block", fontSize: 11.5, fontWeight: 700, color: "var(--text-2)", margin: "10px 0 5px", textTransform: "uppercase", letterSpacing: "0.04em" },
   input: { width: "100%", border: "1px solid var(--border)", borderRadius: 9, padding: "9px 11px", fontSize: 13.5, fontFamily: "inherit", outline: "none", boxSizing: "border-box", background: "var(--bg)", color: "var(--text)", marginBottom: 4 },
+  hint: { fontSize: 11, color: "var(--text-3)", marginTop: 4 },
   grid2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 },
   toggleRow: { display: "flex", alignItems: "flex-start", gap: 9, marginTop: 14, cursor: "pointer" },
   checkbox: { width: 17, height: 17, marginTop: 1, accentColor: ACCENT, cursor: "pointer", flexShrink: 0 },

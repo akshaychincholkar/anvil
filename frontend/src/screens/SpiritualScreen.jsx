@@ -69,7 +69,7 @@ export default function SpiritualScreen() {
   const [order, setOrder] = useState([]);       // saved id order
   const [defaultId, setDefaultId] = useState(null);
   const [editMode, setEditMode] = useState(false);
-  const [tab, setTab] = useState("chanting");   // "chanting" | "read" — Chanting is the default landing tab
+  const [tab, setTab] = useState("read");       // "read" | "chanting" — Reading is the default landing tab
   const appliedRef = useRef(false);
 
   const load = useCallback(async () => {
@@ -210,7 +210,7 @@ export default function SpiritualScreen() {
         )}
 
         <div style={S.tabs}>
-          {[["chanting", "Chanting", Flower2], ["read", "Reading", BookOpen]].map(([id, label, Icon]) => (
+          {[["read", "Reading", BookOpen], ["chanting", "Chanting", Flower2]].map(([id, label, Icon]) => (
             <button key={id} onClick={() => setTab(id)} style={{ ...S.tab, ...(tab === id ? S.tabOn : {}) }}>
               <Icon size={15} /> {label}
             </button>

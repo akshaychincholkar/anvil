@@ -222,6 +222,7 @@ export const api = {
   getChallenges: () => req("GET", "/challenges"),
   createChallenge: (data) => req("POST", "/challenges", data),
   updateChallenge: (id, data) => req("PUT", `/challenges/${id}`, data),
+  logChallengeProgress: (id, data) => req("POST", `/challenges/${id}/log`, data),
   deleteChallenge: (id) => req("DELETE", `/challenges/${id}`),
   restoreChallenge: (id) => req("POST", `/challenges/${id}/restore`),
 

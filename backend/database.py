@@ -131,6 +131,13 @@ def migrate_db():
         # 'instagram'); existing rows are all YouTube.
         add_col("kickstart_video", "platform", "TEXT NOT NULL DEFAULT 'youtube'")
 
+        # Challenges: explicit start_date powers the day-dot progress strip
+        # (one dot per calendar day of the challenge, like the Jap mala beads).
+        # Existing challenges never recorded a start — backfill from created_at
+        # so old challenges still get a sensible dot count instead of none.
+        add_col("challenge", "start_date", "TEXT")
+        conn.execute("UPDATE challenge SET start_date = date(created_at) WHERE start_date IS NULL")
+
 def init_db():
     with db() as conn:
         conn.executescript("""
@@ -580,6 +587,7 @@ def init_db():
             name TEXT NOT NULL,
             completed REAL NOT NULL DEFAULT 0,
             target REAL NOT NULL DEFAULT 0,
+            start_date TEXT,                        -- YYYY-MM-DD; powers the day-dot strip
             end_date TEXT,                          -- YYYY-MM-DD; past & incomplete => failed
             reward TEXT NOT NULL DEFAULT '',        -- label of the treat
             reward_cost REAL NOT NULL DEFAULT 0,    -- money credited on completion
@@ -588,6 +596,17 @@ def init_db():
             position INTEGER NOT NULL DEFAULT 0,
             deleted_at TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        -- One row per calendar day a challenge's progress was actually updated
+        -- (via "Update progress"). Powers the day-dot strip: a day with a log
+        -- row is a filled dot, a past day with none is a missed (grey) dot.
+        CREATE TABLE IF NOT EXISTS challenge_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            challenge_id INTEGER NOT NULL,
+            log_date TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(challenge_id, log_date)
         );
 
         -- Bucket list: materialistic wishes, ordered by priority (position).
