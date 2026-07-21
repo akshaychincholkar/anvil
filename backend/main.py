@@ -119,6 +119,40 @@ def _seed_pillars(conn, uid: int):
         conn.executemany("INSERT INTO pillar (user_id, name, color) VALUES (?, ?, ?)",
                          [(uid, n, c) for n, c in PILLAR_SEED])
 
+# Fallback starting set, used only if the template account below doesn't
+# exist on this deployment (e.g. someone else's self-hosted copy of Anvil).
+EXPENSE_CATEGORY_FALLBACK_SEED = [
+    ("Groceries", "Carrot", "#4C9A6B"),
+    ("Food & Dining", "Utensils", "#C9772E"),
+    ("Transport", "Bus", "#3A7CA5"),
+    ("Shopping", "ShoppingBag", "#C2536B"),
+    ("Bills & Utilities", "Zap", "#C9A227"),
+    ("Rent & Housing", "Home", "#8268B0"),
+    ("Health", "Heart", "#A23E57"),
+    ("Entertainment", "Clapperboard", "#5B7C99"),
+    ("Other", "ShoppingBag", "#9A968C"),
+]
+EXPENSE_CATEGORY_TEMPLATE_EMAIL = "akshaychincholkar@gmail.com"
+
+def _seed_expense_categories(conn, uid: int):
+    """Populate a user's expense categories if they currently have none — on
+    first sign-in, but also as a lazy backfill for any existing user who
+    still has an empty list (e.g. created before this seeding existed).
+    Never touches a user who already has at least one category, so someone
+    who deliberately deleted all of theirs is left alone."""
+    if conn.execute("SELECT 1 FROM expense_category WHERE user_id=? AND deleted_at IS NULL LIMIT 1", (uid,)).fetchone():
+        return
+    template = conn.execute(
+        "SELECT ec.name, ec.icon, ec.color FROM expense_category ec JOIN user u ON u.id=ec.user_id "
+        "WHERE lower(u.email)=? AND ec.deleted_at IS NULL ORDER BY ec.position, ec.id",
+        (EXPENSE_CATEGORY_TEMPLATE_EMAIL,)
+    ).fetchall()
+    seed = [(r["name"], r["icon"], r["color"]) for r in template] if template else EXPENSE_CATEGORY_FALLBACK_SEED
+    conn.executemany(
+        "INSERT INTO expense_category (user_id, name, icon, color, position) VALUES (?, ?, ?, ?, ?)",
+        [(uid, n, icon, c, i) for i, (n, icon, c) in enumerate(seed)]
+    )
+
 def _user_public(row) -> dict:
     return {"id": row["id"], "name": row["name"], "email": row["email"]}
 
@@ -225,6 +259,7 @@ def google_callback(code: str = "", error: Optional[str] = None):
                     cur = conn.execute("INSERT INTO user (name, email, google_sub) VALUES (?,?,?)", (name, email, sub))
                     uid = cur.lastrowid
                 _seed_pillars(conn, uid)
+                _seed_expense_categories(conn, uid)
         else:
             uid = row["id"]
         conn.execute(
@@ -337,6 +372,8 @@ class GoalUpdate(BaseModel):
     title: Optional[str] = None
     start_date: Optional[str] = None
     end_date: Optional[str] = None
+    parent_goal_id: Optional[int] = None
+    clear_parent: bool = False  # set true to detach from its parent (parent_goal_id alone can't distinguish "unset" from "no change")
 
 def _goal_sql():
     return f"""
@@ -451,6 +488,22 @@ def update_goal(goal_id: int, body: GoalUpdate):
             updates["start_date"] = body.start_date
         if body.end_date is not None:
             updates["end_date"] = body.end_date
+        if body.clear_parent:
+            updates["parent_goal_id"] = None
+        elif body.parent_goal_id is not None:
+            # A goal can't become a child of itself or of its own descendant —
+            # walk up from the proposed parent and reject if it loops back here.
+            walk = body.parent_goal_id
+            seen = set()
+            while walk is not None and walk not in seen:
+                if walk == goal_id:
+                    raise HTTPException(400, "A goal can't be nested under itself or its own sub-goal")
+                seen.add(walk)
+                row = conn.execute(
+                    f"SELECT parent_goal_id FROM goal WHERE id=? AND user_id={cu()} AND deleted_at IS NULL", (walk,)
+                ).fetchone()
+                walk = row["parent_goal_id"] if row else None
+            updates["parent_goal_id"] = body.parent_goal_id
         if updates:
             sets = ", ".join(f"{k}=?" for k in updates)
             conn.execute(f"UPDATE goal SET {sets} WHERE id=? AND user_id={cu()}", (*updates.values(), goal_id))
@@ -1725,6 +1778,7 @@ def _own_expense_category(conn, cid):
 def get_expenses():
     with db() as conn:
         _post_fixed_items(conn)
+        _seed_expense_categories(conn, cu())
         cats = conn.execute(
             f"SELECT id, name, icon, color, position FROM expense_category WHERE user_id={cu()} AND deleted_at IS NULL "
             "ORDER BY position, id"

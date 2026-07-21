@@ -236,6 +236,9 @@ const TELE_SCALE = {
   Weekly:    { font: 13.5, pad: "10px 14px", tag: 10 },
 };
 
+// One horizon up from `h` — the level a goal at `h` could optionally nest under.
+const parentHorizonOf = (h) => HORIZONS[Math.max(0, HORIZONS.indexOf(h) - 1)];
+
 function TelescopeView({ goals, pillar, onPickPillar, reload, taskProgress, breaking, setBreaking, onTasksChanged }) {
   const hex = PILLARS[pillar]?.dot || "#9A968C";
   const mine = goals.filter((g) => g.pillar === pillar);
@@ -246,23 +249,53 @@ function TelescopeView({ goals, pillar, onPickPillar, reload, taskProgress, brea
   const [endYear, setEndYear] = useState(YEAR);
   const [month, setMonth] = useState(now.getMonth());
   const [week, setWeek] = useState(1);
+  const [parentId, setParentId] = useState(""); // "" = no parent (optional, top-level)
+  const [editing, setEditing] = useState(null); // { id, title, horizon, parentId } — pencil-edit modal
+
+  // Eligible parents for a new goal at horizon `h`: same pillar, one level up.
+  const parentOptions = (h) => mine.filter((g) => g.horizon === parentHorizonOf(h));
 
   const openAdd = (h) => {
-    setAddH(h); setTitle(""); setYear(YEAR); setEndYear(YEAR);
+    setAddH(h); setTitle(""); setYear(YEAR); setEndYear(YEAR); setParentId("");
     setMonth(h === "Quarterly" ? Math.floor(now.getMonth() / 3) * 3 : now.getMonth());
     setWeek(Math.min(Math.max(Math.ceil(now.getDate() / 7), 1), 4));
   };
+  // Picking a parent snaps the period into that parent's span — mirrors how
+  // the drill-down constrains a sub-goal's dates to its parent's range.
+  const onParentChange = (id) => {
+    setParentId(id);
+    if (!id) return;
+    const parent = mine.find((g) => g.id === Number(id));
+    if (!parent) return;
+    setYear(yearOf(parent.start_date));
+    const months = allowedMonths(parent);
+    setMonth(addH === "Quarterly" ? Math.floor(months[0] / 3) * 3 : months[0]);
+  };
   const submit = async () => {
     if (!title.trim() || !addH) return;
+    const parent = parentId ? mine.find((g) => g.id === Number(parentId)) : null;
     let start_date, end_date;
     if (addH === "Yearly") {
       const sy = Number(year), ey = Math.max(sy, Number(endYear) || sy);
       start_date = `${sy}-01-01`; end_date = `${ey}-12-31`;
     } else {
-      ({ start_date, end_date } = horizonDates(addH, Number(year), month, week));
+      const y = parent ? yearOf(parent.start_date) : Number(year);
+      ({ start_date, end_date } = horizonDates(addH, y, month, week));
     }
-    await api.createGoal({ pillar, title: title.trim(), horizon: addH, parent_goal_id: null, start_date, end_date });
-    setAddH(null); setTitle("");
+    await api.createGoal({ pillar, title: title.trim(), horizon: addH, parent_goal_id: parent ? parent.id : null, start_date, end_date });
+    setAddH(null); setTitle(""); setParentId("");
+    reload();
+  };
+
+  const startEdit = (g) => setEditing({ id: g.id, title: g.title, horizon: g.horizon, parentId: g.parent_goal_id ? String(g.parent_goal_id) : "" });
+  const commitEdit = async () => {
+    if (!editing || !editing.title.trim()) return;
+    const parentChanged = (editing.parentId ? Number(editing.parentId) : null) !== (goals.find((g) => g.id === editing.id)?.parent_goal_id ?? null);
+    await api.updateGoal(editing.id, {
+      title: editing.title.trim(),
+      ...(parentChanged ? (editing.parentId ? { parent_goal_id: Number(editing.parentId) } : { clear_parent: true }) : {}),
+    });
+    setEditing(null);
     reload();
   };
 
@@ -299,7 +332,12 @@ function TelescopeView({ goals, pillar, onPickPillar, reload, taskProgress, brea
                     background: mix(hex, 7), borderColor: mix(hex, 28),
                     ...(isYearly ? { maxWidth: 640, width: "100%", textAlign: "center", boxSizing: "border-box" } : {}),
                   }}>
-                    <span style={{ ...T.tag, fontSize: sc.tag, color: hex, background: mix(hex, 14) }}>{periodLabel(g)}</span>
+                    <div style={T.cardTop}>
+                      <span style={{ ...T.tag, fontSize: sc.tag, color: hex, background: mix(hex, 14) }}>{periodLabel(g)}</span>
+                      <button onClick={() => startEdit(g)} style={{ ...T.editBtn, color: hex }} title="Edit goal">
+                        <Pencil size={sc.tag} />
+                      </button>
+                    </div>
                     <div style={{
                       ...T.cardTitle, fontSize: sc.font,
                       ...(isYearly ? { fontFamily: "'Fraunces',Georgia,serif", fontWeight: 700, letterSpacing: "-0.02em", lineHeight: 1.25 } : {}),
@@ -331,8 +369,14 @@ function TelescopeView({ goals, pillar, onPickPillar, reload, taskProgress, brea
                   onChange={(e) => setTitle(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") submit(); if (e.key === "Escape") setAddH(null); }}
                   style={T.addInput} />
+                {horizon !== "Yearly" && (
+                  <select value={parentId} onChange={(e) => onParentChange(e.target.value)} style={T.addSelect} title="Parent goal (optional)">
+                    <option value="">No parent</option>
+                    {parentOptions(horizon).map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}
+                  </select>
+                )}
                 <select value={year} onChange={(e) => { const y = Number(e.target.value); setYear(y); if (endYear < y) setEndYear(y); }}
-                  style={T.addSelect} title={horizon === "Yearly" ? "Start year" : "Year"}>
+                  disabled={!!parentId} style={T.addSelect} title={horizon === "Yearly" ? "Start year" : "Year"}>
                   {YEAR_OPTIONS.map((y) => <option key={y} value={y}>{y}</option>)}
                 </select>
                 {horizon === "Yearly" && (
@@ -343,16 +387,24 @@ function TelescopeView({ goals, pillar, onPickPillar, reload, taskProgress, brea
                     </select>
                   </>
                 )}
-                {horizon === "Quarterly" && (
-                  <select value={month} onChange={(e) => setMonth(Number(e.target.value))} style={T.addSelect}>
-                    {QUARTERS.map((q) => <option key={q.startMonth} value={q.startMonth}>{q.label}</option>)}
-                  </select>
-                )}
-                {(horizon === "Monthly" || horizon === "Weekly") && (
-                  <select value={month} onChange={(e) => setMonth(Number(e.target.value))} style={T.addSelect}>
-                    {MONTHS.map((m, i) => <option key={i} value={i}>{m}</option>)}
-                  </select>
-                )}
+                {horizon === "Quarterly" && (() => {
+                  const parent = parentId ? mine.find((g) => g.id === Number(parentId)) : null;
+                  const allowedQ = parent ? QUARTERS.filter((q) => allowedMonths(parent).includes(q.startMonth)) : QUARTERS;
+                  return (
+                    <select value={month} onChange={(e) => setMonth(Number(e.target.value))} style={T.addSelect}>
+                      {allowedQ.map((q) => <option key={q.startMonth} value={q.startMonth}>{q.label}</option>)}
+                    </select>
+                  );
+                })()}
+                {(horizon === "Monthly" || horizon === "Weekly") && (() => {
+                  const parent = parentId ? mine.find((g) => g.id === Number(parentId)) : null;
+                  const allowedM = parent ? allowedMonths(parent) : Array.from({ length: 12 }, (_, i) => i);
+                  return (
+                    <select value={month} onChange={(e) => setMonth(Number(e.target.value))} style={T.addSelect}>
+                      {allowedM.map((i) => <option key={i} value={i}>{MONTHS[i]}</option>)}
+                    </select>
+                  );
+                })()}
                 {horizon === "Weekly" && (
                   <select value={week} onChange={(e) => setWeek(Number(e.target.value))} style={T.addSelect}>
                     {[1, 2, 3, 4].map((w) => <option key={w} value={w}>Week {w}</option>)}
@@ -369,6 +421,33 @@ function TelescopeView({ goals, pillar, onPickPillar, reload, taskProgress, brea
           </section>
         );
       })}
+
+      {editing && (
+        <div style={T.modalOverlay} onClick={() => setEditing(null)}>
+          <div style={T.modal} onClick={(e) => e.stopPropagation()}>
+            <div style={T.modalHead}>Edit {editing.horizon.toLowerCase()} goal</div>
+            <input autoFocus value={editing.title}
+              onChange={(e) => setEditing((f) => ({ ...f, title: e.target.value }))}
+              onKeyDown={(e) => e.key === "Enter" && commitEdit()}
+              style={{ ...T.addInput, width: "100%", boxSizing: "border-box" }} />
+            {editing.horizon !== "Yearly" && (
+              <>
+                <label style={T.modalLabel}>Parent goal (optional)</label>
+                <select value={editing.parentId} onChange={(e) => setEditing((f) => ({ ...f, parentId: e.target.value }))}
+                  style={{ ...T.addSelect, width: "100%", boxSizing: "border-box" }}>
+                  <option value="">No parent</option>
+                  {mine.filter((g) => g.horizon === parentHorizonOf(editing.horizon) && g.id !== editing.id)
+                    .map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}
+                </select>
+              </>
+            )}
+            <div style={T.modalActions}>
+              <button onClick={() => setEditing(null)} style={T.addCancel}><X size={14} /></button>
+              <button onClick={commitEdit} style={T.addSave}><Check size={14} /></button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -381,6 +460,8 @@ const T = {
   bandLabel: { fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 },
   cards: { display: "flex", flexWrap: "wrap", gap: 10, justifyContent: "center" },
   card: { border: "1px solid", borderRadius: 12, minWidth: 0, maxWidth: "100%", boxSizing: "border-box" },
+  cardTop: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  editBtn: { border: "none", background: "none", cursor: "pointer", display: "grid", placeItems: "center", padding: 2, borderRadius: 5, flexShrink: 0, opacity: 0.75 },
   tag: { display: "inline-block", fontWeight: 700, borderRadius: 10, padding: "2px 8px", marginBottom: 6, letterSpacing: "0.03em" },
   cardTitle: { fontWeight: 600, lineHeight: 1.35, overflowWrap: "anywhere", color: "var(--text)" },
   empty: { fontSize: 12.5, color: "var(--text-3)", fontStyle: "italic", padding: "8px 0", textAlign: "center", width: "100%" },
@@ -402,6 +483,12 @@ const T = {
   breakerDot: { width: 6, height: 6, borderRadius: "50%", flexShrink: 0 },
   breakerInput: { border: "1px solid var(--border)", borderRadius: 7, padding: "7px 10px", fontSize: 12.5, fontFamily: "inherit", outline: "none", width: "100%", boxSizing: "border-box" },
   breakerHint: { fontSize: 10.5, color: "var(--text-3)" },
+
+  modalOverlay: { position: "fixed", inset: 0, background: "rgba(38,36,31,0.5)", zIndex: 200, display: "grid", placeItems: "center", padding: 16 },
+  modal: { background: "var(--surface)", borderRadius: 14, padding: "18px 18px 16px", width: "100%", maxWidth: 380, boxShadow: "0 12px 48px rgba(0,0,0,0.22)", boxSizing: "border-box", display: "flex", flexDirection: "column", gap: 8 },
+  modalHead: { fontSize: 15.5, fontWeight: 700, fontFamily: "'Fraunces',Georgia,serif", marginBottom: 4 },
+  modalLabel: { fontSize: 11, fontWeight: 700, color: "var(--text-2)", textTransform: "uppercase", letterSpacing: "0.04em", marginTop: 6 },
+  modalActions: { display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 10 },
 };
 
 export default function GoalsWithGantt() {
