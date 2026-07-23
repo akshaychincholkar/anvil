@@ -3774,22 +3774,31 @@ def unregister_device(body: DeviceTokenBody):
 def _send_to_user(conn, uid: int, title: str, body: str, link: str = "/", data: dict = None) -> int:
     """Send a push to every device the user registered. Prunes tokens FCM
     reports as stale. Returns how many devices were successfully reached."""
-    rows = conn.execute("SELECT token FROM device_token WHERE user_id=?", (uid,)).fetchall()
-    # Collapse to one token per physical device. FCM tokens look like
-    # "<instance-id>:<credential>", and a device that re-registered (new service
-    # worker scope, re-enabled push) has several rows sharing one instance id.
-    # Sending to each would deliver the same notification to the same phone
-    # more than once, so keep only the newest token per instance.
-    seen = {}
-    for r in rows:
-        seen[r["token"].split(":")[0]] = r["token"]
+    # Newest row per device first. FCM mints a new token per service-worker
+    # registration, so one phone that re-registered has several rows sharing an
+    # instance id (the part before ":"); the newest is the live one.
+    rows = conn.execute(
+        "SELECT id, token FROM device_token WHERE user_id=? ORDER BY id DESC", (uid,)
+    ).fetchall()
+
     ok = 0
-    for token in seen.values():
+    delivered = set()  # instance ids already reached for this notification
+    for r in rows:
+        token = r["token"]
+        instance = token.split(":")[0]
+        # Skip only if this physical device was already reached *successfully*.
+        # Dedupe must never be the reason a device hears nothing: if the newest
+        # token turns out to be dead, we fall through to the older ones rather
+        # than going silent (this is what broke delivery on one phone before).
+        if instance in delivered:
+            continue
         res = fcm.send(token, title, body, data=data, link=link)
         if res.get("ok"):
             ok += 1
+            delivered.add(instance)
         elif res.get("stale"):
-            conn.execute("DELETE FROM device_token WHERE token=?", (token,))
+            # FCM says this token is dead — drop it and try the device's next one.
+            conn.execute("DELETE FROM device_token WHERE id=?", (r["id"],))
     return ok
 
 @app.post("/api/notifications/test")
