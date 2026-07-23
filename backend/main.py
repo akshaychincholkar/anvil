@@ -3745,6 +3745,18 @@ def register_device(body: DeviceTokenBody):
         # A token uniquely identifies a device/browser; re-registering just
         # re-points it at the current user (e.g. shared machine, account switch).
         conn.execute("DELETE FROM device_token WHERE token=?", (tok,))
+        # FCM mints a NEW token per service-worker registration, so one phone
+        # that re-enabled push (or hit the /fcm/ scope change) ends up with
+        # several token rows — and _send_to_user loops over all of them, which
+        # is a duplicate notification per stale row. The part before ":" is the
+        # stable FCM instance id for the device, so drop the device's older
+        # tokens rather than keying only on the full string.
+        instance = tok.split(":")[0]
+        if instance:
+            conn.execute(
+                f"DELETE FROM device_token WHERE user_id={cu()} AND token LIKE ?",
+                (instance + ":%",),
+            )
         conn.execute(
             f"INSERT INTO device_token (user_id, token, platform) VALUES ({cu()}, ?, ?)",
             (tok, body.platform or "web"),
@@ -3763,13 +3775,21 @@ def _send_to_user(conn, uid: int, title: str, body: str, link: str = "/", data: 
     """Send a push to every device the user registered. Prunes tokens FCM
     reports as stale. Returns how many devices were successfully reached."""
     rows = conn.execute("SELECT token FROM device_token WHERE user_id=?", (uid,)).fetchall()
-    ok = 0
+    # Collapse to one token per physical device. FCM tokens look like
+    # "<instance-id>:<credential>", and a device that re-registered (new service
+    # worker scope, re-enabled push) has several rows sharing one instance id.
+    # Sending to each would deliver the same notification to the same phone
+    # more than once, so keep only the newest token per instance.
+    seen = {}
     for r in rows:
-        res = fcm.send(r["token"], title, body, data=data, link=link)
+        seen[r["token"].split(":")[0]] = r["token"]
+    ok = 0
+    for token in seen.values():
+        res = fcm.send(token, title, body, data=data, link=link)
         if res.get("ok"):
             ok += 1
         elif res.get("stale"):
-            conn.execute("DELETE FROM device_token WHERE token=?", (r["token"],))
+            conn.execute("DELETE FROM device_token WHERE token=?", (token,))
     return ok
 
 @app.post("/api/notifications/test")
