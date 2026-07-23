@@ -43,28 +43,9 @@ if (firebaseConfig.apiKey !== "REPLACE_ME") {
     });
   });
 
-  // Safety net: onBackgroundMessage only fires for payloads Firebase recognises
-  // and swallows the event either way. A raw push listener guarantees something
-  // is shown — showNotification is mandatory on Android, which kills workers
-  // that receive a push and display nothing.
-  self.addEventListener("push", (event) => {
-    let payload = {};
-    try { payload = event.data ? event.data.json() : {}; } catch (_) { /* non-JSON push */ }
-    const n = payload.notification || {};
-    if (!n.title && !n.body) return; // Firebase already handled it
-    event.waitUntil(
-      self.registration.getNotifications().then((shown) => {
-        // onBackgroundMessage may have displayed this already — don't double up.
-        if (shown.some((x) => x.title === n.title)) return;
-        return self.registration.showNotification(n.title || "Anvil", {
-          body: n.body || "",
-          icon: "/icon-192.png",
-          badge: "/icon-192.png",
-          data: { link: (payload.fcmOptions && payload.fcmOptions.link) || "/" },
-        });
-      })
-    );
-  });
+  // Firebase's onBackgroundMessage handles the push and shows the notification.
+  // Do NOT add a raw push event listener — it causes duplicates on Android.
+  // Firebase's handler is sufficient for all valid FCM payloads.
 
   self.addEventListener("notificationclick", (event) => {
     event.notification.close();
