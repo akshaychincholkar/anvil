@@ -50,10 +50,23 @@
         box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
       }
     </style>
-    <script type="module" crossorigin src="/assets/index-CwyTQYW5.js"></script>
+    <script type="module" crossorigin src="/assets/index-BaR_gVOU.js"></script>
   </head>
   <body>
     <div id="root"></div>
+    <!-- Firebase Cloud Messaging web config (NOT secret — see
+         docs/notifications-setup.md). Fill these to enable push. The vapidKey
+         is the "Web Push certificate" key pair from Firebase console. -->
+    <script>
+      window.__ANVIL_FCM__ = {
+        apiKey: "AIzaSyASkEqj9OcgUpNDcUCvsIPtUtKy4NnBGjQ",
+        authDomain: "be-anvil.firebaseapp.com",
+        projectId: "be-anvil",
+        messagingSenderId: "776216344533",
+        appId: "1:776216344533:web:3f8eb24131456a290aef5c",
+        vapidKey: "BM3OJ8eC6ucQquMmCYn1Cj0TvuDxIL5B92ZjHkIQ122wsnoNAx9YyAnG0erdm4pMUejYE7RXe7oTDRvThYcwE8I",
+      };
+    </script>
     <script>
       if ("serviceWorker" in navigator) {
         window.addEventListener("load", () => {

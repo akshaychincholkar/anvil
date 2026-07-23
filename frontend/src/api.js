@@ -131,6 +131,12 @@ export const api = {
   getSetting: (key) => req("GET", `/settings/${key}`),
   setSetting: (key, value) => req("PUT", `/settings/${key}`, { value }),
 
+  // Push notifications (FCM)
+  notificationsStatus: () => req("GET", "/notifications/status"),
+  registerDevice: (data) => req("POST", "/notifications/register", data),
+  unregisterDevice: (data) => req("POST", "/notifications/unregister", data),
+  sendTestNotification: () => req("POST", "/notifications/test"),
+
   // Tasks
   getTasks: () => req("GET", "/tasks"),
   createTask: (data) => req("POST", "/tasks", data),

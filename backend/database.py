@@ -138,6 +138,39 @@ def migrate_db():
         add_col("challenge", "start_date", "TEXT")
         conn.execute("UPDATE challenge SET start_date = date(created_at) WHERE start_date IS NULL")
 
+        # Habits: GET /api/habits batches all logs per user in one IN(...) query
+        # per column (logs/notes/counts/times) instead of 4 queries per habit —
+        # this index makes each of those batched scans an index lookup instead
+        # of a full table scan of habit_log.
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_habit_log_habit_id ON habit_log (habit_id)")
+
+        # Push notifications (FCM): one row per browser/device a user has opted
+        # in from. token is the FCM registration token; last_sent_key dedupes
+        # scheduled sends so a habit reminder fires once per day, not every
+        # time the cron ticks. Created lazily — no-op if the table exists.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS device_token (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                token TEXT NOT NULL,
+                platform TEXT NOT NULL DEFAULT 'web',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(token)
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_device_token_user ON device_token (user_id)")
+        # Dedupe log: remembers "this reminder already went out" so repeated
+        # cron ticks in the same window don't re-notify. key is e.g.
+        # "habit:42:2026-07-21", value is when it was sent.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS notification_sent (
+                user_id INTEGER NOT NULL,
+                dedupe_key TEXT NOT NULL,
+                sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (user_id, dedupe_key)
+            )
+        """)
+
 def init_db():
     with db() as conn:
         conn.executescript("""

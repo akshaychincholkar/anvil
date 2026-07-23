@@ -7,6 +7,7 @@ import UndoToast from "../components/UndoToast.jsx";
 import Dropdown from "../components/Dropdown.jsx";
 import HelpButton from "../components/HelpButton.jsx";
 import { useConfirm } from "../components/ConfirmDialog.jsx";
+import { useCachedList } from "../hooks/useCachedList.js";
 
 const HABIT_TYPES = [
   { value: "regular", label: "Regular (yes/no)" },
@@ -82,7 +83,10 @@ const TODAY = todayISO();
 const THIS_YEAR = new Date().getFullYear();
 
 export default function HabitTracker() {
-  const [habits, setHabits] = useState([]);
+  // Shows last-cached habits instantly on mount (no blank screen while the
+  // server responds), then silently refreshes in the background and updates
+  // both the screen and the cache once fresh data lands.
+  const { data: habits, setData: setHabits, load: reload } = useCachedList("habits", api.getHabits);
   const [selected, setSelected] = useState("ALL");
   const [isMobile, setIsMobile] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -95,7 +99,7 @@ export default function HabitTracker() {
   const [habitOrder, setHabitOrder] = useState([]);
   const confirm = useConfirm();
 
-  const load = useCallback(() => api.getHabits().then(setHabits).catch(console.error), []);
+  const load = useCallback(() => reload().catch(console.error), [reload]);
   useEffect(() => { load(); }, [load]);
 
   // Merge a single updated habit (returned by log/count/clear endpoints) into

@@ -6,3 +6,9 @@ backend/*.log
 backend/anvil.db
 backend/anvil.db-wal
 backend/anvil.db-shm
+
+# Firebase service-account key — a credential, never commit
+*service-account*.json
+*serviceAccount*.json
+backend/firebase-*.json
+firebase-adminsdk-*.json

@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
-import { X, Eye, EyeOff, ChevronUp, ChevronDown, Check, LayoutList, Palette, Coins, Music, Megaphone, Plus, Home } from "lucide-react";
+import { X, Eye, EyeOff, ChevronUp, ChevronDown, Check, LayoutList, Palette, Coins, Music, Megaphone, Plus, Home, BellRing, BellOff, Send } from "lucide-react";
 import { THEMES } from "../theme.js";
 import { CURRENCIES } from "../currency.js";
 import { api } from "../api.js";
 import { getDayStartHour, setDayStartHour } from "../dayStart.js";
+import { pushSupported, pushConfigured, permissionState, enablePush, disablePush, pushEnabledLocally } from "../push.js";
 import Dropdown from "../components/Dropdown.jsx";
 
 const ordinal = (n) => (n % 10 === 1 && n !== 11 ? "st" : n % 10 === 2 && n !== 12 ? "nd" : n % 10 === 3 && n !== 13 ? "rd" : "th");
@@ -151,6 +152,9 @@ export default function SettingsModal({ screens, order, hidden, themeId, currenc
           </button>
           <button onClick={() => setTab("reminders")} style={{ ...S.tab, ...(tab === "reminders" ? S.tabOn : {}) }}>
             <Megaphone size={15} /> Reminders
+          </button>
+          <button onClick={() => setTab("notifications")} style={{ ...S.tab, ...(tab === "notifications" ? S.tabOn : {}) }}>
+            <BellRing size={15} /> Notifications
           </button>
         </div>
 
@@ -300,6 +304,8 @@ export default function SettingsModal({ screens, order, hidden, themeId, currenc
 
               <button onClick={saveReminders} style={{ ...S.saveBtn, marginTop: 16 }}><Check size={15} /> {tSaved ? "Saved" : "Save reminders"}</button>
             </>
+          ) : tab === "notifications" ? (
+            <NotificationSettings S={S} />
           ) : (
             <>
               <p style={S.hint}>Tap a theme to preview it live, then hit <b>Apply theme</b> to keep it.</p>
@@ -328,6 +334,112 @@ export default function SettingsModal({ screens, order, hidden, themeId, currenc
         </div>
       </div>
     </div>
+  );
+}
+
+// Push-notification opt-in. Handles the full permission → token → register
+// flow and gives a "send test" button so the user can confirm it works.
+function NotificationSettings({ S }) {
+  const [supported] = useState(() => pushSupported());
+  const [configured, setConfigured] = useState(() => pushConfigured());
+  const [enabled, setEnabled] = useState(() => pushEnabledLocally());
+  const [perm, setPerm] = useState(() => permissionState());
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null); // { kind: "ok"|"err", text }
+
+  useEffect(() => {
+    // Confirm server-side config too (env vars set) — the client config alone
+    // isn't enough for sends to actually go out.
+    api.notificationsStatus()
+      .then((s) => { setConfigured(s.configured); })
+      .catch(() => {});
+  }, []);
+
+  const toggle = async () => {
+    setBusy(true); setMsg(null);
+    if (enabled) {
+      await disablePush();
+      setEnabled(false);
+      setMsg({ kind: "ok", text: "Notifications turned off on this device." });
+    } else {
+      const res = await enablePush();
+      if (res.ok) {
+        setEnabled(true); setPerm("granted");
+        setMsg({ kind: "ok", text: "Notifications enabled on this device." });
+      } else {
+        setPerm(permissionState());
+        setMsg({ kind: "err", text: res.error });
+      }
+    }
+    setBusy(false);
+  };
+
+  const test = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const result = await api.sendTestNotification();
+      console.log("[NotifTest] Success:", result);
+
+      // On localhost/http, Chrome may not show system notifications due to browser security.
+      // The notification was sent by the backend, but the browser might not display it.
+      const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+      const isHttp = window.location.protocol === "http:";
+
+      let text = "Test sent — check your notifications.";
+      if (isLocalhost && isHttp) {
+        text += " (Note: On localhost over HTTP, Chrome may not show system notifications. Try deploying to HTTPS or using ngrok.)";
+      }
+
+      setMsg({ kind: "ok", text });
+    } catch (e) {
+      console.error("[NotifTest] Error:", e);
+      setMsg({ kind: "err", text: e?.message || "Test failed." });
+    }
+    setBusy(false);
+  };
+
+  if (!supported) {
+    return <p style={S.hint}>This browser doesn't support push notifications. Try installing Anvil as an app (Add to Home Screen) on a supported browser.</p>;
+  }
+
+  return (
+    <>
+      <p style={S.hint}>
+        Get reminded on this device even when Anvil is closed — habit reminders at their set time, challenge deadlines, and a morning digest of today's tasks.
+      </p>
+
+      {!configured && (
+        <div style={{ ...S.row, borderColor: "#C2773B", color: "var(--text-2)", display: "block", padding: "12px 14px" }}>
+          <b style={{ color: "#C2773B" }}>Not configured yet.</b> Push needs a Firebase project set up first — see <code>docs/notifications-setup.md</code>. The button below will work once that's done.
+        </div>
+      )}
+
+      <button onClick={toggle} disabled={busy || perm === "denied"}
+        style={{ ...S.saveBtn, marginTop: 14, width: "100%", justifyContent: "center",
+                 ...(enabled ? { background: "var(--surface)", color: "var(--text)", border: "1px solid var(--border)" } : {}),
+                 ...((busy || perm === "denied") ? { opacity: 0.5, cursor: "not-allowed" } : {}) }}>
+        {enabled ? <><BellOff size={15} /> Turn off on this device</> : <><BellRing size={15} /> Enable notifications</>}
+      </button>
+
+      {perm === "denied" && (
+        <p style={{ ...S.hint, color: "#C2536B", marginTop: 10 }}>
+          Notifications are blocked in your browser settings for this site. Allow them there, then reload.
+        </p>
+      )}
+
+      {enabled && (
+        <button onClick={test} disabled={busy}
+          style={{ ...S.addRowBtn, marginTop: 10, width: "100%", justifyContent: "center", ...(busy ? { opacity: 0.5 } : {}) }}>
+          <Send size={14} /> Send test notification
+        </button>
+      )}
+
+      {msg && (
+        <p style={{ ...S.hint, marginTop: 12, color: msg.kind === "err" ? "#C2536B" : "var(--accent)" }}>
+          {msg.text}
+        </p>
+      )}
+    </>
   );
 }
 

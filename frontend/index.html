@@ -53,6 +53,19 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- Firebase Cloud Messaging web config (NOT secret — see
+         docs/notifications-setup.md). Fill these to enable push. The vapidKey
+         is the "Web Push certificate" key pair from Firebase console. -->
+    <script>
+      window.__ANVIL_FCM__ = {
+        apiKey: "AIzaSyASkEqj9OcgUpNDcUCvsIPtUtKy4NnBGjQ",
+        authDomain: "be-anvil.firebaseapp.com",
+        projectId: "be-anvil",
+        messagingSenderId: "776216344533",
+        appId: "1:776216344533:web:3f8eb24131456a290aef5c",
+        vapidKey: "BM3OJ8eC6ucQquMmCYn1Cj0TvuDxIL5B92ZjHkIQ122wsnoNAx9YyAnG0erdm4pMUejYE7RXe7oTDRvThYcwE8I",
+      };
+    </script>
     <script type="module" src="/src/main.jsx"></script>
     <script>
       if ("serviceWorker" in navigator) {

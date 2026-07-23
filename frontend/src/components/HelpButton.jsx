@@ -65,8 +65,10 @@ function HelpModal({ id, onClose }) {
 
             {/* Image 01 illustrates "What it is"; image 02 illustrates the
                 first How-to step, 03 the second, and so on — purely by
-                position, so screenshots just need to be numbered in the
-                order they should appear, no filename coordination. */}
+                position, so screenshots just need to be numbered for the
+                step they belong to. Any number can be added on its own —
+                e.g. just 04.jpg for the 4th step — without needing 01-03
+                to exist first. */}
             <Section label="What it is">
               <p style={S.p}>{content.what}</p>
               <Shot src={shots[0]} />
@@ -114,10 +116,9 @@ function Section({ label, children }) {
 // Drop-and-deploy screenshots: just save numbered files (01.jpg, 02.png, …)
 // into frontend/public/help/<id>/ — no filename coordination with the text
 // content needed. This probes 01..MAX_SHOTS against a few common extensions;
-// whichever numbers exist get slotted in order — 01 next to "What it is",
-// 02 next to the first How-to step, 03 the second, etc. — so each image
-// demonstrates the thing it's numbered after instead of dumping as one
-// block up top.
+// each number maps to a fixed slot — 01 next to "What it is", 02 next to the
+// first How-to step, 03 the second, etc. — so a single image like 04.jpg can
+// be added on its own for just the 4th step, without needing 01-03 to exist.
 const EXTS = ["jpg", "jpeg", "png", "webp"];
 const MAX_SHOTS = 12;
 
@@ -144,9 +145,10 @@ function useFoundShots(id) {
         ).catch(() => null);
       })
     ).then((results) => {
-      // Keep gaps out: if 02 is missing but 03 exists, 03 should still
-      // slot into the 2nd position (index 1) rather than leaving a hole.
-      if (!cancelled) setFound(results.filter(Boolean));
+      // Keep gaps AS gaps: index i must stay image (i+1), so 04.jpg always
+      // lands next to step 3 even if 02/03 were never added. Filtering them
+      // out here would shift 04 into 03's slot instead of leaving it targeted.
+      if (!cancelled) setFound(results);
     });
     return () => { cancelled = true; };
   }, [id]);

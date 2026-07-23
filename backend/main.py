@@ -64,6 +64,8 @@ async def auth_dependency(request: Request):
         return  # SPA / static assets
     if path in _PUBLIC_API or path.startswith("/api/auth/google"):
         return  # public or browser-redirect OAuth (handled separately)
+    if path.startswith("/api/cron/"):
+        return  # cron endpoints authenticate via ANVIL_CRON_SECRET, not a user token
     uid = verify_token(_bearer(request))
     if not uid:
         raise HTTPException(401, "Not authenticated")
@@ -682,11 +684,60 @@ def _habit_full(conn, habit_id: int) -> dict:
 
 @app.get("/api/habits")
 def get_habits():
+    """Batched equivalent of calling _habit_full() per habit — that N+1 pattern
+    (5 queries per habit) made this endpoint scale linearly with habit count
+    and log history. Here it's a fixed 5 queries total for the whole list."""
     with db() as conn:
-        habits = conn.execute(
-            f"SELECT h.id FROM habit h WHERE h.user_id={cu()} AND h.deleted_at IS NULL ORDER BY h.id"
-        ).fetchall()
-        return [_habit_full(conn, h["id"]) for h in habits]
+        habits = conn.execute(f"""
+            SELECT h.id, p.name AS pillar, h.name, h.target_per_week, h.reminder_time,
+                   h.type, h.target_count, h.period, h.days, h.min_interval_min, h.active
+            FROM habit h JOIN pillar p ON h.pillar_id=p.id
+            WHERE h.user_id={cu()} AND h.deleted_at IS NULL ORDER BY h.id
+        """).fetchall()
+        if not habits:
+            return []
+        ids = [h["id"] for h in habits]
+        placeholders = ",".join("?" * len(ids))
+
+        logs_by_id, notes_by_id, counts_by_id, times_by_id = {}, {}, {}, {}
+        for r in conn.execute(
+            f"SELECT habit_id, date FROM habit_log WHERE habit_id IN ({placeholders}) AND done=1 ORDER BY date", ids
+        ).fetchall():
+            logs_by_id.setdefault(r["habit_id"], []).append(r["date"])
+        for r in conn.execute(
+            f"SELECT habit_id, date, note FROM habit_log WHERE habit_id IN ({placeholders}) AND note IS NOT NULL", ids
+        ).fetchall():
+            notes_by_id.setdefault(r["habit_id"], {})[r["date"]] = r["note"]
+        for r in conn.execute(
+            f"SELECT habit_id, date, count FROM habit_log WHERE habit_id IN ({placeholders}) AND count IS NOT NULL", ids
+        ).fetchall():
+            counts_by_id.setdefault(r["habit_id"], {})[r["date"]] = r["count"]
+        for r in conn.execute(
+            f"SELECT habit_id, date, last_count_at FROM habit_log WHERE habit_id IN ({placeholders}) AND last_count_at IS NOT NULL", ids
+        ).fetchall():
+            times_by_id.setdefault(r["habit_id"], {})[r["date"]] = r["last_count_at"]
+
+        out = []
+        for h in habits:
+            d = row_dict(h)
+            try:
+                d["days"] = json.loads(d["days"]) if d.get("days") else []
+            except Exception:
+                d["days"] = []
+            d["active"] = bool(d.get("active", 1))
+            logs = logs_by_id.get(h["id"], [])
+            d["logs"] = logs
+            d["log_notes"] = notes_by_id.get(h["id"], {})
+            d["log_counts"] = counts_by_id.get(h["id"], {})
+            d["log_count_times"] = times_by_id.get(h["id"], {})
+            if d["type"] == "weekly" and d["days"]:
+                cur, mx = _scheduled_streaks(logs, d["days"])
+            else:
+                cur, mx = _streaks(logs)
+            d["streak"] = cur
+            d["max_streak"] = mx
+            out.append(d)
+        return out
 
 @app.post("/api/habits", status_code=201)
 def create_habit(body: HabitCreate):
@@ -3665,6 +3716,206 @@ def put_setting(key: str, body: SettingBody):
             (key, json.dumps(body.value)),
         )
     return {"key": key, "value": body.value}
+
+
+# ── Push notifications (Firebase Cloud Messaging) ────────────────────────────
+import fcm
+
+CRON_SECRET = os.environ.get("ANVIL_CRON_SECRET", "").strip()
+
+class DeviceTokenBody(BaseModel):
+    token: str
+    platform: str = "web"
+
+@app.get("/api/notifications/status")
+def notifications_status():
+    """Whether push is configured server-side + how many devices this user has."""
+    with db() as conn:
+        n = conn.execute(
+            f"SELECT COUNT(*) c FROM device_token WHERE user_id={cu()}"
+        ).fetchone()["c"]
+    return {"configured": fcm.is_configured(), "devices": n}
+
+@app.post("/api/notifications/register", status_code=201)
+def register_device(body: DeviceTokenBody):
+    tok = (body.token or "").strip()
+    if not tok:
+        raise HTTPException(400, "token required")
+    with db() as conn:
+        # A token uniquely identifies a device/browser; re-registering just
+        # re-points it at the current user (e.g. shared machine, account switch).
+        conn.execute("DELETE FROM device_token WHERE token=?", (tok,))
+        conn.execute(
+            f"INSERT INTO device_token (user_id, token, platform) VALUES ({cu()}, ?, ?)",
+            (tok, body.platform or "web"),
+        )
+    return {"ok": True}
+
+@app.post("/api/notifications/unregister")
+def unregister_device(body: DeviceTokenBody):
+    with db() as conn:
+        conn.execute(
+            f"DELETE FROM device_token WHERE token=? AND user_id={cu()}", ((body.token or "").strip(),)
+        )
+    return {"ok": True}
+
+def _send_to_user(conn, uid: int, title: str, body: str, link: str = "/", data: dict = None) -> int:
+    """Send a push to every device the user registered. Prunes tokens FCM
+    reports as stale. Returns how many devices were successfully reached."""
+    rows = conn.execute("SELECT token FROM device_token WHERE user_id=?", (uid,)).fetchall()
+    ok = 0
+    for r in rows:
+        res = fcm.send(r["token"], title, body, data=data, link=link)
+        if res.get("ok"):
+            ok += 1
+        elif res.get("stale"):
+            conn.execute("DELETE FROM device_token WHERE token=?", (r["token"],))
+    return ok
+
+@app.post("/api/notifications/test")
+def send_test_notification():
+    """User taps 'Send test' in Settings — proves the pipe end to end."""
+    if not fcm.is_configured():
+        raise HTTPException(503, "Push notifications are not configured on the server.")
+    with db() as conn:
+        sent = _send_to_user(
+            conn, cu(),
+            "Anvil ✅", "Push notifications are working.",
+            link="/", data={"type": "test"},
+        )
+    if sent == 0:
+        raise HTTPException(404, "No devices registered, or the send failed. Enable notifications first.")
+    return {"ok": True, "sent": sent, "user_id": cu()}
+
+def _due_notifications(conn, uid: int, now: datetime, today: str):
+    """Compute the notifications due *right now* for one user. Returns a list of
+    (dedupe_key, title, body, link) tuples. The cron endpoint sends whichever
+    haven't already gone out today (via notification_sent)."""
+    out = []
+    hhmm = now.strftime("%H:%M")
+    cur_min = now.hour * 60 + now.minute
+
+    # 1) Habit reminders — habit.reminder_time is "HH:MM"; fire within a 5-min
+    #    window of that time, once per habit per day, only if not done today.
+    habits = conn.execute(
+        "SELECT id, name, reminder_time FROM habit "
+        "WHERE user_id=? AND deleted_at IS NULL AND active=1 AND reminder_time IS NOT NULL AND reminder_time <> ''",
+        (uid,),
+    ).fetchall()
+    for h in habits:
+        try:
+            hh, mm = h["reminder_time"].split(":")
+            target_min = int(hh) * 60 + int(mm)
+        except (ValueError, AttributeError):
+            continue
+        # Fire if now is within [target, target+5min) — catches ticks landing
+        # slightly after the mark without double-firing (dedupe handles the rest).
+        if 0 <= cur_min - target_min < 5:
+            done = conn.execute(
+                "SELECT 1 FROM habit_log WHERE habit_id=? AND date=? AND done=1", (h["id"], today)
+            ).fetchone()
+            if not done:
+                out.append((
+                    f"habit:{h['id']}:{today}",
+                    "Habit reminder",
+                    f"Time for: {h['name']}",
+                    "/habits",
+                ))
+
+    # 2) Challenge deadlines — active challenges ending within 2 days, once/day
+    #    per challenge, sent around 9am so it isn't a middle-of-night ping.
+    if 9 * 60 <= cur_min < 9 * 60 + 5:
+        chs = conn.execute(
+            "SELECT id, name, completed, target, end_date FROM challenge "
+            "WHERE user_id=? AND deleted_at IS NULL AND end_date IS NOT NULL",
+            (uid,),
+        ).fetchall()
+        for c in chs:
+            if c["target"] and c["completed"] >= c["target"]:
+                continue  # already done
+            if not c["end_date"] or c["end_date"] < today:
+                continue  # past deadline / no deadline
+            days_left = (date.fromisoformat(c["end_date"]) - date.fromisoformat(today)).days
+            if 0 <= days_left <= 2:
+                pct = int((c["completed"] / c["target"]) * 100) if c["target"] else 0
+                when = "today" if days_left == 0 else ("tomorrow" if days_left == 1 else f"in {days_left} days")
+                out.append((
+                    f"challenge:{c['id']}:{today}",
+                    "Challenge deadline",
+                    f"'{c['name']}' ends {when} — you're at {pct}%",
+                    "/challenges",
+                ))
+
+    # 3) Daily digest — one morning summary (~8am) of today's Do-Now tasks and
+    #    this week's Weekly goal.
+    if 8 * 60 <= cur_min < 8 * 60 + 5:
+        donow = conn.execute(
+            "SELECT COUNT(*) c FROM task WHERE user_id=? AND deleted_at IS NULL AND status='active' AND quadrant='Q1'",
+            (uid,),
+        ).fetchone()["c"]
+        wk = conn.execute(
+            "SELECT title FROM goal WHERE user_id=? AND deleted_at IS NULL AND horizon='Weekly' "
+            "AND start_date <= ? AND end_date >= ? ORDER BY start_date LIMIT 1",
+            (uid, today, today),
+        ).fetchone()
+        if donow or wk:
+            bits = []
+            if donow:
+                bits.append(f"{donow} task{'s' if donow != 1 else ''} in Do-Now")
+            if wk:
+                bits.append(f"weekly goal: {wk['title']}")
+            out.append((
+                f"digest:{today}",
+                "Today on Anvil",
+                " · ".join(bits),
+                "/",
+            ))
+    return out
+
+# Accept GET as well as POST: schedulers vary in what they send (and some
+# follow redirects into a GET), and the SPA catch-all below would otherwise
+# answer a GET with index.html — a cheerful 200 that never sends anything,
+# which looks identical to success in the scheduler's dashboard.
+@app.api_route("/api/cron/reminders", methods=["GET", "POST"])
+def cron_reminders(request: Request, key: str = ""):
+    """Called by an external scheduler every few minutes. Wakes the machine,
+    finds every user's due notifications, and sends the ones not already sent
+    today. Secured by ANVIL_CRON_SECRET (query ?key= or X-Cron-Key header) —
+    NOT by a user token, since no user is logged in for a cron call."""
+    provided = key or request.headers.get("x-cron-key", "")
+    if not CRON_SECRET or provided != CRON_SECRET:
+        raise HTTPException(403, "Bad or missing cron key")
+    if not fcm.is_configured():
+        return {"ok": True, "skipped": "fcm_not_configured", "sent": 0}
+    now = _user_now()
+    today = now.date().isoformat()
+    total_sent = 0
+    checked = 0
+    with db() as conn:
+        uids = [r["user_id"] for r in conn.execute(
+            "SELECT DISTINCT user_id FROM device_token"
+        ).fetchall()]
+        for uid in uids:
+            checked += 1
+            for dedupe_key, title, body, link in _due_notifications(conn, uid, now, today):
+                already = conn.execute(
+                    "SELECT 1 FROM notification_sent WHERE user_id=? AND dedupe_key=?", (uid, dedupe_key)
+                ).fetchone()
+                if already:
+                    continue
+                sent = _send_to_user(conn, uid, title, body, link=link, data={"type": dedupe_key.split(":")[0]})
+                if sent:
+                    conn.execute(
+                        "INSERT OR REPLACE INTO notification_sent (user_id, dedupe_key) VALUES (?, ?)",
+                        (uid, dedupe_key),
+                    )
+                    total_sent += sent
+        # Housekeeping: drop dedupe rows older than a few days so the table
+        # doesn't grow forever. Every key ends in ":YYYY-MM-DD", so compare the
+        # trailing 10 chars against a cutoff date.
+        cutoff = (now.date() - timedelta(days=4)).isoformat()
+        conn.execute("DELETE FROM notification_sent WHERE substr(dedupe_key, -10) < ?", (cutoff,))
+    return {"ok": True, "users_checked": checked, "sent": total_sent}
 
 
 # ── Serve React frontend (must be last) ──────────────────────────────────────
