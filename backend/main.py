@@ -3901,18 +3901,24 @@ def cron_reminders(request: Request, key: str = ""):
         for uid in uids:
             checked += 1
             for dedupe_key, title, body, link in _due_notifications(conn, uid, now, today):
-                already = conn.execute(
-                    "SELECT 1 FROM notification_sent WHERE user_id=? AND dedupe_key=?", (uid, dedupe_key)
-                ).fetchone()
-                if already:
-                    continue
-                sent = _send_to_user(conn, uid, title, body, link=link, data={"type": dedupe_key.split(":")[0]})
-                if sent:
+                # Atomic check-and-insert prevents duplicate sends even if the cron endpoint
+                # is called multiple times in rapid succession (e.g., cron-job.org retries).
+                # Try to insert; if the key already exists (UNIQUE constraint), skip it.
+                try:
                     conn.execute(
-                        "INSERT OR REPLACE INTO notification_sent (user_id, dedupe_key) VALUES (?, ?)",
+                        "INSERT INTO notification_sent (user_id, dedupe_key) VALUES (?, ?)",
                         (uid, dedupe_key),
                     )
+                except Exception:
+                    # Key already exists — this notification was already sent. Skip it.
+                    continue
+                # Key inserted successfully — now send the notification.
+                sent = _send_to_user(conn, uid, title, body, link=link, data={"type": dedupe_key.split(":")[0]})
+                if sent:
                     total_sent += sent
+                else:
+                    # Send failed; clean up the dedupe record so it can retry.
+                    conn.execute("DELETE FROM notification_sent WHERE user_id=? AND dedupe_key=?", (uid, dedupe_key))
         # Housekeeping: drop dedupe rows older than a few days so the table
         # doesn't grow forever. Every key ends in ":YYYY-MM-DD", so compare the
         # trailing 10 chars against a cutoff date.
