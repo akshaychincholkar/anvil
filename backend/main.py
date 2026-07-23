@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 import json
 import os
+import sqlite3
 import hmac
 import hashlib
 import base64
@@ -3723,6 +3724,12 @@ import fcm
 
 CRON_SECRET = os.environ.get("ANVIL_CRON_SECRET", "").strip()
 
+# How late a habit reminder may still be delivered. The external scheduler ticks
+# on its own cadence and the machine scales to zero, so an exact-minute match
+# misses constantly; this lets a late tick still deliver, while keeping a
+# missed-all-afternoon reminder from arriving at bedtime.
+LATE_REMINDER_GRACE_MIN = 60
+
 class DeviceTokenBody(BaseModel):
     token: str
     platform: str = "web"
@@ -3837,9 +3844,14 @@ def _due_notifications(conn, uid: int, now: datetime, today: str):
             target_min = int(hh) * 60 + int(mm)
         except (ValueError, AttributeError):
             continue
-        # Fire if now is within [target, target+5min) — catches ticks landing
-        # slightly after the mark without double-firing (dedupe handles the rest).
-        if 0 <= cur_min - target_min < 5:
+        # Fire once the reminder time has passed today, rather than only inside a
+        # narrow window at the mark. An external scheduler ticks on its own cadence
+        # (and a scaled-to-zero machine adds cold-start delay), so a 5-minute window
+        # was simply being missed whenever no tick happened to land inside it.
+        # Firing on "has passed" makes delivery robust to tick timing; the
+        # notification_sent dedupe key is what keeps it to exactly one per day.
+        # Cap the catch-up so a reminder isn't delivered many hours late.
+        if 0 <= cur_min - target_min <= LATE_REMINDER_GRACE_MIN:
             done = conn.execute(
                 "SELECT 1 FROM habit_log WHERE habit_id=? AND date=? AND done=1", (h["id"], today)
             ).fetchone()
@@ -3930,24 +3942,25 @@ def cron_reminders(request: Request, key: str = ""):
         for uid in uids:
             checked += 1
             for dedupe_key, title, body, link in _due_notifications(conn, uid, now, today):
-                # Atomic check-and-insert prevents duplicate sends even if the cron endpoint
-                # is called multiple times in rapid succession (e.g., cron-job.org retries).
-                # Try to insert; if the key already exists (UNIQUE constraint), skip it.
+                # Claim this notification before sending. INSERT is atomic against
+                # the (user_id, dedupe_key) primary key, so concurrent or retried
+                # cron calls cannot both claim the same one — exactly one sends.
+                # Catch only the uniqueness violation: a bare except would swallow
+                # real database errors and silently report them as "already sent".
                 try:
                     conn.execute(
                         "INSERT INTO notification_sent (user_id, dedupe_key) VALUES (?, ?)",
                         (uid, dedupe_key),
                     )
-                except Exception:
-                    # Key already exists — this notification was already sent. Skip it.
-                    continue
-                # Key inserted successfully — now send the notification.
-                sent = _send_to_user(conn, uid, title, body, link=link, data={"type": dedupe_key.split(":")[0]})
-                if sent:
-                    total_sent += sent
-                else:
-                    # Send failed; clean up the dedupe record so it can retry.
-                    conn.execute("DELETE FROM notification_sent WHERE user_id=? AND dedupe_key=?", (uid, dedupe_key))
+                except sqlite3.IntegrityError:
+                    continue  # already claimed — someone else sent it
+                # The claim stands even if the send fails. Releasing it on failure
+                # would let the next tick try again, which is how a flaky send turns
+                # into several delivered notifications; one missed reminder is a
+                # better failure than a burst of duplicates.
+                total_sent += _send_to_user(
+                    conn, uid, title, body, link=link, data={"type": dedupe_key.split(":")[0]}
+                )
         # Housekeeping: drop dedupe rows older than a few days so the table
         # doesn't grow forever. Every key ends in ":YYYY-MM-DD", so compare the
         # trailing 10 chars against a cutoff date.
