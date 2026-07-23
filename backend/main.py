@@ -3815,8 +3815,11 @@ def _due_notifications(conn, uid: int, now: datetime, today: str):
                 "SELECT 1 FROM habit_log WHERE habit_id=? AND date=? AND done=1", (h["id"], today)
             ).fetchone()
             if not done:
+                # Dedupe key includes reminder_time so changing it (e.g., from 9:00 to 14:00)
+                # triggers a new notification the same day. Without the time, old behavior
+                # was one notification per habit per day no matter how many times you changed it.
                 out.append((
-                    f"habit:{h['id']}:{today}",
+                    f"habit:{h['id']}:{h['reminder_time']}:{today}",
                     "Habit reminder",
                     f"Time for: {h['name']}",
                     "/habits",
